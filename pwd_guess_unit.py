@@ -181,6 +181,11 @@ class CharacterTableTest(unittest.TestCase):
                                                  [True, False]])), 'ba')
         self.assertEqual(ctable.get_char_index('a'), 0)
         self.assertEqual(ctable.get_char_index('b'), 1)
+        np.testing.assert_array_equal(ctable.encode_many(['aa', 'ba']),
+                                      np.array([[[True, False],
+                                                 [True, False]],
+                                                [[False, True],
+                                                 [True, False]]]))
 
 class OptimizingTableTest(unittest.TestCase):
     def test_table(self):

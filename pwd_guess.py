@@ -301,6 +301,20 @@ class CharacterTable(object):
         self.indices_char = dict((i, c) for i, c in enumerate(self.chars))
         self.maxlen = maxlen
 
+    def pad_to_len(self, astring, maxlen = None):
+        maxlen = maxlen if maxlen else self.maxlen
+        return astring + (PASSWORD_END * (maxlen - len(astring)))
+
+    def encode_many(self, string_list, maxlen = None):
+        maxlen = maxlen if maxlen else self.maxlen
+        x_str_list = list(map(
+            lambda x: self.pad_to_len(x, maxlen), string_list))
+        x_vec = np.zeros((len(x_str_list), maxlen, len(self.chars)),
+                         dtype = np.bool)
+        for i, xstr in enumerate(x_str_list):
+            x_vec[i] = self.encode(xstr, maxlen = maxlen)
+        return x_vec
+
     def encode(self, C, maxlen=None):
         maxlen = maxlen if maxlen else self.maxlen
         X = np.zeros((maxlen, len(self.chars)))
@@ -669,16 +683,9 @@ class Trainer(object):
         self.model = None
         self.pwd_list = pwd_list
 
-    def pad_to_len(self, astring):
-        return astring + (PASSWORD_END * (self.config.max_len - len(astring)))
-
     def next_train_set_as_np(self):
         x_strs, y_str_list, weight_list = self.pwd_list.next_chunk()
-        x_str_list = list(map(self.pad_to_len, x_strs))
-        x_vec = np.zeros((len(x_str_list), self.config.max_len,
-                          len(self.ctable.chars)), dtype = np.bool)
-        for i, xstr in enumerate(x_str_list):
-            x_vec[i] = self.ctable.encode(xstr, maxlen = self.config.max_len)
+        x_vec = self.ctable.encode_many(x_strs)
         y_vec = self.prepare_y_data(y_str_list)
         weight_vec = np.zeros((len(weight_list), 1, 1))
         for i, weight in enumerate(weight_list):
@@ -1072,7 +1079,7 @@ def get_version_string():
 def init_logging(args):
     def except_hook(exctype, value, tb):
         logging.critical('Uncaught exception', exc_info = (exctype, value, tb))
-        sys.stderr.write('Uncaught exception!')
+        sys.stderr.write('Uncaught exception! See log for details.\n')
     sys.excepthook = except_hook
     config = ModelDefaults.fromFile(args['config'])
     log_format = '%(asctime)-15s %(levelname)s: %(message)s'
