@@ -63,21 +63,16 @@ class ModelSerializer(object):
         model.load_weights(self.weightfile)
         return model
 
-default_char_bag = (string.ascii_lowercase +
-                    string.ascii_uppercase +
-                    string.digits +
-                    '~!@#$%^&*(),.<>/?\'"{}[]\|-_=+;:\n `')
-
 class ModelDefaults(object):
-    """Configuration information for guessing and training. Can be read from a
-    file in json format.
+    """
+    Configuration information for guessing and training. Can be read from a file
+    in json format.
 
     Attributes:
     char_bag - alphabet of characters over which to guess
     model_type - type of model. Read keras documentation for more types.
     hidden_size - size of each layer. More means better accuracy
     layers - number of hidden layers. More means better accuracy.
-    train_test_split - fraction of data to keep for training and testing
     max_len - maximum length of any password in training data. This can be
               larger than all passwords in the data and the network may output
               guesses that are this many characters long.
@@ -90,12 +85,13 @@ class ModelDefaults(object):
     lower_probability_threshold - This controls how many passwords to output
                                   during generation. Lower means more passwords.
     """
-    char_bag = default_char_bag
+    char_bag = (string.ascii_lowercase +
+                string.ascii_uppercase +
+                string.digits +
+                '~!@#$%^&*(),.<>/?\'"{}[]\|-_=+;:\n `')
     model_type = recurrent.JZS1
     hidden_size = 128
     layers = 1
-    # TODO: implement verification does not happen yet
-    train_test_split = 0.1
     max_len = 40
     min_len = 4
     training_chunk = 128
@@ -164,13 +160,6 @@ class Trainer(object):
             y_vec[i] = self.ctable.encode(ystr, maxlen = 1)
         return (x_vec, y_vec)
 
-    def verification_set(self, x_vec, y_vec):
-        X, y = shuffle(x_vec, y_vec)
-        split_at = len(X) - math.ceil(len(X) * self.config.train_test_split)
-        X_train, X_val = (slice_X(X, 0, split_at), slice_X(X, split_at))
-        y_train, y_val = (y[:split_at], y[split_at:])
-        return (X_train, X_val, y_train, y_val)
-
     def build_model(self):
         model = Sequential()
         model.add(self.config.model_type(
@@ -186,8 +175,8 @@ class Trainer(object):
         return model
 
     def train_model(self, model):
-        for gen in range(1, self.config.generations):
-            logging.info('Generation ' + str(gen))
+        for gen in range(self.config.generations):
+            logging.info('Generation ' + str(gen + 1))
             self.train_model_generation(model)
 
     def train_model_generation(self, model):
@@ -200,10 +189,9 @@ class Trainer(object):
             assert len(x_all) == len(y_all)
             loss, accuracy = model.train_on_batch(x_all, y_all, accuracy = True)
             if self.chunk % self.config.chunk_print_interval == 0:
-                logging.info('Chunk size in cases %s', len(x_all))
-                logging.info('Chunk %s of %s', self.chunk, total_chunks)
-                logging.info('Loss: %s', loss)
-                logging.info('Accuracy: %s', accuracy)
+                logging.info('Chunk %s of %s. Each chunk is size %s',
+                             self.chunk, total_chunks, len(x_all))
+                logging.info('Loss: %s. Accuracy%s.', loss, accuracy)
             x_all, y_all = self.next_train_set_as_np()
 
     def train(self):
@@ -347,10 +335,8 @@ def guess(args, config):
     ostream = open(args['enumerate_ofile'], 'w')
     logging.info('Enumerating guesses...')
     guesser = Guesser(model, config, ostream)
-    try:
-        guesser.guess()
-    finally:
-        ostream.close()
+    guesser.guess()
+    ostream.close()
     logging.info('Done! Generated %s guesses', guesser.generated)
 
 def main(args):
@@ -392,7 +378,8 @@ if __name__=='__main__':
     parser.add_argument('--enumerate-ofile',
                         help='Enumerate guesses output file')
     parser.add_argument('--config', help='Config file in json. ')
-    parser.add_argument('--profile', help='Profile the training phase. ')
+    parser.add_argument('--profile',
+                        help='Profile execution and save to the given file. ')
     parser.add_argument('--help-config', action='store_true',
                         help='Print help for config files and exit')
     parser.add_argument('--log-file')

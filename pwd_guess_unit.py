@@ -7,7 +7,6 @@ import gzip
 import io
 
 import pwd_guess
-import enumerate_guesses
 
 class TrainerTest(unittest.TestCase):
     def test_training_set(self):
@@ -174,7 +173,7 @@ class ModelSerializerTest(unittest.TestCase):
 class GuesserTest(unittest.TestCase):
     def test_guesser(self):
         mock_model = Mock()
-        mockable_return = [[0.5, 0.5]]
+        mockable_return = [[[0.5, 0.5]]]
         mock_model.predict = MagicMock(return_value = mockable_return)
         config = pwd_guess.ModelDefaults(
             min_len = 3, max_len = 3, char_bag = 'a\n',
@@ -182,7 +181,11 @@ class GuesserTest(unittest.TestCase):
         ostream = io.StringIO()
         guesser = pwd_guess.Guesser(mock_model, config, ostream)
         guesser.guess()
-        print(ostream.getvalue())
+        self.assertEqual("""aaa	0.0625
+aa	0.125
+a	0.25
+	0.5
+""", ostream.getvalue())
 
 if __name__ == '__main__':
     unittest.main()
