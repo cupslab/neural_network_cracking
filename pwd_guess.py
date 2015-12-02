@@ -623,6 +623,7 @@ class SuperTriePreprocessor(NodeTriePreprocessor):
             self.current_generator) / self.config.training_chunk)
         # TODO: make memory efficient
         random.shuffle(self.current_generator)
+        self.current_generator = iter(self.current_generator)
 
     def next_chunk(self):
         x, y, w = [], [], []
