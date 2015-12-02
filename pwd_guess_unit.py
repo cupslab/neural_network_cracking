@@ -1449,5 +1449,36 @@ class RandomWalkGuesserTest(unittest.TestCase):
                     self.assertEqual(prob, '0.008' if pwd == 'aaa' else '0.512')
                     self.assertAlmostEqual(float(gn), 8 if pwd == 'aaa' else 1)
 
+    def test_guess_wide(self):
+        with tempfile.NamedTemporaryFile(mode = 'w') as gf:
+            gf.write('aaaa\nbbbba\n')
+            gf.flush()
+            pw = pwd_guess.PwdList(gf.name)
+            self.assertEqual(list(pw.as_list()), [('aaaa', 1), ('bbbba', 1)])
+            config = pwd_guess.ModelDefaults(
+                parallel_guessing = False, char_bag = 'ab\n', min_len = 3,
+                max_len = 5, password_test_fname = gf.name,
+                random_walk_seed_num = 10000,
+                relevel_not_matching_passwords = True,
+                guess_serialization_method = 'random_walk')
+            self.assertTrue(pwd_guess.Filterer(config).pwd_is_valid('aaa'))
+            builder = pwd_guess.GuesserBuilder(config)
+            mock_model = Mock()
+            mock_model.predict = mock_predict_smart_parallel_skewed
+            builder.add_model(mock_model).add_file(self.tempf.name)
+            guesser = builder.build()
+            guesser.complete_guessing()
+            with open(self.tempf.name, 'r') as output:
+                reader = list(csv.reader(
+                    output, delimiter = '\t', quotechar = None))
+                self.assertEqual(len(reader), 2)
+                print(reader)
+                for row in reader:
+                    pwd, prob, gn = row
+                    self.assertTrue(pwd == 'aaaa' or pwd == 'bbbba')
+                    self.assertEqual(prob, '0.0004' if pwd == 'aaaa' else '0.02048')
+                    self.assertAlmostEqual(float(gn), 50 if pwd == 'aaaa' else 15, 0)
+
+
 if __name__ == '__main__':
     unittest.main()

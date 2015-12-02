@@ -1456,8 +1456,10 @@ class RandomWalkGuesser(Guesser):
             astring, prob, d_accum, cost_accum = cur_node
             poss_next = list(self.next_nodes(astring, prob, predictions[i][0]))
             if len(poss_next) == 0:
+                self.cost_sum += cost_accum
+                self.cost_num += 1
                 continue
-            next_node = random.choice(poss_next)
+            next_node = self.choose_next_node(poss_next)
             d_accum_next = len(poss_next) * d_accum
             cost_next = (
                 cost_accum + d_accum_next * self.cost_of_node(*next_node))
@@ -1465,9 +1467,12 @@ class RandomWalkGuesser(Guesser):
         if len(next_nodes) != 0:
             self.super_node_recur(next_nodes)
 
+    def choose_next_node(self, node_list):
+        return random.choice(node_list)
+
     def cost_of_node(self, pwd, prob):
         count_pre_serializer = self.output_serializer.get_total_guessed()
-        if not (len(pwd) > 0 and pwd[-1] == PASSWORD_END):
+        if len(pwd) == 0 or pwd[-1] != PASSWORD_END:
             return 0
         self.output_serializer.serialize(pwd, prob)
         return (self.output_serializer.get_total_guessed() -
@@ -1493,12 +1498,16 @@ class RandomWalkGuesser(Guesser):
     def guess(self, start = '', start_prob = 1):
         for prob_node in self.calculate_probs_from_file():
             pwd, prob = prob_node
+            logging.info('Calculating guess number for %s at %s', pwd, prob)
             self.lower_probability_threshold = prob
             self.cost_sum = 0
             self.cost_num = 0
             self.super_node_recur(list(self.seed_data()))
-            self.ostream.write('%s\t%s\t%s\n' %
-                               (pwd, prob, self.cost_sum / self.cost_num))
+            if self.cost_num != 0:
+                cost = self.cost_sum / self.cost_num
+            else:
+                cost = 1
+            self.ostream.write('%s\t%s\t%s\n' % (pwd, prob, cost))
 
 class GuesserBuilderError(Exception): pass
 
