@@ -30,6 +30,38 @@ import sqlite3
 
 PASSWORD_END = '\n'
 
+class NodeTrie(object):
+    def __init__(self):
+        self.nodes = collections.defaultdict(NodeTrie)
+        self.weight = 0
+        self._size = 0
+
+    def increment(self, aword, weight):
+        self.weight += weight
+        answer = 0
+        if len(aword) != 0:
+            if aword[0] not in self.nodes:
+                answer += 1
+            returned = self.nodes[sys.intern(aword[0])].increment(
+                sys.intern(aword[1:]), weight)
+            self._size += returned + answer
+            return returned + answer
+        return answer
+
+    def size(self):
+        return self._size
+
+    def random_iterate(self, cur = ''):
+        if cur != '':
+            yield (cur, self.weight)
+        for key in self.nodes:
+            others = self.nodes[key].random_iterate(cur + key)
+            for item in others:
+                yield item
+
+    def finish(self):
+        pass
+
 class CharacterTable(object):
     """
     Given a set of characters:
@@ -366,24 +398,29 @@ class Preprocessor(object):
         pass
 
 class TriePreprocessor(object):
-    def __init__(self, prep, config = ModelDefaults()):
-        self.prep = prep
+    def __init__(self, config = ModelDefaults()):
         self.config = config
         self.instances = 0
         if self.config.trie_implementation == 'DB':
             self.trie = DBTrie(config)
         elif self.config.trie_implementation == 'trie':
             self.trie = TriePwdList(config)
+        elif self.config.trie_implementation == 'node_trie':
+            self.trie = NodeTrie()
         else:
             logging.warning('Unknown trie type %s. Using trie',
                             self.config.trie_implementation)
             self.trie = TriePwdList(config)
 
-    def begin(self):
-        self.compress()
-        logging.info(
-            'Compressed %s instances into %s chunks of %s instances each',
-            self.instances, self.total_chunks(), self.trie.size())
+    def begin(self, prep):
+        self.prep = prep
+        x, y, w = self.prep.next_chunk()
+        while len(x) != 0:
+            self.compress_list(x, y, w)
+            x, y, w = self.prep.next_chunk()
+            if self.prep.chunk % self.config.chunk_print_interval == 0:
+                logging.info('Done compressing chunk %s of %s',
+                             self.prep.chunk, self.prep.total_chunks())
         self.reset()
 
     def compress_list(self, x, y, w):
@@ -394,21 +431,15 @@ class TriePreprocessor(object):
     def total_chunks(self):
         return self._total_size
 
-    def compress(self):
-        x, y, w = self.prep.next_chunk()
-        while len(x) != 0:
-            self.compress_list(x, y, w)
-            x, y, w = self.prep.next_chunk()
-            if self.prep.chunk % self.config.chunk_print_interval == 0:
-                logging.info('Done compressing chunk %s of %s',
-                             self.prep.chunk, self.prep.total_chunks())
-        self._total_size = math.ceil(
-            self.trie.size() / self.config.training_chunk)
-
     def finish(self):
         self.trie.finish()
 
     def reset(self):
+        self._total_size = math.ceil(
+            self.trie.size() / self.config.training_chunk)
+        logging.info(
+            'Compressed %s instances into %s chunks of %s instances each',
+            self.instances, self.total_chunks(), self.trie.size())
         self.current_generator = self.trie.random_iterate()
 
     def next_chunk(self):
@@ -420,6 +451,20 @@ class TriePreprocessor(object):
             y.append(key[-1])
             w.append(value)
         return (x, y, w)
+
+class NodeTriePreprocessor(TriePreprocessor):
+    def begin(self, pwd_list):
+        self.pwd_list = pwd_list
+        assert type(pwd_list) == dict
+        chunk = 0
+        for pwd in self.pwd_list:
+            self.instances += len(pwd) + 1
+            self.trie.increment(pwd + PASSWORD_END, self.pwd_list[pwd])
+            if chunk % self.config.chunk_print_interval == 0:
+                logging.info('Done compressing chunk %s of %s',
+                             chunk, len(self.pwd_list))
+            chunk += 1
+        self.reset()
 
 class Trainer(object):
     def __init__(self, pwd_list, config = ModelDefaults()):
@@ -826,12 +871,17 @@ def preprocessing(args, config):
     if len(plist) == 0:
         logging.error('Empty training set! Quiting...')
         sys.exit(1)
-    preprocessor = Preprocessor(plist, config)
-    if (config.trie_implementation is not None and
+    if (config.trie_implementation == 'node_trie' and
         config.simulated_frequency_optimization):
-        preprocessor = TriePreprocessor(preprocessor, config)
+        preprocessor = NodeTriePreprocessor(config)
+        preprocessor.begin(plist)
+    elif (config.trie_implementation is not None and
+        config.simulated_frequency_optimization):
+        preprocessor = TriePreprocessor(config)
         logging.info('Inserting into trie...')
-        preprocessor.begin()
+        preprocessor.begin(Preprocessor(plist, config))
+    else:
+        preprocessor = Preprocessor(plist, config)
     return preprocessor
 
 def train(args, config):

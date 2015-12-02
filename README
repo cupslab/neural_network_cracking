@@ -14,6 +14,7 @@ Setup
       (https://github.com/fchollet/keras). Run the IntegrationTest unit test to
       verify that you have a proper version of keras.
 
+      datrie - pip install datrie
 
 Tests
 -----
