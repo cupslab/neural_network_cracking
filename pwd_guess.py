@@ -7,6 +7,7 @@ from keras.layers import recurrent
 from keras.optimizers import SGD
 from sklearn.utils import shuffle
 import numpy as np
+from sqlitedict import SqliteDict
 
 import sys
 import argparse
@@ -97,6 +98,7 @@ class NodeTrieSerializer(object):
         self.chunk_size = struct.calcsize(self.fmt)
 
     def num_records(self):
+        logging.warning('NodeTrie number of records is inaccurate!')
         return os.path.getsize(self.config.trie_fname) / self.chunk_size
 
     def serialize(self, trie):
@@ -159,7 +161,7 @@ class CharacterTable(object):
             config.rare_character_optimization):
             return OptimizingCharacterTable(
                 config.char_bag, config.max_len,
-                config.rare_character_bag,
+                config.get_intermediate_info('rare_character_bag'),
                 config.uppercase_character_optimization)
         else:
             return CharacterTable(config.char_bag, config.max_len)
@@ -231,44 +233,45 @@ class ModelDefaults(object):
     in json format.
 
     Attributes:
-    char_bag - alphabet of characters over which to guess
+    char_bag - alphabet of characters over which to guess.
 
     model_type - type of model. Read keras documentation for more types.
 
-    hidden_size - size of each layer. More means better accuracy
+    hidden_size - size of each layer. More means better accuracy.
 
-    layers - number of hidden layers. More means better accuracy
+    layers - number of hidden layers. More means better accuracy.
 
     max_len - maximum length of any password in training data. This can be
       larger than all passwords in the data and the network may output guesses
       that are this many characters long.
 
-    min_len - minimum length of any password that will be guessed
+    min_len - minimum length of any password that will be guessed.
 
     training_chunk - Smaller training chunk means less memory consumed. This is
-      using memory on the GPU which is small. generations - More generations
-      means it takes longer but is more accurate
+      using memory on the GPU which is small.
 
-    chunk_print_interval - Interval over which to print info to the log
+    generations - More generations means it takes longer but is more accurate.
+      Default is 20.
+
+    chunk_print_interval - Interval over which to print info to the log.
 
     lower_probability_threshold - This controls how many passwords to output
       during generation. Lower means more passwords.
 
     relevel_not_matching_passwords - If true, then passwords that do not match
-      the filter policy will have their probability equal to zero.
-
-    generation_checkpoint - Every few generations, save the model.
+      the filter policy will have their probability equal to zero. Recommended
+      true.
 
     training_accuracy_threshold - If the accuracy is not improving by this
-      amount, then quit.
+      amount, then quit. Set to -1 to never quit early.
 
     rare_character_optimization - Default false. If you specify a list of
       characters to treat as rare, then it will model those characters with a
       rare character. This will increase performance at the expense of accuracy.
 
-    rare_character_lowest_threshold - Default 20. The with the lowest frequency
-      in the training data will be modeled as special characters. This number
-      indicates how many to drop.
+    rare_character_lowest_threshold - Default 20. The characters with the lowest
+      frequency in the training data will be modeled as special characters. This
+      number indicates how many to drop.
 
     uppercase_character_optimization - Default false. If true, uppercase
       characters will be treated the same as lower case characters. Increases
@@ -277,16 +280,18 @@ class ModelDefaults(object):
     guess_serialization_method - Default is 'human'. TODO: add a compressed
       method.
 
-    simulated_frequency_optimization - Only for TSV files. If set to true, then
-      multiple instances of the same password are simulated. This improves
-      performance. Recommended.
+    simulated_frequency_optimization - Default false. Only for TSV files. If set
+      to true, then multiple instances of the same password are simulated. This
+      improves performance. True is recommended.
 
     trie_implementation - Trie implementation. 'DB' for sqlite database. 'trie'
       for datrie C implementation. 'node_trie' for custom implementation. None
-      for no trie optimization. 'node_trie' is recommended.
+      for no trie optimization. 'node_trie' is recommended, but may consume
+      large amounts of memory. 'DB' with a disk backed representation will use
+      less memory, but will take long on large datasets.
 
     trie_fname - File name for disk-backed trie's. DB and node_trie can
-      optionally save a trie file.
+      save a trie file.
     """
     char_bag = (string.ascii_lowercase +
                 string.ascii_uppercase +
@@ -303,7 +308,6 @@ class ModelDefaults(object):
     chunk_print_interval = 1000
     lower_probability_threshold = 10**-5
     relevel_not_matching_passwords = True
-    generation_checkpoint = True
     training_accuracy_threshold = 10**-10
     train_test_ratio = 10
     parallel_guessing = False
@@ -311,11 +315,11 @@ class ModelDefaults(object):
     rare_character_optimization = False
     uppercase_character_optimization = False
     rare_character_lowest_threshold = 20
-    rare_character_bag = ''
     guess_serialization_method = 'human'
     simulated_frequency_optimization = False
     trie_implementation = None
     trie_fname = ':memory:'
+    intermediate_fname = 'intermediate_fname.sqlite'
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -360,6 +364,15 @@ class ModelDefaults(object):
         else:
             logging.warning('Unknown model type %s', self.model_type)
             return None
+
+    def set_intermediate_info(self, key, value):
+        with SqliteDict(self.intermediate_fname) as info:
+            info[key] = value
+            info.commit()
+
+    def get_intermediate_info(self, key):
+        with SqliteDict(self.intermediate_fname) as info:
+            return info[key]
 
 class TriePwdList(BaseTrie):
     def __init__(self, config = ModelDefaults()):
@@ -713,8 +726,9 @@ class Filterer(object):
         char_freqs = {}
         for key in self.frequencies:
             char_freqs[key] = self.frequencies[key] / self.total_characters
-        self.config.rare_character_bag = self.rare_characters()
-        logging.info('Rare characters: %s', self.config.rare_character_bag)
+        self.config.set_intermediate_info(
+            'rare_character_bag', self.rare_characters())
+        logging.info('Rare characters: %s', self.rare_characters())
 
     def filter(self, alist):
         if type(alist) == list:
