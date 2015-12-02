@@ -1089,7 +1089,7 @@ class ConcatenatingList(object):
         return itertools.chain.from_iterable(answer)
 
 class Filterer(object):
-    def __init__(self, config):
+    def __init__(self, config, uniquify = False):
         self.filtered_out = 0
         self.total = 0
         self.total_characters = 0
@@ -1101,6 +1101,8 @@ class Filterer(object):
         self.char_bag = config.char_bag
         self.max_len = config.max_len
         self.min_len = config.min_len
+        self.uniquify = uniquify
+        self.seen = set()
 
     def inc_frequencies(adict, pwd):
         for c in pwd:
@@ -1111,6 +1113,11 @@ class Filterer(object):
         answer = (all(map(lambda c: c in self.char_bag, pwd)) and
                   len(pwd) <= self.max_len and
                   len(pwd) >= self.min_len)
+        if self.uniquify:
+            if pwd in self.seen:
+                answer = False
+            else:
+                self.seen.add(pwd)
         if quick:
             return answer
         if answer:
@@ -1402,7 +1409,7 @@ class Guesser(object):
 
     def do_calculate_probs_from_file(self):
         logging.info('Reading password calculator test set...')
-        filterer = Filterer(self.config)
+        filterer = Filterer(self.config, True)
         pwd_lister = PwdList(self.config.password_test_fname)
         pwd_input = list(pwd_lister.as_list())
         pwds = list(filterer.filter(pwd_input))
