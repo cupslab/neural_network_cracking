@@ -1267,6 +1267,7 @@ class ProbabilityCalculator(object):
     def probability_stream(self, pwd_list):
         self.preproc.begin(pwd_list)
         x_strings, y_strings, _ = self.preproc.next_chunk()
+        logging.info('Initial probabilities: %s, %s', x_strings, y_strings)
         while len(x_strings) != 0:
             y_indices = list(map(self.ctable.get_char_index, y_strings))
             probs = self.guesser.batch_prob(x_strings)
@@ -1278,12 +1279,15 @@ class ProbabilityCalculator(object):
         prev_prob = 1
         for item in self.probability_stream(pwd_list):
             input_string, next_char, output_prob = item
+            logging.info(input_string, next_char, output_prob)
             if next_char != PASSWORD_END or self.prefixes is False:
                 prev_prob *= output_prob
+                logging.info('Ending password %s', prev_prob)
             if next_char == PASSWORD_END:
                 if self.template_probs:
                     prev_prob *= self.pts.find_real_pwd(
                         self.ctable.translate(input_string), input_string)
+                    logging.info('Template password %s', prev_prob)
                 yield (input_string, prev_prob)
                 prev_prob = 1
 
@@ -1362,8 +1366,8 @@ class PasswordTemplateSerializer(object):
             if char in self.preimage:
                 preimages = self.preimage[char]
                 assert pwd[i] in preimages
-                prob *= self.calc(char, pwd[i],
-                                  i == 0, i == (len(template) - 1))
+                prob *= self.calc(
+                    char, pwd[i], i == 0, i == (len(template) - 1))
         return prob
 
     def recursive_helper(self, cur_template, cur_pwd, cur_prob):
@@ -1437,6 +1441,7 @@ class Guesser(object):
 
     def calculate_probs_from_file(self):
         if self._calc_prob_cache is None:
+            logging.info('Calculating pwd prob from file for the first time')
             self._calc_prob_cache = list(self.do_calculate_probs_from_file())
         return self._calc_prob_cache
 
@@ -1672,7 +1677,7 @@ class RandomWalkGuesser(Guesser):
 
     def guess(self, pwd = '', prob = 1):
         pwds_probs = list(self.calculate_probs_from_file())
-        logging.debug('Beginning probabilities: %s', pwds_probs)
+        logging.info('Beginning probabilities: %s', pwds_probs)
         self.random_walk(pwds_probs)
 
 class GuesserBuilderError(Exception): pass
