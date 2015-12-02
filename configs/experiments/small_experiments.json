@@ -6,7 +6,7 @@
                 "config" : {
                     "chunk_print_interval" : 1000,
                     "training_chunk" : 1000,
-                    "layers" : 1,
+                    "layers" : 0,
                     "hidden_size" : 256,
                     "generations" : 500,
                     "training_accuracy_threshold" : -1,
@@ -123,7 +123,7 @@
             "command" : "python3 /home/wmeliche/nn/src/pwd_guess.py --config-args {config} --profile profilebin"
         },
         {
-            "name" : "jsz2_optimizer_rmsprop",
+            "name" : "jsz2_optimizer_sgd",
             "config" : {
                 "config" : {
                     "chunk_print_interval" : 1000,
@@ -181,7 +181,9 @@
             "pwd_format" : [
                 "tsv"
             ],
-            "log_file" : "log.txt"
+            "log_file" : "log.txt",
+            "arch_file" : "arch.json",
+            "weight_file" : "weight.h5"
         }
     }
 }
