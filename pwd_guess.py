@@ -1052,11 +1052,17 @@ class Filterer(object):
         self.total = 0
         self.total_characters = 0
         self.frequencies = collections.defaultdict(int)
+        self.beg_frequencies = collections.defaultdict(int)
+        self.end_frequencies = collections.defaultdict(int)
         self.config = config
         self.longest_pwd = 0
         self.char_bag = config.char_bag
         self.max_len = config.max_len
         self.min_len = config.min_len
+
+    def inc_frequencies(adict, pwd):
+        for c in pwd:
+            adict[c] += 1
 
     def pwd_is_valid(self, pwd, quick = False):
         pwd = pwd.strip(PASSWORD_END)
@@ -1067,9 +1073,9 @@ class Filterer(object):
             return answer
         if answer:
             self.total_characters += len(pwd)
-            for c in pwd:
-                assert c != ''
-                self.frequencies[c] += 1
+            Filterer.inc_frequencies(self.frequencies, pwd)
+            Filterer.inc_frequencies(self.beg_frequencies, pwd[0])
+            Filterer.inc_frequencies(self.end_frequencies, pwd[-1])
         else:
             self.filtered_out += 1
         self.total += 1
@@ -1097,6 +1103,12 @@ class Filterer(object):
             logging.info('Rare characters: %s', self.rare_characters())
             logging.info('Longest pwd is : %s characters long',
                          self.longest_pwd)
+            self.config.set_intermediate_info(
+                'character_frequencies', self.frequencies)
+            self.config.set_intermediate_info(
+                'beginning_character_frequencies', self.beg_frequencies)
+            self.config.set_intermediate_info(
+                'end_character_frequencies', self.end_frequencies)
 
     def filter(self, alist):
         return filter(lambda x: self.pwd_is_valid(x[0]), alist)
@@ -1264,7 +1276,8 @@ class Guesser(object):
         self.chunk_size_guesser = self.config.chunk_size_guesser
         self.output_serializer = self.make_serializer(ostream)
         self.chars_list = self.ctable.chars
-        if type(self.ctable) == OptimizingCharacterTable:
+        if (type(self.ctable) == OptimizingCharacterTable and
+            config.rare_character_optimization_guessing):
             self.output_serializer = PasswordTemplateSerializer(
                 config, self.output_serializer)
 
