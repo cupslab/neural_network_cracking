@@ -1065,16 +1065,18 @@ class Filterer(object):
         return lowest[:min(self.config.rare_character_lowest_threshold,
                            len(lowest))]
 
-    def finish(self):
+    def finish(self, save_stats = True):
         logging.info('Filtered %s of %s passwords',
                      self.filtered_out, self.total)
         char_freqs = {}
         for key in self.frequencies:
             char_freqs[key] = self.frequencies[key] / self.total_characters
-        self.config.set_intermediate_info(
-            'rare_character_bag', self.rare_characters())
-        logging.info('Rare characters: %s', self.rare_characters())
-        logging.info('Longest pwd is : %s characters long', self.longest_pwd)
+        if save_stats:
+            self.config.set_intermediate_info(
+                'rare_character_bag', self.rare_characters())
+            logging.info('Rare characters: %s', self.rare_characters())
+            logging.info('Longest pwd is : %s characters long',
+                         self.longest_pwd)
 
     def filter(self, alist):
         return filter(lambda x: self.pwd_is_valid(x[0]), alist)
@@ -1159,9 +1161,14 @@ class Guesser(object):
         if self.config.guess_serialization_method == 'human':
             return GuessSerializer(ostream)
         elif self.config.guess_serialization_method == 'calculator':
-            return GuessNumberGenerator(ostream,
-                ProbabilityCalculator(self).calc_probabilities(
-                    PwdList(self.config.password_test_fname).as_list()))
+            logging.info('Reading password calculator test set...')
+            filterer = Filterer(self.config)
+            pwds = list(filterer.filter(
+                PwdList(self.config.password_test_fname).as_list()))
+            filterer.finish(save_stats=False)
+            logging.info('Calculating test set probabilities')
+            return GuessNumberGenerator(
+                ostream, ProbabilityCalculator(self).calc_probabilities(pwds))
         logging.error('Unknown serialization method %s',
                       config.guess_serialization_method)
 
