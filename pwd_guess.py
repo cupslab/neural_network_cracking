@@ -29,9 +29,8 @@ import os.path
 import mmap
 import bisect
 import unittest
+import math
 from unittest.mock import Mock
-
-import generator
 
 PASSWORD_END = '\n'
 
@@ -1311,6 +1310,7 @@ class Guesser(object):
         self.model = model
         self.config = config
         self.max_len = config.max_len
+        self.char_bag = config.char_bag
         self.lower_probability_threshold = config.lower_probability_threshold
         self.relevel_not_matching_passwords = (
             config.relevel_not_matching_passwords)
@@ -1321,6 +1321,8 @@ class Guesser(object):
         self.ostream = ostream
         self.chars_list = self.ctable.chars
         self._calc_prob_cache = None
+        self.should_make_guesses_rare_char_optimizer = (
+            self._should_make_guesses_rare_char_optimizer())
         self.output_serializer = self.make_serializer()
 
     def do_calculate_probs_from_file(self):
@@ -1338,6 +1340,10 @@ class Guesser(object):
             self._calc_prob_cache = list(self.do_calculate_probs_from_file())
         return self._calc_prob_cache
 
+    def _should_make_guesses_rare_char_optimizer(self):
+        return (type(self.ctable) == OptimizingCharacterTable and
+                self.config.rare_character_optimization_guessing)
+
     def make_serializer(self):
         if self.config.guess_serialization_method == 'human':
             answer = GuessSerializer(self.ostream)
@@ -1349,8 +1355,7 @@ class Guesser(object):
         else:
             logging.error('Unknown serialization method %s',
                           self.config.guess_serialization_method)
-        if (type(self.ctable) == OptimizingCharacterTable and
-            self.config.rare_character_optimization_guessing):
+        if self.should_make_guesses_rare_char_optimizer:
             logging.info('Using template converting password serializer')
             answer = PasswordTemplateSerializer(self.config, answer)
         return answer
@@ -1467,16 +1472,26 @@ class RandomWalkGuesser(Guesser):
                 self.cost_sum += cost_accum
                 self.cost_num += 1
                 continue
-            next_node = self.choose_next_node(poss_next)
-            d_accum_next = len(poss_next) * d_accum
+            pwd, prob, pred = self.choose_next_node(poss_next)
+            d_accum_next = d_accum / pred
             cost_next = (
-                cost_accum + d_accum_next * self.cost_of_node(*next_node))
-            next_nodes.append(next_node + (d_accum_next, cost_next))
+                cost_accum + d_accum_next * self.cost_of_node(pwd, prob))
+            next_nodes.append((pwd, prob, d_accum_next, cost_next))
         if len(next_nodes) != 0:
             self.super_node_recur(next_nodes)
 
     def choose_next_node(self, node_list):
-        return random.choice(node_list)
+        # answer = random.choice(node_list)
+        # return answer[0], answer[1], 1 / len(node_list)
+        total = sum(map(lambda x: x[2], node_list))
+        r = random.uniform(0, total)
+        upto = 0
+        for pwd, prob, cond_prob in node_list:
+            if upto + cond_prob > r:
+                return pwd, prob, (cond_prob / total)
+            upto += cond_prob
+        assert False, "Shouldn't go here"
+        return answer[0], answer[1], 1 / len(node_list)
 
     def cost_of_node(self, pwd, prob):
         count_pre_serializer = self.output_serializer.get_total_guessed()
@@ -1497,7 +1512,7 @@ class RandomWalkGuesser(Guesser):
             chain_pass = astring + char
             if len(chain_pass) > self.max_len and char != PASSWORD_END:
                 continue
-            yield chain_pass, chain_prob
+            yield chain_pass, chain_prob, prediction[i]
 
     def seed_data(self):
         for _ in range(self.config.random_walk_seed_num):
