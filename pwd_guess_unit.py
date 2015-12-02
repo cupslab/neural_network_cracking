@@ -232,6 +232,9 @@ class CharacterTableTest(unittest.TestCase):
 class OptimizingTableTest(unittest.TestCase):
     def test_table(self):
         ctable = pwd_guess.OptimizingCharacterTable('abcd', 2, 'ab', False)
+        self.assertEqual(ctable.rare_character_preimage, {
+            'a' : ['a', 'b']
+        })
         np.testing.assert_array_equal(ctable.encode('cc'),
                                       np.array([[False, True, False],
                                                 [False, True, False]]))
@@ -255,6 +258,13 @@ class OptimizingTableTest(unittest.TestCase):
 
     def test_table_upper(self):
         ctable = pwd_guess.OptimizingCharacterTable('abcdABCD:', 2, ':', True)
+        self.assertEqual(ctable.rare_character_preimage, {
+            ':' : [':'],
+            'a' : ['A', 'a'],
+            'b' : ['B', 'b'],
+            'c' : ['C', 'c'],
+            'd' : ['D', 'd']
+        })
         np.testing.assert_array_equal(ctable.encode('cc'), np.array(
             [[False, False, False, True, False],
              [False, False, False, True, False]]))
@@ -947,7 +957,6 @@ def mock_fork_starter(args):
     return pwd_guess.ParallelGuesser.fork_entry_point(
         mock_model, pwd_guess.ModelDefaults(**config_dict), node)
 
-@unittest.skip('Broken again')
 class ParallelGuesserTest(unittest.TestCase):
     mock_model = Mock()
 
@@ -1193,6 +1202,38 @@ class ProbabilityCalculatorTest(unittest.TestCase):
         self.assertEqual(set(p.calc_probabilities([('aaa', 1), ('abb', 1)])),
                          set([('aaa', 0.125), ('abb', 0.125)]))
 
+    def test_calc_optimizing(self):
+        with tempfile.NamedTemporaryFile() as tf:
+            config = pwd_guess.ModelDefaults(
+                min_len = 2, max_len = 2, char_bag = 'abAB\n',
+                uppercase_character_optimization = True,
+                rare_character_optimization = False,
+                relevel_not_matching_passwords = False,
+                lower_probability_threshold = .1,
+                intermediate_fname = tf.name)
+            config.set_intermediate_info('rare_character_bag', [])
+            freqs = {
+                'a' : .3, 'b' : .4, 'A' : .2, 'B' : .1
+            }
+            config.set_intermediate_info('character_frequencies', freqs)
+            config.set_intermediate_info(
+                'beginning_character_frequencies', freqs)
+            config.set_intermediate_info(
+                'end_character_frequencies', freqs)
+            mock_guesser = Mock()
+            mock_guesser.config = config
+            mock_guesser.conditional_probs_many = MagicMock(
+                return_value=[[[0, 0.5, 0.5]],
+                              [[0, 0.5, 0.5]],
+                              [[1, 0, 0]],
+                              [[0, 0.5, 0.5]],
+                              [[0, 0.5, 0.5]],
+                              [[1, 0, 0]]])
+            p = pwd_guess.ProbabilityCalculator(mock_guesser)
+            self.assertEqual(set(p.calc_probabilities(
+                [('aa', 1), ('bB', 1)])),
+                             set([('aa', .09), ('bB', 0.04000000000000001)]))
+
 class GuessNumberGeneratorTest(unittest.TestCase):
     def setUp(self):
         self.ostream = tempfile.NamedTemporaryFile(mode = 'w', delete = False)
@@ -1233,6 +1274,65 @@ william	2.12144662517e-05	72
 8daddy	1.00234253381e-05	234
 """,
                 guesses.read())
+
+class PasswordTemplateSerializerTest(unittest.TestCase):
+    def test_serialize(self):
+        serialized = []
+        self.finished = False
+        def mock_serialize(pwd, prob):
+            serialized.append((pwd, prob))
+        def mock_finish():
+            self.finished = True
+        mock_serializer = Mock()
+        mock_serializer.serialize = mock_serialize
+        mock_serializer.finish = mock_finish
+        with tempfile.NamedTemporaryFile() as tf:
+            config = pwd_guess.ModelDefaults(
+                min_len = 2, max_len = 2, char_bag = 'abABc:!@\n',
+                uppercase_character_optimization = True,
+                rare_character_optimization = True,
+                relevel_not_matching_passwords = False,
+                lower_probability_threshold = .007,
+                intermediate_fname = tf.name)
+            config.set_intermediate_info(
+                'rare_character_bag', [':', '!', '@'])
+            freqs = {
+                'a' : .2, 'b' : .2, 'A' : .1, 'B' : .1,
+                ':' : .19, '!' : .19, '@' : .02
+            }
+            config.set_intermediate_info('character_frequencies', freqs)
+            config.set_intermediate_info(
+                'beginning_character_frequencies', freqs)
+            end_freqs = freqs.copy()
+            end_freqs[':'] = .3
+            end_freqs['!'] = .1
+            end_freqs['@'] = 0
+            config.set_intermediate_info(
+                'end_character_frequencies', end_freqs)
+            pts = pwd_guess.PasswordTemplateSerializer(config, mock_serializer)
+            self.assertAlmostEqual(pts.calc('a', 'A'), .33333333)
+            self.assertAlmostEqual(pts.calc('a', 'a'), .66666666)
+            self.assertAlmostEqual(pts.calc(':', '!'), .475)
+            pts.serialize('aa', .5)
+            pts.serialize('b:', .4)
+            pts.serialize('cc', .4)
+            self.assertAlmostEqual(
+                pts.find_real_pwd('aa', 'aA'), (2/3) * (1/3))
+            self.assertAlmostEqual(
+                pts.find_real_pwd('aa', 'aa'), (2/3) * (2/3))
+            self.assertAlmostEqual(
+                pts.find_real_pwd('b:', 'b:'), (2/3) * (.3/.4))
+            self.assertFalse(self.finished)
+            pts.finish()
+            self.assertTrue(self.finished)
+        self.assertEqual(set(serialized), set([
+            ('cc', .4),
+            ('aa', .5 * (2/3) * (2/3)), ('aA', .5 * (2/3) * (1/3)),
+            ('Aa', .5 * (1/3) * (2/3)), ('AA', .5 * (1/3) * (1/3)),
+            ('b:', .4 * (2/3) * (.3 / .4)),
+            ('B:', .4 * (1/3) * (.3 / .4)),
+            ('b!', .4 * (2/3) * (.1 / .4)),
+            ('B!', .4 * (1/3) * (.1 / .4))]))
 
 if __name__ == '__main__':
     logging.basicConfig(level = logging.CRITICAL)

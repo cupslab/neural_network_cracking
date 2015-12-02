@@ -437,9 +437,15 @@ class OptimizingCharacterTable(CharacterTable):
         char_bag = chars
         for r in self.rare_characters:
             char_bag = char_bag.replace(r, '')
-        char_bag += self.rare_characters[0]
-        self.rare_dict = dict([(char, self.rare_characters[0])
-                               for char in self.rare_characters])
+        if len(rare_characters):
+            char_bag += self.rare_characters[0]
+            self.rare_dict = dict([(char, self.rare_characters[0])
+                                   for char in self.rare_characters])
+            self.rare_character_preimage = {
+                self.rare_characters[0] : list(self.rare_characters)}
+        else:
+            self.rare_character_preimage = {}
+            self.rare_dict = {}
         if uppercase:
             for c in string.ascii_uppercase:
                 if c not in chars:
@@ -447,6 +453,7 @@ class OptimizingCharacterTable(CharacterTable):
                 self.rare_dict[c] = c.lower()
                 char_bag = char_bag.replace(c, '')
                 assert c.lower() in char_bag
+                self.rare_character_preimage[c.lower()] = [c, c.lower()]
         super().__init__(char_bag, maxlen)
         for key in self.rare_dict:
             self.char_indices[key] = self.char_indices[self.rare_dict[key]]
@@ -514,6 +521,7 @@ class ModelDefaults(object):
     parallel_guessing = False
     fork_length = 2
     rare_character_optimization = False
+    rare_character_optimization_guessing = False
     uppercase_character_optimization = False
     rare_character_lowest_threshold = 20
     guess_serialization_method = 'human'
@@ -577,6 +585,14 @@ class ModelDefaults(object):
         assert self.max_len <= 255
         if self.guess_serialization_method == 'calculator':
             assert os.path.exists(self.password_test_fname)
+        if self.rare_character_optimization_guessing:
+            assert (self.rare_character_optimization or
+                    self.uppercase_character_optimization)
+        elif (self.rare_character_optimization or
+              self.uppercase_character_optimization):
+            logging.warning(
+                'Warning, without rare_character_optimization_guessing setting,'
+                ' output guesses may ignore case or special characters')
 
     def as_dict(self):
         answer = dict(vars(ModelDefaults).copy())
@@ -1128,6 +1144,10 @@ class ProbabilityCalculator(object):
         self.guesser = guesser
         self.ctable = CharacterTable.fromConfig(guesser.config)
         self.preproc = Preprocessor(guesser.config)
+        self.template_probs = False
+        if type(self.ctable) == OptimizingCharacterTable:
+            self.template_probs = True
+            self.pts = PasswordTemplateSerializer(guesser.config)
 
     def probability_stream(self, pwd_list):
         self.preproc.begin(pwd_list)
@@ -1145,8 +1165,90 @@ class ProbabilityCalculator(object):
             input_string, next_char, output_prob = item
             prev_prob *= output_prob
             if next_char == PASSWORD_END:
+                if self.template_probs:
+                    prev_prob *= self.pts.find_real_pwd(
+                        self.ctable.translate(input_string),
+                        input_string)
                 yield (input_string, prev_prob)
                 prev_prob = 1
+
+class PasswordTemplateSerializer(object):
+    def __init__(self, config, serializer = None, lower_prob_threshold = None):
+        self.preimage = (CharacterTable.fromConfig(config)
+                         .rare_character_preimage)
+        self.char_frequencies = config.get_intermediate_info(
+            'character_frequencies')
+        self.beginning_char_frequencies = config.get_intermediate_info(
+            'beginning_character_frequencies')
+        self.end_char_frequencies = config.get_intermediate_info(
+            'end_character_frequencies')
+        self.serializer = serializer
+        self.lower_probability_threshold = (
+            config.lower_probability_threshold
+            if lower_prob_threshold is None else lower_prob_threshold)
+        self.beg_cache = self.cache_freqs(self.beginning_char_frequencies)
+        self.end_cache = self.cache_freqs(self.end_char_frequencies)
+        self.cache = self.cache_freqs(self.char_frequencies)
+
+    def lookup_in_cache(self, cache, template_char, character):
+        return cache[template_char][character]
+
+    def cache_freqs(self, freqs):
+        answer = collections.defaultdict(dict)
+        for template_char in self.preimage.keys():
+            for preimage in self.preimage[template_char]:
+                answer[template_char][preimage] = self._calc(
+                    freqs, template_char, preimage)
+        return answer
+
+    def _calc(self, freqs, template_char, character):
+        return freqs[character] / sum(map(
+            lambda c: freqs[c], self.preimage[template_char]))
+
+    def calc(self, template_char, character, begin = False, end = False):
+        if begin:
+            return self.lookup_in_cache(
+                self.beg_cache, template_char, character)
+        if end:
+            return self.lookup_in_cache(
+                self.end_cache, template_char, character)
+        return self.lookup_in_cache(
+            self.cache, template_char, character)
+
+    def find_real_pwd(self, template, pwd):
+        assert len(pwd) == len(template)
+        prob = 1
+        for i, char in enumerate(template):
+            if char in self.preimage:
+                preimages = self.preimage[char]
+                assert pwd[i] in preimages
+                prob *= self.calc(char, pwd[i],
+                                  i == 0, i == (len(template) - 1))
+        return prob
+
+    def recursive_helper(self, cur_template, cur_pwd, cur_prob):
+        if cur_prob < self.lower_probability_threshold:
+            return
+        if len(cur_template) == 0:
+            self.serializer.serialize(cur_pwd, cur_prob)
+            return
+        if cur_template[0] in self.preimage:
+            preimages = self.preimage[cur_template[0]]
+            for c in preimages:
+                self.recursive_helper(
+                    cur_template[1:], cur_pwd + c,
+                    cur_prob * self.calc(cur_template[0], c,
+                                         len(cur_pwd) == 0,
+                                         len(cur_template) == 1))
+        else:
+            self.recursive_helper(
+                cur_template[1:], cur_template[0] + cur_pwd, cur_prob)
+
+    def serialize(self, pwd_template, prob):
+        self.recursive_helper(pwd_template, '', prob)
+
+    def finish(self):
+        self.serializer.finish()
 
 class Guesser(object):
     def __init__(self, model, config, ostream):
@@ -1162,6 +1264,9 @@ class Guesser(object):
         self.chunk_size_guesser = self.config.chunk_size_guesser
         self.output_serializer = self.make_serializer(ostream)
         self.chars_list = self.ctable.chars
+        if type(self.ctable) == OptimizingCharacterTable:
+            self.output_serializer = PasswordTemplateSerializer(
+                config, self.output_serializer)
 
     def make_serializer(self, ostream):
         if self.config.guess_serialization_method == 'human':
@@ -1192,6 +1297,9 @@ class Guesser(object):
             preds[i] = v / sum_per
 
     def relevel_prediction_many(self, pred_list, str_list):
+        if (self.filterer.pwd_is_valid(str_list[0]) and
+            len(str_list[0]) != self.max_len):
+            return
         for i in range(len(pred_list)):
             self.relevel_prediction(pred_list[i][0], str_list[i])
 
@@ -1207,23 +1315,25 @@ class Guesser(object):
             self.relevel_prediction_many(answer, astring_list)
         return answer
 
-    def handle_nodes(self, node_list):
+    def super_node_recur(self, node_list):
         prefixes = list(map(lambda x: x[0], node_list))
+        if len(prefixes) == 0:
+            return
+        logging.info('Super node buffer size %s, guess number %s',
+                     len(prefixes), self.generated)
         predictions = self.conditional_probs_many(prefixes)
+        node_batch = []
         for i, cur_node in enumerate(node_list):
             astring, prob = cur_node
             for next_node in generator.next_nodes(
                     self, astring, prob, predictions[i][0]):
-                yield next_node
-
-    def super_node_recur(self, node_list):
-        stack = node_list[:]
-        while len(stack) > 0:
-            first_chunk = stack[:self.chunk_size_guesser]
-            logging.info('Super node buffer size %s, guess number %s',
-                         len(first_chunk), self.generated)
-            stack = stack[self.chunk_size_guesser:]
-            stack = list(self.handle_nodes(first_chunk)) + stack
+                node_batch.append(next_node)
+                if len(node_batch) == self.chunk_size_guesser:
+                    self.super_node_recur(node_batch)
+                    node_batch = []
+        if len(node_batch) > 0:
+            self.super_node_recur(node_batch)
+            node_batch = []
 
     def recur(self, astring = '', prob = 1):
         self.super_node_recur([(astring, prob)])
@@ -1428,6 +1538,9 @@ def preprocessing(args, config):
     # read_passwords must be called before creating the preprocessor because it
     # initializes statistics needed for some preprocessors
     plist = read_passwords(args['pwd_file'], args['pwd_format'], config)
+    if args['stats_only']:
+        logging.info('Only getting stats. Quitting...')
+        return None
     preprocessor = BasePreprocessor.fromConfig(config)
     preprocessor.begin(plist)
     if args['pre_processing_only']:
@@ -1534,6 +1647,9 @@ def make_parser():
                         help = 'Print version number and exit')
     parser.add_argument('--pre-processing-only', action='store_true',
                         help = 'Only perform the preprocessing step. ')
+    parser.add_argument('--stats-only', action='store_true',
+                        help=('Quit after reading in passwords and saving '
+                              'stats. '))
     parser.add_argument('--config-args',
                         help = 'File with both configuration and arguments. ')
     return parser
