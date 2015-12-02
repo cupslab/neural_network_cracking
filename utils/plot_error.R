@@ -37,6 +37,8 @@ colnames(actual) <- COLNAMES_EXACT
 total <- merge(estimates, actual, by = "pwd")
 
 bothvalues <- total[total$guess.number.y > 0, ]
+print("Buggy passwords")
+print(bothvalues[ bothvalues$prob.x != bothvalues$prob.y, ]$pwd)
 bothvalues <- bothvalues[ bothvalues$prob.x == bothvalues$prob.y, ]
 bothvalues$actual.percent.error <- (abs(
     bothvalues$guess.number.y - bothvalues$guess.number.x) /

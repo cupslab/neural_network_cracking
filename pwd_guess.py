@@ -1564,8 +1564,6 @@ class RandomWalkSerializer(GuessSerializer):
         self.total_guessed += 1
 
 class RandomWalkGuesser(Guesser):
-    ERROR_BOUNDS_95_PERCENT_THETA = 1.96
-
     def __init__(self, *args):
         super().__init__(*args)
         if self.should_make_guesses_rare_char_optimizer:
@@ -2037,7 +2035,7 @@ def guess(args, config):
     guesser = (GuesserBuilder(config).add_serializer(
         ModelSerializer(args['arch_file'], args['weight_file']))
                .add_file(args['enumerate_ofile'])).build()
-    if args['calc_probabilities_only']:
+    if args['calc_probability_only']:
         guesser.calculate_probs()
     else:
         guesser.complete_guessing()
