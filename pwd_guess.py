@@ -53,7 +53,7 @@ class BaseTrie(object):
 
 class NodeTrie(BaseTrie):
     def __init__(self):
-        self.nodes = collections.defaultdict(NodeTrie)
+        self.nodes = {}
         self.weight = 0
         self._size = 0
 
@@ -62,15 +62,20 @@ class NodeTrie(BaseTrie):
 
     def increment(self, aword, weight = 1):
         self.weight += weight
+        if len(aword) == 0:
+            return 0
         answer = 0
-        if len(aword) != 0:
-            if aword[0] not in self.nodes:
-                answer += 1
-            returned = self.nodes[sys.intern(aword[0])].increment(
-                sys.intern(aword[1:]), weight)
-            self._size += returned + answer
-            return returned + answer
-        return answer
+        sub_node = None
+        next_char = aword[0]
+        if next_char not in self.nodes:
+            answer += 1
+            sub_node = NodeTrie()
+            self.nodes[next_char] = sub_node
+        else:
+            sub_node = self.nodes[next_char]
+        returned = sub_node.increment(aword[1:], weight)
+        self._size += returned + answer
+        return returned + answer
 
     def random_iterate(self, cur = ''):
         if cur != '':
@@ -81,8 +86,8 @@ class NodeTrie(BaseTrie):
                 yield item
 
     def sampled_training(self, value = ''):
-        node_children = list(map(lambda k: (k, self.nodes[k].weight),
-                                 sorted(self.nodes.keys())))
+        node_children = [(k, self.nodes[k].weight)
+                         for k in sorted(self.nodes.keys())]
         if len(node_children) == 0:
             return
         yield (value, node_children)
@@ -103,6 +108,7 @@ class DiskBackedTrie(BaseTrie):
         self.current_branch_key = None
         self.weights = NodeTrie()
         self.keys = []
+        self.fork_length = config.fork_length
 
     def finish(self):
         self.close_branch()
@@ -133,8 +139,7 @@ class DiskBackedTrie(BaseTrie):
         self.keys.append(key)
 
     def increment(self, aword, weight = 1):
-        start, end = (aword[:self.config.fork_length],
-                      aword[self.config.fork_length:])
+        start, end = (aword[:self.fork_length], aword[self.fork_length:])
         if start != self.current_branch_key:
             self.open_new_branch(start)
         self.weights.increment(start, weight)

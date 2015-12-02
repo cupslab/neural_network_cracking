@@ -22,7 +22,7 @@
         "simulated_frequency_optimization" : true,
         "trie_implementation" : "disk",
         "trie_serializer_type" : "fuzzy",
-        "trie_fname" : "trie_binary.gz",
+        "trie_fname" : "trie_table_binary",
         "trie_intermediate_storage" : "trie_intermediate_binaries",
         "intermediate_fname" : "intermediate_data.sqlite",
         "randomize_training_order" : false,
