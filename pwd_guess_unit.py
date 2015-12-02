@@ -137,14 +137,12 @@ class NodeTrieTest(unittest.TestCase):
         self.trie.increment('aaa', 1)
         self.assertEqual([('a', 1), ('aa', 1), ('aaa', 1)],
                          list(self.trie.iterate('reg')))
-        self.assertEqual(self.trie.size(), 3)
 
     def test_iterate_overlap(self):
         self.trie.increment('aaa', 1)
         self.trie.increment('aab', 5)
         self.assertEqual(set([('a', 6), ('aa', 6), ('aaa', 1), ('aab', 5)]),
                          set(self.trie.iterate('reg')))
-        self.assertEqual(self.trie.size(), 4)
 
     def test_sampled_iterate(self):
         self.trie.increment('aaa', 1)

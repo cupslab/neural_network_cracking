@@ -53,29 +53,23 @@ class BaseTrie(object):
 
 class NodeTrie(BaseTrie):
     def __init__(self):
-        self.nodes = {}
+        self.nodes = collections.defaultdict(NodeTrie)
         self.weight = 0
         self._size = 0
 
-    def size(self):
-        return self._size
+    @staticmethod
+    def increment_optimized(anode, aword, weight = 1):
+        root = anode
+        inc_str = aword
+        root.weight += weight
+        while len(inc_str) != 0:
+            next_char, inc_str = inc_str[0], inc_str[1:]
+            root.weight += weight
+            root = root.nodes[next_char]
+        root.weight += weight
 
     def increment(self, aword, weight = 1):
-        self.weight += weight
-        if len(aword) == 0:
-            return 0
-        answer = 0
-        sub_node = None
-        next_char = aword[0]
-        if next_char not in self.nodes:
-            answer += 1
-            sub_node = NodeTrie()
-            self.nodes[next_char] = sub_node
-        else:
-            sub_node = self.nodes[next_char]
-        returned = sub_node.increment(aword[1:], weight)
-        self._size += returned + answer
-        return returned + answer
+        NodeTrie.increment_optimized(self, aword, weight)
 
     def random_iterate(self, cur = ''):
         if cur != '':
@@ -739,8 +733,9 @@ class HybridDiskPreprocessor(TriePreprocessor):
     def preprocess(self, pwd_list):
         # TODO: make memory efficient
         out_pwd_list = collections.defaultdict(list)
+        fork_len = self.config.fork_length
         for item in pwd_list:
-            out_pwd_list[item[0][:self.config.fork_length]].append(item)
+            out_pwd_list[item[0][:fork_len]].append(item)
         return self.read(out_pwd_list)
 
     def read(self, pwd_list):
@@ -955,12 +950,15 @@ class Filterer(object):
         self.frequencies = collections.defaultdict(int)
         self.config = config
         self.longest_pwd = 0
+        self.char_bag = config.char_bag
+        self.max_len = config.max_len
+        self.min_len = config.min_len
 
     def pwd_is_valid(self, pwd):
         pwd = pwd.strip(PASSWORD_END)
-        answer = (all(map(lambda c: c in self.config.char_bag, pwd)) and
-                  len(pwd) <= self.config.max_len and
-                  len(pwd) >= self.config.min_len)
+        answer = (all(map(lambda c: c in self.char_bag, pwd)) and
+                  len(pwd) <= self.max_len and
+                  len(pwd) >= self.min_len)
         if answer:
             self.total_characters += len(pwd)
             for c in pwd:
@@ -991,7 +989,7 @@ class Filterer(object):
             'rare_character_bag', self.rare_characters())
         logging.info('Rare characters: %s', self.rare_characters())
         logging.info('Longest pwd is : %s characters long', self.longest_pwd)
-        self.config.max_len = self.longest_pwd
+        self.max_len = self.longest_pwd
 
     def filter(self, alist):
         return filter(lambda x: self.pwd_is_valid(x[0]), alist)
@@ -1177,6 +1175,7 @@ def init_logging(args):
         logging.critical('Uncaught exception', exc_info = (exctype, value, tb))
         sys.stderr.write('Uncaught exception! See log for details.\n')
     sys.excepthook = except_hook
+    sys.setcheckinterval = 1000
     log_format = '%(asctime)-15s %(levelname)s: %(message)s'
     log_level = log_level_map[args['log_level']]
     if args['log_file']:
