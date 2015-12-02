@@ -434,6 +434,7 @@ class ModelDefaults(object):
     trie_serializer_encoding = 'utf8'
     trie_serializer_type = 'reg'
     save_always = True
+    randomize_training_order = False
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -587,7 +588,8 @@ class Preprocessor(BasePreprocessor):
 
     def reset(self):
         self.chunk = 0
-        random.shuffle(self.pwd_whole_list)
+        if self.config.randomize_training_order:
+            random.shuffle(self.pwd_whole_list)
 
 class TriePreprocessor(BasePreprocessor):
     def __init__(self, config = ModelDefaults()):
@@ -609,9 +611,9 @@ class TriePreprocessor(BasePreprocessor):
             chunk += 1
         self._total_size = math.ceil(
             self.trie.size() / self.config.training_chunk)
-        self.reset()
         logging.info('Saving preprocessing step...')
         TrieSerializer.fromConfig(self.config).serialize(self.trie)
+        self.reset()
 
     def compress_list(self, x, y, w):
         for i in range(len(x)):
@@ -619,18 +621,18 @@ class TriePreprocessor(BasePreprocessor):
             self.instances += 1
 
     def total_chunks(self):
+        logging.warning('Total size is in accurate')
         return self._total_size
 
     def reset(self):
         self.current_generator = self.trie.iterate(
             self.config.trie_serializer_type)
+        self._total_size = 0
 
-        # TODO: make memory efficient
-        self.current_generator = list(self.current_generator)
-        self._total_size = math.ceil(len(
-            self.current_generator) / self.config.training_chunk)
-        random.shuffle(self.current_generator)
-        self.current_generator = iter(self.current_generator)
+        if self.config.randomize_training_order:
+            self.current_generator = list(self.current_generator)
+            random.shuffle(self.current_generator)
+            self.current_generator = iter(self.current_generator)
 
     def next_chunk(self):
         x, y, w = [], [], []
