@@ -47,6 +47,9 @@ class CharacterTable(object):
             X = X.argmax(axis=-1)
         return ''.join(self.indices_char[x] for x in X)
 
+    def get_char_index(self, character):
+        return self.char_indices[character]
+
     @staticmethod
     def fromConfig(config):
         return CharacterTable(config.char_bag, config.max_len)
@@ -368,14 +371,14 @@ class Guesser(object):
         self.filterer = Filterer(self.config)
 
     def cond_prob_from_preds(self, char, preds):
-        return preds[self.ctable.char_indices[char]]
+        return preds[self.ctable.get_char_index(char)]
 
     def relevel_prediction(self, preds, astring):
         if not self.filterer.pwd_is_valid(astring):
-            preds[self.ctable.char_indices[PASSWORD_END]] = 0
+            preds[self.ctable.get_char_index(PASSWORD_END)] = 0
         elif len(astring) == self.config.max_len:
             for c in self.config.char_bag:
-                preds[self.ctable.char_indices[c]] = (
+                preds[self.ctable.get_char_index(c)] = (
                     1 if c == PASSWORD_END else 0)
         sum_per = sum(preds)
         for i, v in enumerate(preds):
