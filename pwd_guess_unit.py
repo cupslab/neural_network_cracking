@@ -5,6 +5,7 @@ import shutil
 import os.path
 import gzip
 import io
+import json
 
 import pwd_guess
 
@@ -79,6 +80,15 @@ class ModelDefaultsTest(unittest.TestCase):
     def test_get_set_dict(self):
         m = pwd_guess.ModelDefaults({'hidden_size' : 8})
         self.assertEqual(8, m.hidden_size)
+
+    def test_as_dict(self):
+        m = pwd_guess.ModelDefaults()
+        self.assertTrue(m.as_dict()['hidden_size'],
+                        pwd_guess.ModelDefaults.hidden_size)
+
+    def test_serialize_dict(self):
+        m = pwd_guess.ModelDefaults()
+        self.assertTrue(json.dumps(m.as_dict()) is not None)
 
 class PwdListTest(unittest.TestCase):
     def setUp(self):

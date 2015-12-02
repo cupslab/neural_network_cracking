@@ -117,6 +117,12 @@ class ModelDefaults(object):
         with open(afile, 'r') as f:
             return ModelDefaults(json.load(f))
 
+    def as_dict(self):
+        answer = dict(vars(ModelDefaults).copy())
+        answer.update(self.adict)
+        return dict([(key, str(value)) for key, value in answer.items()
+                     if key[0] != '_' and not hasattr(value, '__call__')])
+
 class Trainer(object):
     def __init__(self, pwd_list, config = ModelDefaults()):
         self.config = config
@@ -191,7 +197,7 @@ class Trainer(object):
             if self.chunk % self.config.chunk_print_interval == 0:
                 logging.info('Chunk %s of %s. Each chunk is size %s',
                              self.chunk, total_chunks, len(x_all))
-                logging.info('Loss: %s. Accuracy%s.', loss, accuracy)
+                logging.info('Loss: %s. Accuracy: %s.', loss, accuracy)
             x_all, y_all = self.next_train_set_as_np()
 
     def train(self):
@@ -292,15 +298,17 @@ class Guesser(object):
     def guess(self):
         self.recur('', 1)
 
-def init_logging(args):
+def init_logging(args, config):
     log_format = '%(asctime)-15s %(levelname)s: %(message)s'
+    log_level = logging.WARNING if args['quiet'] else logging.INFO
     if args['log_file']:
         logging.basicConfig(filename = args['log_file'],
-                            level = logging.INFO, format = log_format)
+                            level = log_level, format = log_format)
     else:
-        logging.basicConfig(level = logging.INFO, format = log_format)
+        logging.basicConfig(level = log_level, format = log_format)
     logging.info('Beginning...')
     logging.info('Arguments %s', json.dumps(args, indent = 4))
+    logging.info('Configuration %s', json.dumps(config.as_dict(), indent = 4))
 
 def train(args, config):
     if args['tsv']:
@@ -321,6 +329,7 @@ def train(args, config):
             sys.exit(1)
         model = Trainer(plist, config).train()
         if args['arch_file'] is not None and args['weight_file'] is not None:
+            logging.info('Saving model')
             ModelSerializer(
                 args['arch_file'], args['weight_file']).save_model(model)
     logging.info('Filtered %s of %s passwords', filt.filtered_out, filt.total)
@@ -337,14 +346,14 @@ def guess(args, config):
     guesser = Guesser(model, config, ostream)
     guesser.guess()
     ostream.close()
-    logging.info('Done! Generated %s guesses', guesser.generated)
+    logging.info('Generated %s guesses', guesser.generated)
 
 def main(args):
     if args['help_config']:
         sys.stdout.write(ModelDefaults.__doc__ + '\n')
         sys.exit(0)
-    init_logging(args)
     config = ModelDefaults.fromFile(args['config'])
+    init_logging(args, config)
     if args['pwd_file']:
         train(args, config)
     if args['enumerate_ofile']:
@@ -352,6 +361,7 @@ def main(args):
     if not args['pwd_file'] and not args['enumerate_ofile']:
         logging.error('Nothing to do! Use --pwd-file or --enumerate-ofile. ')
         sys.exit(1)
+    logging.info('Done!')
 
 if __name__=='__main__':
     parser = argparse.ArgumentParser(
@@ -376,13 +386,15 @@ if __name__=='__main__':
         'Test if the password input is valid and print to stderr errors. Will'
         ' not train the neural network. '))
     parser.add_argument('--enumerate-ofile',
-                        help='Enumerate guesses output file')
-    parser.add_argument('--config', help='Config file in json. ')
+                        help = 'Enumerate guesses output file')
+    parser.add_argument('--config', help = 'Config file in json. ')
     parser.add_argument('--profile',
-                        help='Profile execution and save to the given file. ')
-    parser.add_argument('--help-config', action='store_true',
-                        help='Print help for config files and exit')
+                        help = 'Profile execution and save to the given file. ')
+    parser.add_argument('--help-config', action = 'store_true',
+                        help = 'Print help for config files and exit')
     parser.add_argument('--log-file')
+    parser.add_argument('-q', '--quiet', action = 'store_true',
+                        help = 'Silence logging. ')
     args = vars(parser.parse_args())
     main_bundle = lambda: main(args)
     if args['profile'] is not None:

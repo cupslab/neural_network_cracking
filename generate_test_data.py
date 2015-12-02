@@ -2,8 +2,24 @@ import sys
 import argparse
 import random
 
+import numpy as np
+
+skewed_dict = [
+    (1, 'abab'),
+    (4, 'abbbb'),
+    (2, 'aaaa'),
+    (3, 'aaab')
+]
+
+sums = sum(map(lambda x: x[0], skewed_dict))
+probs = list(map(lambda x: x[0] / sums, skewed_dict))
+
+def skewed():
+    return skewed_dict[np.random.choice(len(skewed_dict), 1, p = probs)[0]][1]
+
 distributions = {
-    'constant' : lambda: 'aaa'
+    'constant' : lambda: 'aaa',
+    'skewed' : skewed
 }
 
 def main(args):
@@ -13,7 +29,7 @@ def main(args):
 
 if __name__=='__main__':
     parser = argparse.ArgumentParser(
-        description="Generate test data of a's and b's")
+        description="Generate test data")
     parser.add_argument('-o', '--ofile',
                         type = argparse.FileType('w'),
                         help = 'Input file. Default is stdout. ',
