@@ -1228,6 +1228,7 @@ class Guesser(object):
                                map(lambda x: x[0], node_list)))
         if len(prefixes) == 0:
             return
+        logging.info('Super node buffer size %s', len(prefixes))
         predictions = self.conditional_probs_many(prefixes)
         cached_prefixes = dict(zip(prefixes, predictions))
         for cur_node in node_list:
