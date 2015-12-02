@@ -517,6 +517,7 @@ class ModelDefaults(object):
     trie_intermediate_storage = ':memory:'
     intermediate_fname = ':memory:'
     preprocess_trie_on_disk = False
+    preprocess_trie_on_disk_buff_size = 10000
     trie_serializer_encoding = 'utf8'
     trie_serializer_type = 'reg'
     save_always = True
@@ -773,33 +774,48 @@ class HybridDiskPreprocessor(TriePreprocessor):
 
     class DiskCache(object):
         def __init__(self, config):
-            self.file_map = {}
-            self.writer_map = {}
+            self.buffer = HybridDiskPreprocessor.MemoryCache()
             self.file_name_mapping = {}
             self.storage_dir = config.trie_intermediate_storage
+            self.buff_size = 0
+            self.chunk_size = config.preprocess_trie_on_disk_buff_size
             if not os.path.exists(self.storage_dir):
                 os.mkdir(self.storage_dir)
 
-        def _santize(self, key):
-            answer = FNAME_PREFIX_PREPROCESSOR + str(len(self.file_map))
+        def santize(self, key):
+            answer = FNAME_PREFIX_PREPROCESSOR + str(
+                len(self.file_name_mapping))
             self.file_name_mapping[key] = answer
             return os.path.join(self.storage_dir, answer)
 
-        def _unsantize(self, key):
+        def unsantize(self, key):
             return os.path.join(self.storage_dir, self.file_name_mapping[key])
 
+        def flush_buff(self):
+            for key in sorted(self.buffer.cache.keys()):
+                if key not in self.file_name_mapping:
+                    fname = self.santize(key)
+                else:
+                    fname = self.unsantize(key)
+                with open(fname, 'a') as afile:
+                    writer = csv.writer(
+                        afile, delimiter = '\t', quotechar = None)
+                    values = self.buffer.cache[key]
+                    for value in values:
+                        writer.writerow(value)
+            self.buff_size = 0
+
         def add_key(self, key, value):
-            if key not in self.file_map:
-                self.file_map[key] = open(self._santize(key), 'w')
-                self.writer_map[key] = csv.writer(
-                    self.file_map[key], delimiter = '\t', quotechar = None)
-            self.writer_map[key].writerow(value)
+            self.buffer.add_key(key, value)
+            self.buff_size += 1
+            if self.buff_size == self.chunk_size:
+                self.flush_buff()
 
         def read(self):
-            for key in self.file_map:
-                self.file_map[key].close()
-            for key in sorted(self.file_map.keys()):
-                with open(self._unsantize(key), 'r') as istr:
+            if self.buff_size != 0:
+                self.flush_buff()
+            for key in sorted(self.file_name_mapping.keys()):
+                with open(self.unsantize(key), 'r') as istr:
                     for item in csv.reader(
                             istr, delimiter = '\t', quotechar = None):
                         yield (item[0], int(item[1]))
