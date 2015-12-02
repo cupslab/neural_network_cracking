@@ -1,0 +1,187 @@
+{
+    "experiments" : [
+        {
+            "name" : "jsz2_fastest",
+            "config" : {
+                "config" : {
+                    "chunk_print_interval" : 1000,
+                    "training_chunk" : 1000,
+                    "layers" : 1,
+                    "hidden_size" : 256,
+                    "generations" : 500,
+                    "training_accuracy_threshold" : -1,
+                    "min_len" : 4,
+                    "max_len" : 25,
+                    "train_test_ratio" : 10,
+                    "rare_character_optimization" : true,
+                    "uppercase_character_optimization" : true,
+                    "simulated_frequency_optimization" : true,
+                    "trie_implementation" : "disk",
+                    "trie_fname" : "trie_fname",
+                    "intermediate_fname" : "intermediate_data.sqlite",
+                    "model_type" : "JZS2",
+                    "model_truncate_gradient" : 2
+                }
+            },
+            "command" : "python3 /home/wmeliche/nn/src/pwd_guess.py --config-args {config} --profile profilebin"
+        },
+        {
+            "name" : "jsz2_accurate",
+            "config" : {
+                "config" : {
+                    "chunk_print_interval" : 1000,
+                    "training_chunk" : 500,
+                    "layers" : 2,
+                    "hidden_size" : 512,
+                    "generations" : 500,
+                    "training_accuracy_threshold" : -1,
+                    "min_len" : 4,
+                    "max_len" : 25,
+                    "train_test_ratio" : 10,
+                    "rare_character_optimization" : false,
+                    "uppercase_character_optimization" : false,
+                    "simulated_frequency_optimization" : true,
+                    "trie_implementation" : "disk",
+                    "trie_fname" : "trie_fname",
+                    "intermediate_fname" : "intermediate_data.sqlite",
+                    "model_type" : "JZS2",
+                }
+            },
+            "command" : "python3 /home/wmeliche/nn/src/pwd_guess.py --config-args {config} --profile profilebin"
+        },
+        {
+            "name" : "jsz2_mid",
+            "config" : {
+                "config" : {
+                    "chunk_print_interval" : 1000,
+                    "training_chunk" : 1000,
+                    "layers" : 1,
+                    "hidden_size" : 256,
+                    "generations" : 500,
+                    "training_accuracy_threshold" : -1,
+                    "min_len" : 4,
+                    "max_len" : 25,
+                    "train_test_ratio" : 10,
+                    "rare_character_optimization" : true,
+                    "uppercase_character_optimization" : true,
+                    "simulated_frequency_optimization" : true,
+                    "trie_implementation" : "disk",
+                    "trie_fname" : "trie_fname",
+                    "intermediate_fname" : "intermediate_data.sqlite",
+                    "model_type" : "JZS2",
+                }
+            },
+            "command" : "python3 /home/wmeliche/nn/src/pwd_guess.py --config-args {config} --profile profilebin"
+        },
+        {
+            "name" : "jsz3_mid",
+            "config" : {
+                "config" : {
+                    "chunk_print_interval" : 1000,
+                    "training_chunk" : 1000,
+                    "layers" : 1,
+                    "hidden_size" : 256,
+                    "generations" : 500,
+                    "training_accuracy_threshold" : -1,
+                    "min_len" : 4,
+                    "max_len" : 25,
+                    "train_test_ratio" : 10,
+                    "rare_character_optimization" : true,
+                    "uppercase_character_optimization" : true,
+                    "simulated_frequency_optimization" : true,
+                    "trie_implementation" : "disk",
+                    "trie_fname" : "trie_fname",
+                    "intermediate_fname" : "intermediate_data.sqlite",
+                    "model_type" : "JZS3",
+                }
+            },
+            "command" : "python3 /home/wmeliche/nn/src/pwd_guess.py --config-args {config} --profile profilebin"
+        },
+        {
+            "name" : "jsz2_optimizer_rmsprop",
+            "config" : {
+                "config" : {
+                    "chunk_print_interval" : 1000,
+                    "training_chunk" : 1000,
+                    "layers" : 1,
+                    "hidden_size" : 256,
+                    "generations" : 500,
+                    "training_accuracy_threshold" : -1,
+                    "min_len" : 4,
+                    "max_len" : 25,
+                    "train_test_ratio" : 10,
+                    "rare_character_optimization" : true,
+                    "uppercase_character_optimization" : true,
+                    "simulated_frequency_optimization" : true,
+                    "trie_implementation" : "disk",
+                    "trie_fname" : "trie_fname",
+                    "intermediate_fname" : "intermediate_data.sqlite",
+                    "model_type" : "JZS2",
+                    "model_optimizer" : "rmsprop"
+                }
+            },
+            "command" : "python3 /home/wmeliche/nn/src/pwd_guess.py --config-args {config} --profile profilebin"
+        },
+        {
+            "name" : "jsz2_optimizer_rmsprop",
+            "config" : {
+                "config" : {
+                    "chunk_print_interval" : 1000,
+                    "training_chunk" : 1000,
+                    "layers" : 1,
+                    "hidden_size" : 256,
+                    "generations" : 500,
+                    "training_accuracy_threshold" : -1,
+                    "min_len" : 4,
+                    "max_len" : 25,
+                    "train_test_ratio" : 10,
+                    "rare_character_optimization" : true,
+                    "uppercase_character_optimization" : true,
+                    "simulated_frequency_optimization" : true,
+                    "trie_implementation" : "disk",
+                    "trie_fname" : "trie_fname",
+                    "intermediate_fname" : "intermediate_data.sqlite",
+                    "model_type" : "JZS2",
+                    "model_optimizer" : "sgd"
+                }
+            },
+            "command" : "python3 /home/wmeliche/nn/src/pwd_guess.py --config-args {config} --profile profilebin"
+        },
+        {
+            "name" : "jsz2_optimizer_adadelta",
+            "config" : {
+                "config" : {
+                    "chunk_print_interval" : 1000,
+                    "training_chunk" : 1000,
+                    "layers" : 1,
+                    "hidden_size" : 256,
+                    "generations" : 500,
+                    "training_accuracy_threshold" : -1,
+                    "min_len" : 4,
+                    "max_len" : 25,
+                    "train_test_ratio" : 10,
+                    "rare_character_optimization" : true,
+                    "uppercase_character_optimization" : true,
+                    "simulated_frequency_optimization" : true,
+                    "trie_implementation" : "disk",
+                    "trie_fname" : "trie_fname",
+                    "intermediate_fname" : "intermediate_data.sqlite",
+                    "model_type" : "JZS2",
+                    "model_optimizer" : "adadelta"
+                }
+            },
+            "command" : "python3 /home/wmeliche/nn/src/pwd_guess.py --config-args {config} --profile profilebin"
+        }
+    ],
+    "base_config" : {
+        "args" : {
+            "pwd_file" : [
+                "/home/wmeliche/nn/leaks/Rockyou_onlyvalidutf8_top10000.gz"
+            ],
+            "pwd_format" : [
+                "tsv"
+            ],
+            "log_file" : "log.txt"
+        }
+    }
+}

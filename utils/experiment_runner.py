@@ -20,7 +20,7 @@ def run_experiment(logger, exp, base_config):
     name, config, cmd_template = exp['name'], exp['config'], exp['command']
     if os.path.exists(name):
         logger.error(('Path exists %s. Cowardly refusing to overwrite. '
-                       'Skipping test.'), name)
+                      'Skipping test.'), name)
         return CODE_NOT_STARTED
     os.mkdir(name)
     config_file_path = os.path.join(name, FNAME_CONFIG)
@@ -48,17 +48,21 @@ def analytics(logger, ret_codes):
     logger.info('-----------------')
     for c in ret_codes:
         logger.info('%s: %s', c[0], c[1])
-    counter = collections.Counter(ret_codes)
+    counter = collections.Counter(map(lambda x: x[1], ret_codes))
     logger.info('Successes: %s', counter[CODE_SUCCESS])
     logger.info('Errors: %s', counter[CODE_RET_ERROR])
     logger.info('Not started: %s', counter[CODE_NOT_STARTED])
 
 def main(args):
+    logging.basicConfig(format='%(asctime)-15s %(levelname)s: %(message)s')
     logger = logging.getLogger('exp')
     logger.setLevel(logging.INFO)
     with open(args['experiment_config'], 'r') as config_file:
         config = json.load(config_file)
     experiment_list = config['experiments']
+    if len(args['experiments']):
+        experiment_list = list(
+            filter(lambda x: x['name'] in args['experiments'], experiment_list))
     base_config = config['base_config'] if 'base_config' in config else {}
     codes = []
     for experiment in experiment_list:
@@ -69,4 +73,5 @@ def main(args):
 if __name__=='__main__':
     parser = argparse.ArgumentParser(description='')
     parser.add_argument('experiment_config')
+    parser.add_argument('--experiments', nargs = '+')
     main(vars(parser.parse_args()))
