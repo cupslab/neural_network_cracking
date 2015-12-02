@@ -1240,10 +1240,10 @@ class Guesser(object):
         for cur_node in node_list:
             astring, prob = cur_node
             for next_node in self.next_nodes(astring, prob, cached_prefixes):
-            node_batch.append(next_node)
-            if len(node_batch) == self.chunk_size_guesser:
-                self.super_node_recur(node_batch)
-                node_batch = []
+                node_batch.append(next_node)
+                if len(node_batch) == self.chunk_size_guesser:
+                    self.super_node_recur(node_batch)
+                    node_batch = []
         if len(node_batch) > 0:
             self.super_node_recur(node_batch)
             node_batch = []
