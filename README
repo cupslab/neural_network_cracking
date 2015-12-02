@@ -24,7 +24,7 @@ Setup
 Tests
 -----
 
-Run automated tests by:
+Run quick automated tests by:
 
     python pwd_guess_unit.py
 
@@ -32,8 +32,14 @@ or to run only specific tests:
 
     python -m unittest pwd_guess_unit.<specific unit test>
 
+To run the end to end tests:
+
+    python -m unittest end_to_end_tests
 
 Most tests are very quick, however each EndToEnd test may take 10-15 minutes.
+The ones in pwd_guess_unit should take about 1 minute. On a new machine or when
+you update the GPU or theano library, it takes longer because the cached
+compilation step has to be reperformed.
 
 
 Help

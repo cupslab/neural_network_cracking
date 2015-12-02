@@ -8,6 +8,7 @@ from keras.optimizers import SGD
 from sklearn.utils import shuffle
 import numpy as np
 from sqlitedict import SqliteDict
+import theano
 
 import sys
 import argparse
@@ -1280,6 +1281,9 @@ def main(args):
         config = ModelDefaults.fromFile(args['config'])
     init_logging(args)
     logging.info('Configuration: %s', json.dumps(config.as_dict(), indent = 4))
+    if theano.config.floatX == 'float64':
+        logging.warning(('Using float64 instead of float32 for theano will'
+                         ' harm performance. Edit ~/.theanorc'))
     if args['pwd_file']:
         train(args, config)
     elif args['enumerate_ofile']:
