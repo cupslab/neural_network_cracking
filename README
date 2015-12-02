@@ -1,0 +1,8 @@
+Setup
+-----
+
+    Requirements:
+    . python3 (version 3.4.2 was used during development)
+    . python packages:
+        theano (http://deeplearning.net/software/theano/install.html)
+        keras (pip3 install keras)

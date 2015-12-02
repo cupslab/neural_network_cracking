@@ -19,6 +19,30 @@ class TrainerTest(unittest.TestCase):
                          (list(prefix), list(suffix)))
         self.assertTrue(all(map(lambda x: len(x) == 40, list(prefix))))
 
+    def test_accuracy(self):
+        t = pwd_guess.Trainer(['pass'], pwd_guess.ModelDefaults(max_len = 5))
+        mock_model = Mock()
+        mock_model.train_on_batch = MagicMock(return_value = (0.5, 0.5))
+        self.assertEqual(0.5, t.train_model_generation(mock_model))
+
+    def test_train_model(self):
+        t = pwd_guess.Trainer(['pass'], pwd_guess.ModelDefaults(
+            max_len = 5, generations = 20))
+        mock_model = Mock()
+        mock_model.train_on_batch = MagicMock(return_value = (0.5, 0.5))
+        t.train_model(mock_model, None)
+        self.assertEqual(t.generation, 2)
+
+    def test_training_set_small(self):
+        t = pwd_guess.Trainer(
+            ['aaa'], pwd_guess.ModelDefaults(max_len = 3, min_len = 3))
+        prefix, suffix = t.next_train_chunk()
+        self.assertEqual(([x + ('\n' * (3 - len(x)))
+                           for x in ['', 'a', 'aa', 'aaa']],
+                          ['a', 'a', 'a', '\n']),
+                         (list(prefix), list(suffix)))
+        self.assertTrue(all(map(lambda x: len(x) == 3, list(prefix))))
+
     def test_char_table_no_error(self):
         t = pwd_guess.Trainer(['pass'])
         self.assertNotEqual(None, t.ctable)

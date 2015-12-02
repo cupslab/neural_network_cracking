@@ -74,7 +74,7 @@ class ModelDefaults(object):
     char_bag - alphabet of characters over which to guess
     model_type - type of model. Read keras documentation for more types.
     hidden_size - size of each layer. More means better accuracy
-    layers - number of hidden layers. More means better accuracy.
+    layers - number of hidden layers. More means better accuracy
     max_len - maximum length of any password in training data. This can be
               larger than all passwords in the data and the network may output
               guesses that are this many characters long.
@@ -89,6 +89,9 @@ class ModelDefaults(object):
     relevel_not_matching_passwords - If true, then passwords that do not match
                                      the filter policy will have their
                                      probability equal to zero.
+    generation_checkpoint - Every few generations, save the model.
+    training_accuracy_threshold - If the accuracy is not improving by this
+                                  amount, then quit.
     """
     char_bag = (string.ascii_lowercase +
                 string.ascii_uppercase +
@@ -105,6 +108,8 @@ class ModelDefaults(object):
     chunk_print_interval = 1000
     lower_probability_threshold = 10**-5
     relevel_not_matching_passwords = True
+    generation_checkpoint = True
+    training_accuracy_threshold = 10**-10
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -140,8 +145,9 @@ class ModelDefaults(object):
 class Trainer(object):
     def __init__(self, pwd_list, config = ModelDefaults()):
         self.config = config
-        self.pwd_whole_list = list(pwd_list)
         self.chunk = 0
+        self.generation = 0
+        self.pwd_whole_list = list(pwd_list)
         self.ctable = CharacterTable.fromConfig(self.config)
 
     def train_chunk_from_pwds(self, pwds):
@@ -195,10 +201,21 @@ class Trainer(object):
         model.compile(loss='categorical_crossentropy', optimizer = 'adam')
         return model
 
-    def train_model(self, model):
+    def train_model(self, model, serializer):
+        prev_accuracy = 0
         for gen in range(self.config.generations):
+            self.generation = gen + 1
             logging.info('Generation ' + str(gen + 1))
-            self.train_model_generation(model)
+            accuracy = self.train_model_generation(model)
+            if serializer is not None:
+                logging.info('Saving model...')
+                serializer.save_model(model)
+            if (accuracy - prev_accuracy <
+                self.config.training_accuracy_threshold):
+                logging.info('Accuracy of %s is less than threshold.',
+                             accuracy - prev_accuracy)
+                break
+            prev_accuracy = accuracy
 
     def train_model_generation(self, model):
         self.chunk = 0
@@ -206,20 +223,25 @@ class Trainer(object):
         total_chunks = math.ceil(
             len(self.pwd_whole_list) / self.config.training_chunk)
         logging.info('Total chunks %s', total_chunks)
+        accuracy_accum = []
+        num = 0
         while len(x_all) != 0:
             assert len(x_all) == len(y_all)
             loss, accuracy = model.train_on_batch(x_all, y_all, accuracy = True)
+            accuracy_accum += [(len(x_all), accuracy)]
             if self.chunk % self.config.chunk_print_interval == 0:
                 logging.info('Chunk %s of %s. Each chunk is size %s',
                              self.chunk, total_chunks, len(x_all))
                 logging.info('Loss: %s. Accuracy: %s.', loss, accuracy)
             x_all, y_all = self.next_train_set_as_np()
+        return sum(map(lambda x: x[0] * x[1], accuracy_accum)) / sum(
+            map(lambda x: x[0], accuracy_accum))
 
-    def train(self):
+    def train(self, serializer = None):
         logging.info('Building model...')
         model = self.build_model()
         logging.info('Done compiling model. Beginning training...')
-        self.train_model(model)
+        self.train_model(model, serializer)
         return model
 
 class PwdList(object):
@@ -371,11 +393,9 @@ def train(args, config):
         if len(plist) == 0:
             logging.error('Empty training set! Quiting...')
             sys.exit(1)
-        model = Trainer(plist, config).train()
-        if args['arch_file'] is not None and args['weight_file'] is not None:
-            logging.info('Saving model')
-            ModelSerializer(
-                args['arch_file'], args['weight_file']).save_model(model)
+        logging.info('Saving model')
+        serializer = ModelSerializer(args['arch_file'], args['weight_file'])
+        model = Trainer(plist, config).train(serializer)
         if args['enumerate_ofile']:
             Guesser.do_guessing(model, config, args['enumerate_ofile'])
     logging.info('Filtered %s of %s passwords', filt.filtered_out, filt.total)
