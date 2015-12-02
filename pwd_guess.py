@@ -947,25 +947,19 @@ class PwdList(object):
     def __init__(self, ifile_name):
         self.ifile_name = ifile_name
 
-    def open_file(self):
-        if self.ifile_name[-3:] == '.gz':
-            return gzip.open(self.ifile_name, 'rt')
-        return open(self.ifile_name, 'r')
-
     def as_list_iter(self, agen):
-        return [(row.strip(PASSWORD_END), 1) for row in agen]
+        for row in agen:
+            yield (row.strip(PASSWORD_END), 1)
 
     def as_list(self):
-        answer = []
-        ifile = self.open_file()
-        try:
-            answer = self.as_list_iter(ifile)
-            if all(map(lambda x: '\t' in x, answer[:10])):
-                logging.warning('Many passwords seem to contain a tab! '
-                                'Did you mis-enter the password format?')
-        finally:
-            ifile.close()
-        return answer
+        if self.ifile_name[-3:] == '.gz':
+            with gzip.open(self.ifile_name, 'rt') as ifile:
+                for item in self.as_list_iter(ifile):
+                    yield item
+        else:
+            with open(self.ifile_name, 'r') as ifile:
+                for item in self.as_list_iter(ifile):
+                    yield item
 
     @staticmethod
     def getFactory(file_formats, config):
@@ -984,17 +978,15 @@ class PwdList(object):
 
 class TsvList(PwdList):
     def as_list_iter(self, agen):
-        answer = []
-        for row in csv.reader(agen, delimiter = '\t', quotechar = None):
+        for row in csv.reader(iter(agen), delimiter = '\t', quotechar = None):
             pwd, freq = row[:2]
             for _ in range(int(float.fromhex(freq))):
-                answer.append((sys.intern(pwd), 1))
-        return answer
+                yield (sys.intern(pwd), 1)
 
 class TsvSimulatedList(PwdList):
     def as_list_iter(self, agen):
-        return [(row[0], int(float.fromhex(row[1]))) for row in
-                csv.reader(agen, delimiter = '\t', quotechar = None)]
+        for row in csv.reader(iter(agen), delimiter = '\t', quotechar = None):
+            yield (row[0], int(float.fromhex(row[1])))
 
 class ConcatenatingList(object):
     def __init__(self, config, file_list, file_formats):
@@ -1320,10 +1312,11 @@ def read_passwords(pwd_file, pwd_format, config):
     input_factory = PwdList.getFactory(pwd_format, config)
     filt = Filterer(config)
     logging.info('Reading training set...')
-    plist = list(filt.filter(input_factory(pwd_file).as_list()))
+    for item in filt.filter(input_factory(pwd_file).as_list()):
+        pass
     filt.finish()
     logging.info('Done reading passwords...')
-    return plist
+    return filt.filter(input_factory(pwd_file).as_list())
 
 def preprocessing(args, config):
     if args['pwd_format'][0] in BasePreprocessor.format_keys:
@@ -1332,9 +1325,9 @@ def preprocessing(args, config):
         disk_trie = BasePreprocessor.byFormat(args['pwd_format'][0], config)
         disk_trie.begin(args['pwd_file'][0])
         return disk_trie
-    plist = read_passwords(args['pwd_file'], args['pwd_format'], config)
     preprocessor = BasePreprocessor.fromConfig(config)
-    preprocessor.begin(plist)
+    preprocessor.begin(
+        read_passwords(args['pwd_file'], args['pwd_format'], config))
     if args['pre_processing_only']:
         logging.info('Only performing pre-processing. ')
         if config.compute_stats:

@@ -603,19 +603,10 @@ class PwdListTest(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tempdir)
 
-    def test_open_file(self):
-        self.make_file('test.txt', open)
-        pwd = pwd_guess.PwdList(self.fname)
-        f = pwd.open_file()
-        self.assertEqual(f.read(), self.fcontent)
-        f.close()
-
-    def test_open_gzip_file(self):
+    def test_gzip_file(self):
         self.make_file('test.txt.gz', gzip.open)
         pwd = pwd_guess.PwdList(self.fname)
-        f = pwd.open_file()
-        self.assertEqual(f.read(), self.fcontent)
-        f.close()
+        self.assertEqual([('pass ', 1), ('word', 1)], list(pwd.as_list()))
 
     def test_as_list(self):
         self.make_file('test.txt', open)
