@@ -1207,10 +1207,11 @@ class Guesser(object):
         return answer
 
     def next_nodes(self, astring, total_preds):
-        for char in self.ctable.chars:
-            chain_prob = total_preds[self.ctable.get_char_index(char)]
+        for charidx in range(len(self.ctable.chars)):
+            chain_prob = total_preds[charidx]
             if chain_prob < self.lower_probability_threshold:
                 continue
+            char = self.ctable.chars[charidx]
             if char == PASSWORD_END:
                 self.output_serializer.serialize(astring + char, chain_prob)
                 self.generated += 1
