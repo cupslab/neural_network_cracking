@@ -582,10 +582,12 @@ class ModelDefaults(object):
     password_test_fname = None
     chunk_size_guesser = 1000
     random_walk_seed_num = 1000
-    random_walk_seed_iterations = 1
     max_gpu_prediction_size = 25000
     gpu_fork_bias = 2
     cpu_limit = 8
+    random_walk_confidence_bound_z_value = 1.96
+    random_walk_confidence_percent = 5
+    random_walk_upper_bound = 10
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -1626,26 +1628,32 @@ class RandomWalkGuesser(Guesser):
         for _ in range(self.config.random_walk_seed_num):
             yield '', 1, 1, 0
 
+    def calc_error(self):
+        return self.config.random_walk_confidence_bound_z_value * (
+            np.std(self.estimates) / math.sqrt(len(self.estimates)))
+
     def random_walk(self, probs):
         for prob_node in probs:
             pwd, prob = prob_node
             logging.info('Calculating guess number for %s at %s', pwd, prob)
             self.lower_probability_threshold = prob
             self.estimates = []
-            for _ in range(self.config.random_walk_seed_iterations):
+            error = -1
+            num = 0
+            while True:
                 self.super_node_recur(list(self.seed_data()))
-            if len(self.estimates) != 0:
-                cost = np.average(self.estimates)
-                stdev = np.std(self.estimates)
-                error = self.ERROR_BOUNDS_95_PERCENT_THETA * (
-                    stdev / math.sqrt(len(self.estimates)))
-            else:
-                logging.error(("Number of passwords guessed is 0 for all "
-                               "branches! I don't know what this means"
-                               "but its probably a bug. "))
-                cost = -1
-                stdev = -1
-                error = -1
+                num += 1
+                if len(self.estimates) == 0:
+                    logging.error(("Number of passwords guessed is 0 for all "
+                                   "branches! I don't know what this means"
+                                   "but its probably a bug. "))
+                if self.calc_error() < (np.average(self.estimates) * .01 * (
+                        self.config.random_walk_confidence_percent)) or (
+                            num > self.config.random_walk_upper_bound):
+                    break
+            cost = np.average(self.estimates)
+            stdev = np.std(self.estimates)
+            error = self.calc_error()
             self.ostream.write('%s\t%s\t%s\t%s\t%s\t%s\n' % (
                 pwd, prob, cost, stdev, len(self.estimates), error))
             self.ostream.flush()
