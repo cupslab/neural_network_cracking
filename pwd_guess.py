@@ -22,6 +22,9 @@ import multiprocessing
 import tempfile
 import subprocess
 
+PASSWORD_END = '\n'
+RARE_CHARACTER_SYMBOL = '`'
+
 class CharacterTable(object):
     """
     Given a set of characters:
@@ -52,7 +55,44 @@ class CharacterTable(object):
 
     @staticmethod
     def fromConfig(config):
-        return CharacterTable(config.char_bag, config.max_len)
+        if (config.uppercase_character_optimization or
+            config.rare_character_optimization):
+            return OptimizingCharacterTable(
+                config.char_bag, config.max_len,
+                config.rare_character_optimization,
+                config.uppercase_character_optimization)
+        else:
+            return CharacterTable(config.char_bag, config.max_len)
+
+class OptimizingCharacterTable(CharacterTable):
+    def __init__(self, chars, maxlen, rare_characters, uppercase):
+        self.rare_characters = rare_characters
+        char_bag = chars
+        for r in rare_characters:
+            char_bag = char_bag.replace(r, '')
+        char_bag += RARE_CHARACTER_SYMBOL
+        self.rare_dict = dict([(char, RARE_CHARACTER_SYMBOL)
+                               for char in rare_characters])
+        if uppercase:
+            for c in string.ascii_uppercase:
+                if c not in chars:
+                    continue
+                self.rare_dict[c] = c.lower()
+                char_bag = char_bag.replace(c, '')
+                assert c.lower() in char_bag
+        super().__init__(char_bag, maxlen)
+
+    def replace_all(self, astring):
+        return ''.join(map(
+            lambda c: self.rare_dict[c] if c in self.rare_dict else c, astring))
+
+    def encode(self, C, maxlen = None):
+        return super().encode(self.replace_all(C), maxlen)
+
+    def get_char_index(self, character):
+        if character in self.rare_dict:
+            return super().get_char_index(self.rare_dict[character])
+        return super().get_char_index(character)
 
 class ModelSerializer(object):
     def __init__(self, archfile = None, weightfile = None):
@@ -81,35 +121,50 @@ class ModelSerializer(object):
         logging.info('Done loading model')
         return model
 
-PASSWORD_END = '\n'
 
 class ModelDefaults(object):
-    """
-    Configuration information for guessing and training. Can be read from a file
+    """Configuration information for guessing and training. Can be read from a file
     in json format.
 
     Attributes:
     char_bag - alphabet of characters over which to guess
+
     model_type - type of model. Read keras documentation for more types.
+
     hidden_size - size of each layer. More means better accuracy
+
     layers - number of hidden layers. More means better accuracy
+
     max_len - maximum length of any password in training data. This can be
-              larger than all passwords in the data and the network may output
-              guesses that are this many characters long.
+      larger than all passwords in the data and the network may output guesses
+      that are this many characters long.
+
     min_len - minimum length of any password that will be guessed
+
     training_chunk - Smaller training chunk means less memory consumed. This is
-                     especially important because often, the blocking thing is
-                     using memory on the GPU which is small.
-    generations - More generations means it takes longer but is more accurate
+      using memory on the GPU which is small. generations - More generations
+      means it takes longer but is more accurate
+
     chunk_print_interval - Interval over which to print info to the log
+
     lower_probability_threshold - This controls how many passwords to output
-                                  during generation. Lower means more passwords.
+      during generation. Lower means more passwords.
+
     relevel_not_matching_passwords - If true, then passwords that do not match
-                                     the filter policy will have their
-                                     probability equal to zero.
+      the filter policy will have their probability equal to zero.
+
     generation_checkpoint - Every few generations, save the model.
+
     training_accuracy_threshold - If the accuracy is not improving by this
-                                  amount, then quit.
+      amount, then quit.
+
+    rare_character_optimization - Default false. If you specify a list of
+      characters to treat as rare, then it will model those characters with a
+      rare character. This will increase performance at the expense of accuracy.
+
+    uppercase_character_optimization - Default false. If true, uppercase
+      characters will be treated the same as lower case characters. Increases
+      performance at the expense of accuracy.
     """
     char_bag = (string.ascii_lowercase +
                 string.ascii_uppercase +
@@ -131,6 +186,8 @@ class ModelDefaults(object):
     train_test_ratio = 10
     parallel_guessing = False
     fork_length = 2
+    rare_character_optimization = False
+    uppercase_character_optimization = False
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
