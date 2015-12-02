@@ -9,7 +9,6 @@ from sklearn.utils import shuffle
 import numpy as np
 from sqlitedict import SqliteDict
 import theano
-import theano.tensor as T
 
 import sys
 import argparse
@@ -1160,7 +1159,6 @@ class Guesser(object):
         self.filterer = Filterer(self.config)
         self.chunk_size_guesser = self.config.chunk_size_guesser
         self.output_serializer = self.make_serializer(ostream)
-        self.calc_prob_fn = None
 
     def make_serializer(self, ostream):
         if self.config.guess_serialization_method == 'human':
@@ -1200,6 +1198,11 @@ class Guesser(object):
     def conditional_probs(self, astring):
         return self.conditional_probs_many([astring])[0][0].copy()
 
+    def _conditional_probs(self, astring, cache):
+        answer = cache[astring]
+        del cache[astring]
+        return answer[0]
+
     def conditional_probs_many(self, astring_list):
         answer = self.model.predict(self.ctable.encode_many(astring_list),
                                     verbose = 0,
@@ -1209,40 +1212,21 @@ class Guesser(object):
             self.relevel_prediction_many(answer, astring_list)
         return answer
 
-    def next_nodes(self, astring, total_preds):
+    def next_nodes(self, astring, prob, cache):
+        prediction = self._conditional_probs(astring, cache)
+        total_preds = np.array(prediction) * prob
         for char in self.ctable.chars:
-            chain_prob = total_preds[self.ctable.get_char_index(char)]
             chain_pass = astring + char
+            chain_prob = total_preds[self.ctable.get_char_index(char)]
             if chain_prob < self.lower_probability_threshold:
                 continue
             if char == PASSWORD_END:
                 self.output_serializer.serialize(chain_pass, chain_prob)
                 self.generated += 1
-            elif len(astring) + 1 > self.max_len:
+            elif len(chain_pass) > self.max_len:
                 continue
             elif char != PASSWORD_END:
                 yield chain_pass, chain_prob
-
-    def calculate_abs_probs_many_compile(self):
-        abs_probs_tensor = T.vector()
-        abs_probs_diag = T.nlinalg.AllocDiag()(abs_probs_tensor)
-        cond_probs_mat = T.ftensor3('p')
-        cond_probs_mat_shuffled = cond_probs_mat.dimshuffle((0, 2, 1))
-        cond_probs_mat_flat = cond_probs_mat_shuffled.flatten(2)
-        product = T.dot(abs_probs_diag, cond_probs_mat_flat)
-        output_fn = theano.function([abs_probs_tensor, cond_probs_mat], product,
-                                    allow_input_downcast = True)
-        return output_fn
-
-    def next_nodes_many(self, node_list, predictions):
-        assert len(node_list) == len(predictions)
-        node_strs, node_probs = zip(*node_list)
-        if self.calc_prob_fn is None:
-            self.calc_prob_fn = self.calculate_abs_probs_many_compile()
-        pred_out = self.calc_prob_fn(list(node_probs), predictions)
-        for i, node_str in enumerate(node_strs):
-            for n in self.next_nodes(node_str, pred_out[i]):
-                yield n
 
     def super_node_recur(self, node_list):
         prefixes = list(map(lambda x: x[0], node_list))
@@ -1251,8 +1235,11 @@ class Guesser(object):
         logging.info('Super node buffer size %s, guess number %s',
                      len(prefixes), self.generated)
         predictions = self.conditional_probs_many(prefixes)
+        cached_prefixes = dict(zip(prefixes, predictions))
         node_batch = []
-        for next_node in self.next_nodes_many(node_list, predictions):
+        for cur_node in node_list:
+            astring, prob = cur_node
+            for next_node in self.next_nodes(astring, prob, cached_prefixes):
             node_batch.append(next_node)
             if len(node_batch) == self.chunk_size_guesser:
                 self.super_node_recur(node_batch)
