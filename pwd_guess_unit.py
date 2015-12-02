@@ -283,7 +283,6 @@ class DiskPreprocessorTest(unittest.TestCase):
 
         pre = pwd_guess.DiskPreprocessor(self.config)
         pre.begin()
-        self.assertEqual(pre.total_chunks(), 0)
         prefix, suffix, weight = pre.next_chunk()
         exp_prefix = ['', 'a', 'aa', 'aa']
         exp_suffix = ['a', 'a', 'a', 'b']

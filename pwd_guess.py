@@ -168,10 +168,6 @@ class TrieSerializer(object):
             os.mkdir(directory)
         self.do_serialize(trie)
 
-    def num_records(self):
-        logging.warning('Unable to get number of records')
-        return 1
-
     def do_serialize(self, trie):
         raise NotImplementedError()
 
@@ -403,10 +399,8 @@ class ModelSerializer(object):
         return model
 
 class ModelDefaults(object):
-    char_bag = (string.ascii_lowercase +
-                string.ascii_uppercase +
-                string.digits +
-                '~!@#$%^&*(),.<>/?\'"{}[]\|-_=+;: `' +
+    char_bag = (string.ascii_lowercase + string.ascii_uppercase +
+                string.digits + '~!@#$%^&*(),.<>/?\'"{}[]\|-_=+;: `' +
                 PASSWORD_END)
     model_type = 'JZS1'
     hidden_size = 128
@@ -513,9 +507,6 @@ class BasePreprocessor(object):
     def reset(self):
         raise NotImplementedError()
 
-    def total_chunks(self):
-        raise NotImplementedError()
-
     def stats(self):
         self.reset()
         x_vec, y_vec, weights = self.next_chunk()
@@ -577,9 +568,6 @@ class Preprocessor(BasePreprocessor):
         return (
             list(pwd_input), list(output), list(weight))
 
-    def total_chunks(self):
-        return math.ceil(len(self.pwd_whole_list) / self.config.training_chunk)
-
     def password_weight(self, pwd):
         if pwd in self.pwd_freqs:
             return self.pwd_freqs[pwd]
@@ -595,7 +583,6 @@ class TriePreprocessor(BasePreprocessor):
     def __init__(self, config = ModelDefaults()):
         super().__init__(config)
         self.instances = 0
-        self._total_size = 0
         self.trie = BaseTrie.fromConfig(config)
 
     def preprocess(self, pwd_list):
@@ -609,8 +596,6 @@ class TriePreprocessor(BasePreprocessor):
             self.instances += len(pwd) + 1
             self.trie.increment(pwd + PASSWORD_END, weight)
             chunk += 1
-        self._total_size = math.ceil(
-            self.trie.size() / self.config.training_chunk)
         logging.info('Saving preprocessing step...')
         TrieSerializer.fromConfig(self.config).serialize(self.trie)
         self.reset()
@@ -620,14 +605,9 @@ class TriePreprocessor(BasePreprocessor):
             self.trie.increment(x[i] + y[i], w[i])
             self.instances += 1
 
-    def total_chunks(self):
-        logging.warning('Total size is in accurate')
-        return self._total_size
-
     def reset(self):
         self.current_generator = self.trie.iterate(
             self.config.trie_serializer_type)
-        self._total_size = 0
 
         if self.config.randomize_training_order:
             self.current_generator = list(self.current_generator)
@@ -656,8 +636,6 @@ class DiskPreprocessor(TriePreprocessor):
             trie_file, self.config.max_len,
             self.config.trie_serializer_encoding)
         self.reset()
-        self._total_chunks = math.ceil(
-            self.serializer.num_records() / self.config.training_chunk)
 
     def reset(self):
         self.current_generator = self.serializer.deserialize()
@@ -753,7 +731,6 @@ class Trainer(object):
     def train_model_generation(self):
         self.chunk = 0
         self.pwd_list.reset()
-        logging.info('Total chunks %s', self.pwd_list.total_chunks())
         accuracy_accum = []
         x_all, y_all, w_all = self.next_train_set_as_np()
         chunk = 0
@@ -763,8 +740,8 @@ class Trainer(object):
                 x_all, y_all, w_all)
             accuracy_accum += [(len(x_all), te_acc)]
             if chunk % self.config.chunk_print_interval == 0:
-                logging.info('Chunk %s of %s. Each chunk is size %s',
-                             chunk, self.pwd_list.total_chunks(), len(x_all))
+                logging.info('Chunk %s. Each chunk is size %s',
+                             chunk, len(x_all))
                 logging.info('Train loss %s. Test loss %s. Test accuracy %s.',
                              tr_loss, te_loss, te_acc)
             x_all, y_all, w_all = self.next_train_set_as_np()
