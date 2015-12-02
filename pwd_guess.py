@@ -57,7 +57,6 @@ class ModelSerializer(object):
         self.model_creator_from_json = model_from_json
 
     def save_model(self, model):
-        globals()['most_recent_model'] = model
         if self.archfile is None or self.weightfile is None:
             logging.info(
                 'Cannot save model because file arguments were not provided')
@@ -439,29 +438,22 @@ def init_logging(args, config):
     logging.info('Configuration %s', json.dumps(config.as_dict(), indent = 4))
 
 def train(args, config):
-    global trained_model
     if args['tsv']:
         input_const = TsvList
     else:
         input_const = PwdList
-    ilist = input_const(args['pwd_file']).as_list()
     filt = Filterer(config)
-    if args['test_input']:
-        logging.info('filtering only...')
-        filt.filter_test(ilist)
-    else:
-        logging.info('Starting training...')
-        plist = list(filt.filter(ilist))
-        logging.info('Done reading passwords...')
-        if len(plist) == 0:
-            logging.error('Empty training set! Quiting...')
-            sys.exit(1)
-        logging.info('Saving model')
-        trainer = Trainer(plist, config)
-        trainer.train(ModelSerializer(args['arch_file'], args['weight_file']))
-        if args['enumerate_ofile']:
-            Guesser.do_guessing(trainer.model, config, args['enumerate_ofile'])
+    logging.info('Reading training set...')
+    plist = list(filt.filter(input_const(args['pwd_file']).as_list()))
     logging.info('Filtered %s of %s passwords', filt.filtered_out, filt.total)
+    logging.info('Done reading passwords...')
+    if len(plist) == 0:
+        logging.error('Empty training set! Quiting...')
+        sys.exit(1)
+    trainer = Trainer(plist, config)
+    trainer.train(ModelSerializer(args['arch_file'], args['weight_file']))
+    if args['enumerate_ofile']:
+        Guesser.do_guessing(trainer.model, config, args['enumerate_ofile'])
 
 def guess(args, config):
     logging.info('Loading model...')
@@ -506,9 +498,6 @@ def make_parser():
                         help=('Input file from --pwd-file is in TSV format. '
                               'The first column of the TSV should be the'
                               ' password. '))
-    parser.add_argument('--test-input', action='store_true', help=(
-        'Test if the password input is valid and print to stderr errors. Will'
-        ' not train the neural network. '))
     parser.add_argument('--enumerate-ofile',
                         help = 'Enumerate guesses output file')
     parser.add_argument('--config', help = 'Config file in json. ')
