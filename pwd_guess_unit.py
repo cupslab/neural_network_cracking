@@ -1621,6 +1621,8 @@ class PasswordTemplateSerializerTest(unittest.TestCase):
                     0.06666666666666667, 0.16666666666666666, .05, .05, .2])
 
 class RandomWalkGuesserTest(unittest.TestCase):
+    expected_class = pwd_guess.RandomWalkGuesser
+
     def setUp(self):
         self.tempf = tempfile.NamedTemporaryFile(delete = False)
 
@@ -1629,15 +1631,19 @@ class RandomWalkGuesserTest(unittest.TestCase):
         if os.path.exists(self.tempf.name):
             os.remove(self.tempf.name)
 
+    def make_builder(self, config):
+        config.guess_serialization_method = 'random_walk'
+        return pwd_guess.GuesserBuilder(config)
+
     def test_create(self):
-        builder = pwd_guess.GuesserBuilder(pwd_guess.ModelDefaults(
+        builder = self.make_builder(pwd_guess.ModelDefaults(
             parallel_guessing = False,
             guess_serialization_method = 'random_walk'))
         mock_model = Mock()
         mock_model.predict = mock_predict_smart_parallel
         builder.add_model(mock_model).add_file(self.tempf.name)
         guesser = builder.build()
-        self.assertEqual(pwd_guess.RandomWalkGuesser, type(guesser))
+        self.assertEqual(self.expected_class, type(guesser))
 
     def test_seed_data(self):
         config = pwd_guess.ModelDefaults(
@@ -1645,7 +1651,7 @@ class RandomWalkGuesserTest(unittest.TestCase):
             char_bag = 'ab\n',
             random_walk_seed_num = 2,
             guess_serialization_method = 'random_walk')
-        builder = pwd_guess.GuesserBuilder(config)
+        builder = self.make_builder(config)
         mock_model = Mock()
         mock_model.predict = mock_predict_smart_parallel
         builder.add_model(mock_model).add_file(self.tempf.name)
@@ -1658,7 +1664,7 @@ class RandomWalkGuesserTest(unittest.TestCase):
             parallel_guessing = False,
             char_bag = 'ab\n',
             guess_serialization_method = 'random_walk')
-        builder = pwd_guess.GuesserBuilder(config)
+        builder = self.make_builder(config)
         mock_model = Mock()
         mock_model.predict = mock_predict_smart_parallel
         builder.add_model(mock_model).add_file(self.tempf.name)
@@ -1681,7 +1687,7 @@ class RandomWalkGuesserTest(unittest.TestCase):
                 relevel_not_matching_passwords = True,
                 guess_serialization_method = 'random_walk')
             self.assertTrue(pwd_guess.Filterer(config).pwd_is_valid('aaa'))
-            builder = pwd_guess.GuesserBuilder(config)
+            builder = self.make_builder(config)
             mock_model = Mock()
             mock_model.predict = mock_predict_smart_parallel_skewed
             builder.add_model(mock_model).add_file(self.tempf.name)
@@ -1695,7 +1701,11 @@ class RandomWalkGuesserTest(unittest.TestCase):
                     pwd, prob, gn, *_ = row
                     self.assertTrue(pwd == 'aaa' or pwd == 'bbb')
                     self.assertEqual(prob, '0.008' if pwd == 'aaa' else '0.512')
-                    self.assertAlmostEqual(float(gn), 8 if pwd == 'aaa' else 1, delta = 2)
+                    self.assertAlmostEqual(
+                        float(gn), 8 if pwd == 'aaa' else 1, delta = 2)
+
+    TEST_GUESS_WIDE_EXPECTED_AAAA = 50
+    TEST_GUESS_WIDE_EXPECTED_BBBBA = 15
 
     def test_guess_wide(self):
         with tempfile.NamedTemporaryFile(mode = 'w') as gf:
@@ -1710,7 +1720,7 @@ class RandomWalkGuesserTest(unittest.TestCase):
                 relevel_not_matching_passwords = True,
                 guess_serialization_method = 'random_walk')
             self.assertTrue(pwd_guess.Filterer(config).pwd_is_valid('aaa'))
-            builder = pwd_guess.GuesserBuilder(config)
+            builder = self.make_builder(config)
             mock_model = Mock()
             mock_model.predict = mock_predict_smart_parallel_skewed
             builder.add_model(mock_model).add_file(self.tempf.name)
@@ -1723,8 +1733,12 @@ class RandomWalkGuesserTest(unittest.TestCase):
                 for row in reader:
                     pwd, prob, gn, *_ = row
                     self.assertTrue(pwd == 'aaaa' or pwd == 'bbbba')
-                    self.assertEqual(prob, '0.0004' if pwd == 'aaaa' else '0.02048')
-                    self.assertAlmostEqual(float(gn), 50 if pwd == 'aaaa' else 15, delta = 2)
+                    self.assertEqual(
+                        prob, '0.0004' if pwd == 'aaaa' else '0.02048')
+                    self.assertAlmostEqual(
+                        float(gn),
+                        (self.TEST_GUESS_WIDE_EXPECTED_AAAA if pwd == 'aaaa'
+                         else self.TEST_GUESS_WIDE_EXPECTED_BBBBA), delta = 2)
 
     def test_guess_simulated(self):
         with tempfile.NamedTemporaryFile(mode = 'w') as gf, \
@@ -1754,7 +1768,7 @@ class RandomWalkGuesserTest(unittest.TestCase):
             config.set_intermediate_info(
                 'end_character_frequencies', freqs)
             self.assertTrue(pwd_guess.Filterer(config).pwd_is_valid('aaa'))
-            builder = pwd_guess.GuesserBuilder(config)
+            builder = self.make_builder(config)
             mock_model = Mock()
             mock_model.predict = mock_predict_smart_parallel_skewed
             builder.add_model(mock_model).add_file(self.tempf.name)
@@ -1767,8 +1781,70 @@ class RandomWalkGuesserTest(unittest.TestCase):
                 for row in reader:
                     pwd, prob, gn, *_ = row
                     self.assertTrue(pwd == 'aaaa' or pwd == 'bbbBa')
-                    self.assertEqual(prob, '0.00016384' if pwd == 'aaaa' else '0.0016777216')
-                    self.assertAlmostEqual(float(gn), 397 if pwd == 'aaaa' else 137, delta = 20)
+                    self.assertEqual(
+                        prob, '0.00016384' if pwd == 'aaaa' else '0.0016777216')
+                    self.assertAlmostEqual(
+                        float(gn), 397 if pwd == 'aaaa' else 137, delta = 20)
+
+class DelAmicoRandomWalkTest(RandomWalkGuesserTest):
+    expected_class = pwd_guess.RandomWalkDelAmico
+
+    TEST_GUESS_WIDE_EXPECTED_AAAA = 49
+    TEST_GUESS_WIDE_EXPECTED_BBBBA = 10
+
+    def make_builder(self, config):
+        config.guess_serialization_method = 'delamico_random_walk'
+        return pwd_guess.GuesserBuilder(config)
+
+    def test_create(self):
+        with tempfile.NamedTemporaryFile(mode = 'w') as pwdfile:
+            pwdfile.write('aaaaa\nbbbbb\n')
+            pwdfile.flush()
+            builder = self.make_builder(pwd_guess.ModelDefaults(
+                parallel_guessing = False, char_bag = 'ab\n',
+                password_test_fname = pwdfile.name,
+                guess_serialization_method = 'random_walk'))
+            mock_model = Mock()
+            mock_model.predict = mock_predict_smart_parallel
+            builder.add_model(mock_model).add_file(self.tempf.name)
+            guesser = builder.build()
+            self.assertEqual(self.expected_class, type(guesser))
+
+    def test_seed_data(self):
+        with tempfile.NamedTemporaryFile(mode = 'w') as pwdfile:
+            pwdfile.write('aaaaa\nbbbbb\n')
+            pwdfile.flush()
+            config = pwd_guess.ModelDefaults(
+                parallel_guessing = False, char_bag = 'ab\n',
+                random_walk_seed_num = 2,
+                password_test_fname = pwdfile.name,
+                guess_serialization_method = 'random_walk')
+            builder = self.make_builder(config)
+            mock_model = Mock()
+            mock_model.predict = mock_predict_smart_parallel
+            builder.add_model(mock_model).add_file(self.tempf.name)
+            guesser = builder.build()
+            g = list(guesser.seed_data())
+            self.assertEqual(g, [('', 1, 1, 0), ('', 1, 1, 0)])
+
+    def test_next_nodes(self):
+        with tempfile.NamedTemporaryFile(mode = 'w') as pwdfile:
+            pwdfile.write('aaaaa\nbbbbb\n')
+            pwdfile.flush()
+            config = pwd_guess.ModelDefaults(
+                parallel_guessing = False,
+                char_bag = 'ab\n',
+                password_test_fname = pwdfile.name,
+                guess_serialization_method = 'random_walk')
+            builder = self.make_builder(config)
+            mock_model = Mock()
+            mock_model.predict = mock_predict_smart_parallel
+            builder.add_model(mock_model).add_file(self.tempf.name)
+            guesser = builder.build()
+            next = generator.next_nodes_random_walk(
+                guesser, 'aa', .5, np.array([.5, .25, .25]))
+            self.assertEqual(list(next), [
+                ('aa\n', .25, .5), ('aaa', .125, .25), ('aab', .125, .25)])
 
 class ParallelRandomWalkGuesserTest(unittest.TestCase):
     def setUp(self):

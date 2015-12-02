@@ -1233,6 +1233,9 @@ class Filterer(object):
         return filter(lambda x: self.pwd_is_valid(x[0]), alist)
 
 class GuessSerializer(object):
+    TOTAL_COUNT_RE = re.compile('Total count: (\d*)\n')
+    TOTAL_COUNT_FORMAT = 'Total count: %s\n'
+
     def __init__(self, ostream):
         self.ostream = ostream
         self.total_guessed = 0
@@ -1252,6 +1255,9 @@ class GuessSerializer(object):
         logging.info('Finishing aggregating child output')
         real_output.flush()
 
+    def get_stats(self):
+        raise NotImplementedError()
+
     def finish(self):
         self.ostream.flush()
         self.ostream.close()
@@ -1269,18 +1275,17 @@ class DelegatingSerializer(object):
     def get_total_guessed(self):
         return self.serializer.get_total_guessed()
 
+    def get_stats(self):
+        return self.serializer.get_stats()
+
     def finish(self):
         self.serializer.finish()
 
 class GuessNumberGenerator(GuessSerializer):
-    TOTAL_COUNT_RE = re.compile('Total count: (\d*)\n')
-    TOTAL_COUNT_FORMAT = 'Total count: %s\n'
-
     def __init__(self, ostream, pwd_list):
         super().__init__(ostream)
         self.pwds, self.probs = zip(*sorted(pwd_list, key = lambda x: x[1]))
         self.guess_numbers = [0] * len(self.pwds)
-        self.total_guessed = 0
         self.collected_freqs = collections.defaultdict(int)
         self.collected_probs = {}
         self.collected_total_count = 0
@@ -1600,6 +1605,9 @@ class Guesser(object):
         if self.config.guess_serialization_method == 'calculator':
             answer = serializer_factory(
                 self.ostream, self.calculate_probs_from_file())
+        elif self.config.guess_serialization_method == 'delamico_random_walk':
+            answer = serializer_factory(
+                self.ostream, self.calculate_probs_from_file(), self.config)
         else:
             answer = serializer_factory(self.ostream)
         if self.config.enforced_policy != 'basic':
@@ -1744,33 +1752,41 @@ class RandomWalkGuesser(Guesser):
         self.enforced_policy = self.config.enforced_policy != 'basic'
         if self.enforced_policy:
             self.policy = BasePasswordPolicy.fromConfig(self.config)
+        self.expander = self.output_serializer
+
+    def spinoff_node(self, node):
+        pwd, _, d_accum, cost_fn = node
+        self.estimates.append(cost_fn)
+
+    def add_to_next_node(self, cur_node, next_node):
+        astring, _, d_accum, cost_accum = cur_node
+        pwd, prob, pred = next_node
+        d_accum_next = d_accum / pred
+        return (pwd, prob, d_accum_next, (
+            cost_accum + d_accum_next * self.cost_of_node(pwd)))
 
     def super_node_recur(self, node_list):
         real_node_list = []
-        done_node_list = []
         for node in node_list:
-            pwd, _, d_accum, cost_fn = node
+            pwd, *_ = node
             if len(pwd) <= self.max_len:
                 real_node_list.append(node)
             elif len(pwd) > self.max_len and pwd[-1] == PASSWORD_END:
-                self.estimates.append(cost_fn)
+                self.spinoff_node(node)
         if len(real_node_list) == 0:
             return
         pwd_list = list(self.extract_pwd_from_node(real_node_list))
         predictions = self.batch_prob(pwd_list)
         next_nodes = []
         for i, cur_node in enumerate(real_node_list):
-            astring, prob, d_accum, cost_accum = cur_node
+            astring, prob, *_ = cur_node
             poss_next = generator.next_nodes_random_walk(
                 self, astring, prob, predictions[i][0])
             if len(poss_next) == 0:
-                self.estimates.append(cost_accum)
+                self.spinoff_node(cur_node)
                 continue
-            pwd, prob, pred = self.choose_next_node(poss_next)
-            d_accum_next = d_accum / pred
-            cost_next = (
-                cost_accum + d_accum_next * self.cost_of_node(pwd, prob))
-            next_nodes.append((pwd, prob, d_accum_next, cost_next))
+            next_nodes.append(self.add_to_next_node(
+                cur_node, self.choose_next_node(poss_next)))
         if len(next_nodes) != 0:
             self.super_node_recur(next_nodes)
 
@@ -1784,7 +1800,7 @@ class RandomWalkGuesser(Guesser):
             upto += cond_prob
         assert False, "Shouldn't go here"
 
-    def cost_of_node(self, pwd, prob):
+    def cost_of_node(self, pwd):
         if len(pwd) == 0 or pwd[-1] != PASSWORD_END:
             return 0
         if self.enforced_policy:
@@ -1832,6 +1848,89 @@ class RandomWalkGuesser(Guesser):
         pwds_probs = list(self.calculate_probs_from_file())
         logging.info('Beginning probabilities: %s', pwds_probs)
         self.random_walk(pwds_probs)
+
+class RandomWalkDelAmico(RandomWalkGuesser):
+    def spinoff_node(self, node):
+        pwd, prob = node
+        self.output_serializer.serialize(pwd, prob)
+
+    def make_serializer(self):
+        self.config.lower_probability_threshold = 0
+        temp = self.should_make_guesses_rare_char_optimizer
+        self.should_make_guesses_rare_char_optimizer = False
+        answer = super().make_serializer()
+        self.should_make_guesses_rare_char_optimizer = temp
+        return answer
+
+    def add_to_next_node(self, cur_node, next_node):
+        return next_node[0], next_node[1]
+
+    def keep_going(self):
+        for item in self.output_serializer.get_stats():
+            if item[-1] > (item[2] * .01 * (
+                    self.config.random_walk_confidence_percent)):
+                return True
+        return False
+
+    def random_walk(self, probs):
+        num = 0
+        if self.should_make_guesses_rare_char_optimizer:
+            self.expander = PasswordTemplateSerializer(self.config)
+        self.lower_probability_threshold = 0
+        self.super_node_recur(list(self.seed_data()))
+        while self.keep_going() and num < self.config.random_walk_upper_bound:
+            self.super_node_recur(list(self.seed_data()))
+            num += 1
+
+class DelAmicoCalculator(GuessSerializer):
+    def __init__(self, ostream, pwd_list, config):
+        super().__init__(ostream)
+        self.pwds, self.probs = zip(*sorted(pwd_list, key = lambda x: x[1]))
+        self.guess_numbers = []
+        for _ in range(len(self.pwds)):
+            self.guess_numbers.append([])
+        self.random_walk_confidence_bound_z_value = (
+            config.random_walk_confidence_bound_z_value)
+
+    def serialize(self, pwd, prob):
+        self.total_guessed += 1
+        idx = bisect.bisect_left(self.probs, prob) - 1
+        if idx >= 0:
+            self.guess_numbers[idx].append(prob)
+
+    def get_stats(self):
+        out_guess_numbers = [0] * len(self.guess_numbers)
+        out_variance = [0] * len(self.guess_numbers)
+        out_stdev = [0] * len(self.guess_numbers)
+        out_error = [0] * len(self.guess_numbers)
+        num_guess = self.get_total_guessed()
+        guess_nums = list(map(lambda items: list(
+            map(lambda x: 1/x, items)), self.guess_numbers))
+        for i in range(len(self.guess_numbers)):
+            out_guess_numbers[i] = sum(guess_nums[i]) / num_guess
+        for j in range(len(out_guess_numbers) - 1, 0, -1):
+            out_guess_numbers[j - 1] += out_guess_numbers[j]
+        for i in range(len(self.guess_numbers)):
+            out_variance[i] = (sum(map(
+                lambda e: (e - out_guess_numbers[i])**2, guess_nums[i])) /
+                               num_guess)
+        for i in range(len(self.guess_numbers)):
+            out_stdev[i] = math.sqrt(out_variance[i])
+            out_error[i] = self.random_walk_confidence_bound_z_value * (
+                out_stdev[i] / math.sqrt(num_guess))
+        for i in range(len(self.pwds), 0, -1):
+            idx = i - 1
+            yield [
+                self.pwds[idx], self.probs[idx], out_guess_numbers[idx],
+                out_stdev[idx], num_guess, out_error[idx]]
+
+    def finish(self):
+        logging.info('Guessed %s passwords', self.get_total_guessed())
+        writer = csv.writer(self.ostream, delimiter = '\t', quotechar = None)
+        for item in self.get_stats():
+            writer.writerow(item)
+        self.ostream.flush()
+        self.ostream.close()
 
 class GuesserBuilderError(Exception): pass
 
@@ -1889,8 +1988,12 @@ class GuesserBuilder(object):
             raise GuesserBuilderError('Cannot build without ostream')
         assert self.config is not None
         class_builder = ParallelGuesser if self.parallel else Guesser
-        if self.config.guess_serialization_method == 'random_walk':
-            class_builder = RandomWalkGuesser
+        if (self.config.guess_serialization_method == 'random_walk' or
+            self.config.guess_serialization_method == 'delamico_random_walk'):
+            if self.config.guess_serialization_method == 'random_walk':
+                class_builder = RandomWalkGuesser
+            else:
+                class_builder = RandomWalkDelAmico
             if self.parallel:
                 class_builder = ParallelRandomWalker
         if self.seed_probs is not None:
@@ -2115,7 +2218,8 @@ log_level_map = {
 serializer_type_list = {
     'human' : GuessSerializer,
     'calculator' : GuessNumberGenerator,
-    'random_walk' : RandomWalkSerializer
+    'random_walk' : RandomWalkSerializer,
+    'delamico_random_walk' : DelAmicoCalculator
 }
 
 def get_version_string():

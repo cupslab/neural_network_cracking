@@ -11,7 +11,7 @@ def next_nodes_random_walk(
     cdef np.ndarray[np.double_t, ndim = 1] conditional_predictions
     if self.should_make_guesses_rare_char_optimizer:
         conditional_predictions = (
-            self.output_serializer.expand_conditional_probs(
+            self.expander.expand_conditional_probs(
                 prediction, astring))
     else:
         conditional_predictions = prediction
