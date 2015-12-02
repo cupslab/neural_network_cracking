@@ -805,7 +805,7 @@ class HybridDiskPreprocessor(TriePreprocessor):
                         yield (item[0], int(item[1]))
 
     def preprocess(self, pwd_list):
-        if (self.config.trie_intermediate_storage == ':memory:' and
+        if (self.config.trie_intermediate_storage == ':memory:' or
             not self.config.preprocess_trie_on_disk):
             out_pwd_list = HybridDiskPreprocessor.MemoryCache()
         else:
