@@ -1261,7 +1261,9 @@ class ParallelGuesser(Guesser):
         # conditions
         if not os.path.exists(self.config.guesser_intermediate_directory):
             os.mkdir(self.config.guesser_intermediate_directory)
-        pool = mp.Pool(min(len(arg_list), mp.cpu_count()))
+        pool = mp.Pool(min(len(arg_list), mp.cpu_count()),
+                       # Important to free resources
+                       maxtasksperchild = 1)
         result = pool.map_async(self.fork_starter, arg_list)
         try:
             pool.close()
