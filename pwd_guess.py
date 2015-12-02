@@ -1039,11 +1039,13 @@ class Filterer(object):
         self.max_len = config.max_len
         self.min_len = config.min_len
 
-    def pwd_is_valid(self, pwd):
+    def pwd_is_valid(self, pwd, quick = False):
         pwd = pwd.strip(PASSWORD_END)
         answer = (all(map(lambda c: c in self.char_bag, pwd)) and
                   len(pwd) <= self.max_len and
                   len(pwd) >= self.min_len)
+        if quick:
+            return answer
         if answer:
             self.total_characters += len(pwd)
             for c in pwd:
@@ -1175,12 +1177,14 @@ class Guesser(object):
         return preds[self.ctable.get_char_index(char)]
 
     def relevel_prediction(self, preds, astring):
-        if not self.filterer.pwd_is_valid(astring):
+        if not self.filterer.pwd_is_valid(astring, quick = True):
             preds[self.ctable.get_char_index(PASSWORD_END)] = 0
         elif len(astring) == self.max_len:
-            for c in self.ctable.chars:
-                preds[self.ctable.get_char_index(c)] = (
-                    1 if c == PASSWORD_END else 0)
+            multiply = np.zeros(len(preds))
+            pwd_end_idx = self.ctable.get_char_index(PASSWORD_END)
+            multiply[pwd_end_idx] = 1
+            preds[pwd_end_idx] = 1
+            preds = np.multiply(preds, multiply, preds)
         sum_per = sum(preds)
         for i, v in enumerate(preds):
             preds[i] = v / sum_per
@@ -1201,6 +1205,7 @@ class Guesser(object):
         answer = self.model.predict(self.ctable.encode_many(astring_list),
                                     verbose = 0)
         if self.relevel_not_matching_passwords:
+            answer = np.array(answer)
             self.relevel_prediction_many(answer, astring_list)
         return answer
 
@@ -1213,9 +1218,10 @@ class Guesser(object):
                 self.generated += 1
             return
         prediction = self._conditional_probs(astring, cache)
+        total_preds = np.array(prediction) * prob
         for char in self.ctable.chars:
             chain_pass = astring + char
-            chain_prob = self.cond_prob_from_preds(char, prediction) * prob
+            chain_prob = total_preds[self.ctable.get_char_index(char)]
             if (char == PASSWORD_END and
                 chain_prob >= self.lower_probability_threshold):
                 self.output_serializer.serialize(chain_pass, chain_prob)

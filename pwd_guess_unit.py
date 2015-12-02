@@ -825,21 +825,29 @@ aaa	0.0625
             min_len = 3, max_len = 3, char_bag = 'a\n',
             lower_probability_threshold = 10**-1)
         guesser, ostream = self.make(config, [0.5, 0.5])
-        self.assertEqual([0.0, 1.0], guesser.conditional_probs(''))
-        self.assertEqual([0.0, 1.0], guesser.conditional_probs('a'))
-        self.assertEqual([0.0, 1.0], guesser.conditional_probs('aa'))
-        self.assertEqual([1.0, 0.0], guesser.conditional_probs('aaa'))
+        np.testing.assert_array_equal([0.0, 1.0], guesser.conditional_probs(''))
+        np.testing.assert_array_equal(
+            [0.0, 1.0], guesser.conditional_probs('a'))
+        np.testing.assert_array_equal(
+            [0.0, 1.0], guesser.conditional_probs('aa'))
+        np.testing.assert_array_equal(
+            [1.0, 0.0], guesser.conditional_probs('aaa'))
 
     def test_relevel_tri_alpha(self):
         config = pwd_guess.ModelDefaults(
             min_len = 3, max_len = 3, char_bag = 'ab\n',
             lower_probability_threshold = 10**-1)
         guesser, ostream = self.make(config, [0.5, 0.2, 0.3])
-        self.assertEqual([0.0, .4, .6], guesser.conditional_probs(''))
-        self.assertEqual([0.0, .4, .6], guesser.conditional_probs('a'))
-        self.assertEqual([0.0, .4, .6], guesser.conditional_probs('aa'))
-        self.assertEqual([0.0, .4, .6], guesser.conditional_probs('ab'))
-        self.assertEqual([1.0, 0.0, 0.0], guesser.conditional_probs('aaa'))
+        np.testing.assert_array_equal(
+            [0.0, .4, .6], guesser.conditional_probs(''))
+        np.testing.assert_array_equal(
+            [0.0, .4, .6], guesser.conditional_probs('a'))
+        np.testing.assert_array_equal(
+            [0.0, .4, .6], guesser.conditional_probs('aa'))
+        np.testing.assert_array_equal(
+            [0.0, .4, .6], guesser.conditional_probs('ab'))
+        np.testing.assert_array_equal(
+            [1.0, 0.0, 0.0], guesser.conditional_probs('aaa'))
 
     def test_relevel_tri_alpha_calculator(self):
         distribution = [0.5, 0.2, 0.3]
@@ -865,12 +873,16 @@ aaa	0.0625
                        .add_model(mock_model).add_file(gfile.name).build())
             self.assertEqual(type(guesser.output_serializer),
                              pwd_guess.GuessNumberGenerator)
-            self.assertEqual([0.0, .4, .6], guesser.conditional_probs(''))
-            self.assertEqual([0.0, .4, .6], guesser.conditional_probs('a'))
-            self.assertEqual([0.0, .4, .6], guesser.conditional_probs('aa'))
-            self.assertEqual([0.0, .4, .6], guesser.conditional_probs('ab'))
-            self.assertEqual([1.0, 0.0, 0.0],
-                             guesser.conditional_probs('aaa'))
+            np.testing.assert_array_equal(
+                [0.0, .4, .6], guesser.conditional_probs(''))
+            np.testing.assert_array_equal(
+                [0.0, .4, .6], guesser.conditional_probs('a'))
+            np.testing.assert_array_equal(
+                [0.0, .4, .6], guesser.conditional_probs('aa'))
+            np.testing.assert_array_equal(
+                [0.0, .4, .6], guesser.conditional_probs('ab'))
+            np.testing.assert_array_equal(
+                [1.0, 0.0, 0.0], guesser.conditional_probs('aaa'))
             guesser.complete_guessing()
             # IMPORTANT: This distribution should give a guess count of 4 for
             # baa. However, due to floating point rounding error in python, this
@@ -879,8 +891,8 @@ aaa	0.0625
             # This example is fairly sensitive to floating point rounding error
             self.assertEqual("""Total count: 8
 abb	0.144	1
-aab	0.09600000000000002	4
-aaa	0.06400000000000002	7
+aab	0.096	4
+aaa	0.064	7
 """, gfile.read())
 
     def test_do_guessing(self):
