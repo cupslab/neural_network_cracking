@@ -1219,9 +1219,9 @@ class Guesser(object):
     def super_node_recur(self, node_list):
         stack = node_list[:]
         while len(stack) > 0:
-            logging.info('Super node buffer size %s, guess number %s',
-                         self.generated)
             first_chunk = stack[:self.chunk_size_guesser]
+            logging.info('Super node buffer size %s, guess number %s',
+                         len(first_chunk), self.generated)
             stack = stack[self.chunk_size_guesser:]
             stack = list(self.handle_nodes(first_chunk)) + stack
 
