@@ -13,7 +13,6 @@ import sys
 import argparse
 import itertools
 import string
-import math
 import gzip
 import csv
 import logging
@@ -23,9 +22,7 @@ import random
 import multiprocessing
 import tempfile
 import subprocess as subp
-import io
 import collections
-import sqlite3
 import struct
 import os.path
 
