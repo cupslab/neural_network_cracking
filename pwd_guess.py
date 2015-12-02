@@ -20,7 +20,7 @@ import logging
 import cProfile
 import json
 import random
-import multiprocessing
+import multiprocessing as mp
 import tempfile
 import subprocess as subp
 import collections
@@ -508,6 +508,8 @@ class ModelDefaults(object):
     toc_chunk_size = 1000
     model_truncate_gradient = -1
     model_optimizer = 'adam'
+    guesser_intermediate_directory = 'guesser_files'
+    cleanup_guesser_files = True
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -1017,6 +1019,10 @@ class GuessSerializer(object):
         self.ostream.write('%s\t%s\n' % (
             password.strip(PASSWORD_END), prob))
 
+    def finish(self):
+        self.ostream.flush()
+        self.ostream.close()
+
     @staticmethod
     def fromConfig(config, ostream):
         if config.guess_serialization_method == 'human':
@@ -1058,7 +1064,7 @@ class Guesser(object):
             self.relevel_prediction(answer, astring.strip(PASSWORD_END))
         return answer
 
-    def recur(self, astring, prob):
+    def recur(self, astring = '', prob = 1):
         if prob < self.config.lower_probability_threshold:
             return
         if len(astring) > self.config.max_len:
@@ -1077,34 +1083,84 @@ class Guesser(object):
             elif char != PASSWORD_END:
                 self.recur(chain_pass, chain_prob)
 
-    def guess(self):
-        self.recur('', 1)
+    def guess(self, astring = '', prob = 1):
+        self.recur(astring, prob)
 
-    @staticmethod
-    def do_guessing(model, config, ofname, start = '', start_prob = 1):
-        ostream = open(ofname, 'w') if ofname != '-' else sys.stdout
+    def complete_guessing(self, start = '', start_prob = 1):
         logging.info('Enumerating guesses starting at %s, %s...',
                      start, start_prob)
-        guesser = Guesser(model, config, ostream)
-        guesser.recur(start, start_prob)
-        ostream.flush()
-        ostream.close()
-        logging.info('Generated %s guesses', guesser.generated)
-        return guesser.generated
+        self.guess(start, start_prob)
+        self.output_serializer.finish()
+        logging.info('Generated %s guesses', self.generated)
+        return self.generated
 
-def fork_starting_point(arguments):
-    model = ModelSerializer(*arguments['serializer']).load_model()
-    return ParallelGuesser.fork_entry_point(model, arguments)
+class GuesserBuilderError(Exception): pass
+
+class GuesserBuilder(object):
+    def __init__(self, config):
+        self.config = config
+        self.model = None
+        self.serializer = None
+        self.ostream = None
+        self.ofile_path = None
+        self.parallel = self.config.parallel_guessing
+
+    def add_model(self, model):
+        self.model = model
+        return self
+
+    def add_serializer(self, serializer):
+        self.serializer = serializer
+        return self
+
+    def add_stream(self, ostream):
+        self.ostream = ostream
+        return self
+
+    def add_file(self, ofname):
+        self.add_stream(open(ofname, 'w'))
+        self.ofile_path = ofname
+        return self
+
+    def add_temp_file(self):
+        intm_dir = self.config.guesser_intermediate_directory
+        handle, path = tempfile.mkstemp(dir=intm_dir)
+        self.ofile_path = path
+        return self.add_stream(os.fdopen(handle, 'w'))
+
+    def add_parallel_setting(self, setting):
+        self.parallel = setting
+        return self
+
+    def build(self):
+        if self.parallel:
+            model_or_serializer = self.serializer
+        else:
+            model_or_serializer = self.model
+            if self.serializer is not None and self.model is None:
+                model_or_serializer = self.serializer.load_model()
+        if model_or_serializer is None:
+            raise GuesserBuilderError('Cannot build without model')
+        if self.ostream is None:
+            raise GuesserBuilderError('Cannot build without ostream')
+        assert self.config is not None
+        class_builder = ParallelGuesser if self.parallel else Guesser
+        return class_builder(model_or_serializer, self.config, self.ostream)
+
+def fork_starting_point(args):
+    config_dict, serializer_args, node = args
+    return ParallelGuesser.fork_entry_point(
+        ModelSerializer(*serializer_args), ModelDefaults(**config_dict), node)
 
 class ParallelGuesser(Guesser):
     def __init__(self, serializer, config, ostream):
-        self.tempOstream = tempfile.NamedTemporaryFile(mode = 'w')
+        self.tempOstream = tempfile.NamedTemporaryFile(
+            mode = 'w', delete = False)
         model = serializer.load_model()
         super().__init__(model, config, self.tempOstream)
         self.fork_points = []
         self.intermediate_files = []
         self.serializer = serializer
-        self.forking_function = fork_starting_point
         self.real_output = ostream
         self.fork_starter = fork_starting_point
 
@@ -1114,62 +1170,61 @@ class ParallelGuesser(Guesser):
         else:
             super().recur(astring, prob)
 
-    def guess(self):
-        self.recur('', 1)
+    def guess(self, astring = '', prob = 1):
+        self.recur(astring, prob)
         self.do_forking()
 
     def prepare_argument_dict(self, node):
-        new_file = tempfile.NamedTemporaryFile()
-        self.intermediate_files.append(new_file)
-        return {
-            'config' : self.config.as_dict(),
-            'serializer' : [
+        return (self.config.as_dict(), [
                 self.serializer.archfile, self.serializer.weightfile],
-            'node' : node,
-            'ofile' : new_file.name
-        }
+                node)
 
     def arg_list(self):
         return list(map(self.prepare_argument_dict, self.fork_points))
 
-    def collect_answer(self):
-        streams = list(map(lambda n: open(n.name, 'r'),
-                           [self.tempOstream] + self.intermediate_files))
-        for stream in streams:
-            for line in stream:
-                self.real_output.write(line)
-            stream.close()
+    def collect_answer(self, file_name_list):
+        for file_name in file_name_list:
+            with open(file_name, 'r') as istream:
+                logging.info('Collecting guesses from %s', file_name)
+                for line in istream:
+                    self.real_output.write(line)
+            if self.config.cleanup_guesser_files:
+                os.remove(file_name)
+        if self.config.cleanup_guesser_files:
+            try:
+                os.rmdir(self.config.guesser_intermediate_directory)
+            except OSError as e:
+                logging.error('Cannot remove %s because it is not empty. ',
+                              self.config.guesser_intermediate_directory)
         self.real_output.flush()
 
     def do_forking(self):
         arg_list = self.arg_list()
-        pool = multiprocessing.Pool(
-            min(len(arg_list), multiprocessing.cpu_count()))
+        # Check that the path exists before forking otherwise there are race
+        # conditions
+        if not os.path.exists(self.config.guesser_intermediate_directory):
+            os.mkdir(self.config.guesser_intermediate_directory)
+        pool = mp.Pool(min(len(arg_list), mp.cpu_count()))
         result = pool.map_async(self.fork_starter, arg_list)
         try:
             pool.close()
             pool.join()
             answer = result.get(timeout = 1)
-            self.generated = sum(answer) + self.generated
-            self.collect_answer()
+            generated, files = zip(*answer)
+            self.generated = sum(generated) + self.generated
+            self.collect_answer(files)
         except KeyboardInterrupt as e:
-            logging.error('Received keyboard interrupt. Stopping processes...')
+            logging.error('Received keyboard interrupt. Stopping...')
             pool.terminate()
 
     @staticmethod
-    def fork_entry_point(model, arguments):
-        config = ModelDefaults(**arguments['config'])
-        return Guesser.do_guessing(model, config, arguments['ofile'],
-                                   arguments['node'][0], arguments['node'][1])
-
-    @staticmethod
-    def do_guessing(serializer, config, ofname):
-        ostream = open(ofname, 'w') if ofname != '-' else sys.stdout
-        logging.info('Enumerating guesses...')
-        guesser = ParallelGuesser(serializer, config, ostream)
-        guesser.guess()
-        logging.info('Generated %s guesses', guesser.generated)
-        return guesser.generated
+    def fork_entry_point(model, config, node):
+        builder = (GuesserBuilder(config).add_model(model).add_temp_file()
+                   .add_parallel_setting(False))
+        guesser = builder.build()
+        start_str, start_prob = node
+        guesser.complete_guessing(start_str, start_prob)
+        return guesser.generated, builder.ofile_path
 
 log_level_map = {
     'info' : logging.INFO,
@@ -1237,24 +1292,17 @@ def train(args, config):
         logging.info('Retraining model...')
         trainer.model = serializer.load_model()
     trainer.train(serializer)
-    if args['enumerate_ofile']:
-        if config.parallel_guessing:
-            ParallelGuesser.do_guessing(
-                serializer, config, args['enumerate_ofile'])
-        else:
-            Guesser.do_guessing(trainer.model, config, args['enumerate_ofile'])
+    (GuesserBuilder(config).add_serializer(serializer).add_model(trainer.model)
+     .add_file(args['enumerate_ofile'])).build().complete_guessing()
 
 def guess(args, config):
     logging.info('Loading model...')
     if args['arch_file'] is None or args['weight_file'] is None:
         logging.error('Architecture file or weight file not found. Quiting...')
         sys.exit(1)
-    serializer = ModelSerializer(args['arch_file'], args['weight_file'])
-    if config.parallel_guessing:
-        ParallelGuesser.do_guessing(serializer, config, args['enumerate_ofile'])
-    else:
-        Guesser.do_guessing(
-            serializer.load_model(), config, args['enumerate_ofile'])
+    (GuesserBuilder(config).add_serializer(
+        ModelSerializer(args['arch_file'], args['weight_file']))
+     .add_file(args['enumerate_ofile'])).build().complete_guessing()
 
 def read_config_args(args):
     config_arg_file = open(args['config_args'], 'r')

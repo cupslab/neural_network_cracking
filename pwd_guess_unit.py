@@ -808,17 +808,20 @@ aaa	0.0625
             relevel_not_matching_passwords = False)
         model = self.mock_model(config, [0.5, 0.5])
         with tempfile.NamedTemporaryFile() as fp:
-            pwd_guess.Guesser.do_guessing(model, config, fp.name)
+            (pwd_guess.GuesserBuilder(config).add_model(model).add_file(fp.name)
+             .build().complete_guessing())
             self.assertEqual("""	0.5
 a	0.25
 aa	0.125
 aaa	0.0625
 """, fp.read().decode('utf8'))
 
-def mock_fork_starter(arguments):
-    model = Mock()
-    model.predict = MagicMock(return_value = [[[0.5, 0.25, 0.25]]])
-    return pwd_guess.ParallelGuesser.fork_entry_point(model, arguments)
+def mock_fork_starter(args):
+    config_dict, serializer_args, node = args
+    mock_model = Mock()
+    mock_model.predict = MagicMock(return_value = [[[0.5, 0.25, 0.25]]])
+    return pwd_guess.ParallelGuesser.fork_entry_point(
+        mock_model, pwd_guess.ModelDefaults(**config_dict), node)
 
 class ParallelGuesserTest(unittest.TestCase):
     mock_model = Mock()
@@ -853,15 +856,11 @@ class ParallelGuesserTest(unittest.TestCase):
     def test_get_argument_dict(self):
         parallel_guesser = pwd_guess.ParallelGuesser(
             self.serializer, self.config, self.mock_output)
-        test_config = self.config.as_dict()
         prepared = parallel_guesser.prepare_argument_dict(['aa', 0.125])
-        self.assertEqual({
-            'config' : test_config,
-            'serializer' : [self.archfile.name, self.weightfile.name],
-            'node' : ['aa', 0.125],
-            'ofile' : prepared['ofile']
-        }, prepared)
-        self.assertTrue(type(prepared['ofile']) == str)
+        self.assertEqual((
+            self.config.as_dict(),
+            [self.archfile.name, self.weightfile.name],
+            ['aa', 0.125]), prepared)
 
     def test_forking(self):
         parallel_guesser = pwd_guess.ParallelGuesser(
@@ -872,7 +871,6 @@ class ParallelGuesserTest(unittest.TestCase):
                     csv.reader(io.StringIO(self.mock_output.getvalue()),
                                delimiter = '\t')]
         sort_freq = sorted(pwd_freq, key = lambda x: x[0])
-        self.assertEqual(8, parallel_guesser.generated)
         self.assertEqual([('aaa', .125),
                           ('aab', .125),
                           ('aba', .125),
@@ -881,6 +879,60 @@ class ParallelGuesserTest(unittest.TestCase):
                           ('bab', .125),
                           ('bba', .125),
                           ('bbb', .125)], sort_freq)
+        self.assertEqual(8, parallel_guesser.generated)
+
+class GuesserBuilderTest(unittest.TestCase):
+    def setUp(self):
+        self.tempf = tempfile.NamedTemporaryFile()
+
+    def tearDown(self):
+        if self.tempf is not None:
+            self.tempf.close()
+
+    def test_create(self):
+        pwd_guess.GuesserBuilder(pwd_guess.ModelDefaults())
+
+    def test_make_simple_guesser(self):
+        builder = pwd_guess.GuesserBuilder(
+            pwd_guess.ModelDefaults(parallel_guessing = False))
+        mock_model, mock_stream = Mock(), Mock()
+        builder.add_model(mock_model).add_stream(mock_stream)
+        guesser = builder.build()
+        self.assertNotEqual(guesser, None)
+        self.assertEqual(guesser.model, mock_model)
+        self.assertEqual(guesser.output_serializer.ostream, mock_stream)
+
+    def test_make_parallel_guesser(self):
+        builder = pwd_guess.GuesserBuilder(
+            pwd_guess.ModelDefaults(parallel_guessing = True))
+        mock_serializer, mock_stream, mock_model = Mock(), Mock(), Mock()
+        mock_serializer.load_model = MagicMock(return_value = mock_model)
+        builder.add_serializer(mock_serializer).add_stream(mock_stream)
+        guesser = builder.build()
+        self.assertNotEqual(guesser, None)
+        self.assertEqual(guesser.model, mock_model)
+        self.assertEqual(guesser.real_output, mock_stream)
+
+    def test_make_simple_guesser_file(self):
+        builder = pwd_guess.GuesserBuilder(
+            pwd_guess.ModelDefaults(parallel_guessing = False))
+        mock_model = Mock()
+        builder.add_model(mock_model).add_file(self.tempf.name)
+        guesser = builder.build()
+        self.assertNotEqual(guesser, None)
+        self.assertNotEqual(guesser.output_serializer.ostream, None)
+        self.assertEqual(guesser.model, mock_model)
+
+    def test_make_simple_guesser(self):
+        builder = pwd_guess.GuesserBuilder(
+            pwd_guess.ModelDefaults(parallel_guessing = True))
+        mock_serializer, mock_stream, mock_model = Mock(), Mock(), Mock()
+        mock_serializer.load_model = MagicMock(return_value = mock_model)
+        builder.add_serializer(mock_serializer).add_stream(mock_stream)
+        builder.add_parallel_setting(False)
+        guesser = builder.build()
+        self.assertNotEqual(guesser, None)
+        self.assertEqual(type(guesser), pwd_guess.Guesser)
 
 class PreprocessingStepTest(unittest.TestCase):
     base_config = {
