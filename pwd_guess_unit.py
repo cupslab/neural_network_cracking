@@ -900,6 +900,26 @@ aaab\t3""")
             shutil.rmtree('trie_intermediate')
             os.remove('trie_storage')
 
+    def test_trie_fuzzy_disk_intermediate(self):
+        self.assertFalse(os.path.exists('trie_storage'))
+        try:
+            self.assertEqual(self.do_preprocessing({
+                'simulated_frequency_optimization' : True,
+                'trie_implementation' : 'disk',
+                'trie_serializer_type' : 'fuzzy',
+                'trie_fname' : 'trie_storage',
+                'trie_intermediate_storage' : 'trie_intermediate'
+            }), 12)
+            self.assertFalse(os.path.exists(":memory:"))
+            pre = pwd_guess.BasePreprocessor.byFormat('im_trie',
+                                                      self.real_config)
+            pre.begin()
+            self.assertEqual(type(pre), pwd_guess.IntermediatePreprocessor)
+            self.assertEqual(12, pre.stats())
+        finally:
+            shutil.rmtree('trie_intermediate')
+            os.remove('trie_storage')
+
 if __name__ == '__main__':
     logging.basicConfig(level = logging.CRITICAL)
     unittest.main()

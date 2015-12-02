@@ -39,6 +39,9 @@ class BaseTrie(object):
     def iterate(self, serial_type):
         raise NotImplementedError()
 
+    def finish(self):
+        pass
+
     config_keys = {
         'trie' : lambda _: NodeTrie(),
         'disk' : lambda c: DiskBackedTrie(c),
@@ -104,6 +107,12 @@ class DiskBackedTrie(BaseTrie):
         self.weights = NodeTrie()
         self.keys = []
 
+    def finish(self):
+        self.close_branch()
+        self.config.set_intermediate_info('db_trie_keys', self.keys)
+        self.config.set_intermediate_info('db_trie_weights', self.weights)
+        logging.info('Finishing disk backed trie iteration')
+
     def make_serializer(self):
         return TrieSerializer.getFactory(self.config, True)(
             os.path.join(self.config.trie_intermediate_storage,
@@ -143,18 +152,28 @@ class DiskBackedTrie(BaseTrie):
                 yield (key + subitem[0], subitem[1])
 
     def iterate(self, serial_type):
-        self.close_branch()
+        self.finish()
         for c in self.weights.iterate(serial_type):
             yield c
         for s in self.iterate_subtrees(serial_type):
             yield s
         self.current_branch_key = None
 
+    @classmethod
+    def fromIntermediate(cls, config):
+        answer = cls(config)
+        answer.keys = config.get_intermediate_info('db_trie_keys')
+        answer.weights = config.get_intermediate_info('db_trie_weights')
+        return answer
+
 class TrieSerializer(object):
     def __init__(self, fname, max_len, encoding):
         self.fname = fname
         self.max_len = max_len
         self.encoding = encoding
+
+    def open_file(self, mode):
+        return gzip.open(self.fname, mode)
 
     def serialize(self, trie):
         directory = os.path.dirname(self.fname)
@@ -210,12 +229,11 @@ class NodeTrieSerializer(TrieSerializer):
         self.chunk_size = struct.calcsize(self.fmt)
 
     def do_serialize(self, trie):
-        with gzip.open(self.fname, 'wb') as afile:
+        with self.open_file('wb') as afile:
             for item in trie.iterate('reg'):
                 pwd, weight = item
                 afile.write(struct.pack(
-                    self.fmt, pwd.encode(self.encoding),
-                    weight))
+                    self.fmt, pwd.encode(self.encoding), weight))
 
     def load_one_record(self, somebytes):
         pwd, weight =  struct.unpack_from(self.fmt, somebytes)
@@ -224,7 +242,7 @@ class NodeTrieSerializer(TrieSerializer):
                 weight)
 
     def deserialize(self):
-        with gzip.open(self.fname, 'rb') as afile:
+        with self.open_file('rb') as afile:
             while True:
                 chunk = afile.read(self.chunk_size)
                 if chunk:
@@ -263,13 +281,13 @@ class TrieFuzzySerializer(TrieSerializer):
                 .strip(PASSWORD_FRAGMENT_DELIMITER), record)
 
     def do_serialize(self, trie):
-        with gzip.open(self.fname, 'wb') as afile:
+        with self.open_file('wb') as afile:
             for item in trie.iterate('fuzzy'):
                 pwd, records = item
                 self.write_record(afile, pwd, records)
 
     def deserialize(self):
-        with gzip.open(self.fname, 'rb') as afile:
+        with self.open_file('rb') as afile:
             while True:
                 answer = self.read_record(afile)
                 if answer is None:
@@ -515,6 +533,11 @@ class BasePreprocessor(object):
         None : lambda c: Preprocessor(c)
     }
 
+    format_keys = {
+        'trie' : lambda c: DiskPreprocessor(c),
+        'im_trie' : lambda c: IntermediatePreprocessor(c)
+    }
+
     @staticmethod
     def fromConfig(config):
         logging.info('Preprocessor type %s...', config.trie_implementation)
@@ -523,6 +546,12 @@ class BasePreprocessor(object):
                 config.trie_implementation](config)
         logging.error('Cannot find trie_implementation %s',
                       config.trie_implementation)
+
+    @staticmethod
+    def byFormat(pwd_format, config):
+        if pwd_format in BasePreprocessor.format_keys:
+            return BasePreprocessor.format_keys[pwd_format](config)
+        logging.error('Cannot find preprocessor from format %s', pwd_format)
 
 class Preprocessor(BasePreprocessor):
     def __init__(self, config = ModelDefaults()):
@@ -588,6 +617,7 @@ class TriePreprocessor(BasePreprocessor):
             pwd, weight = item
             self.instances += len(pwd) + 1
             self.trie.increment(pwd + PASSWORD_END, weight)
+        self.trie.finish()
         logging.info('Saving preprocessing step...')
         TrieSerializer.fromConfig(self.config).serialize(self.trie)
 
@@ -630,6 +660,11 @@ class DiskPreprocessor(TriePreprocessor):
 
     def set_iterator(self):
         self.current_generator = self.serializer.deserialize()
+
+class IntermediatePreprocessor(TriePreprocessor):
+    def begin(self, pwd_file = None):
+        logging.info('Loading trie intermediate representation...')
+        self.trie = DiskBackedTrie.fromIntermediate(self.config)
 
 class HybridDiskPreprocessor(TriePreprocessor):
     def preprocess(self, pwd_list):
@@ -955,19 +990,15 @@ def fork_starting_point(arguments):
 
 class ParallelGuesser(Guesser):
     def __init__(self, serializer, config, ostream):
+        self.tempOstream = tempfile.NamedTemporaryFile(mode = 'w')
+        model = serializer.load_model()
+        super().__init__(model, config, self.tempOstream)
         self.fork_points = []
         self.intermediate_files = []
         self.serializer = serializer
         self.forking_function = fork_starting_point
-        self.tempOstream = tempfile.NamedTemporaryFile(mode = 'w')
         self.real_output = ostream
         self.fork_starter = fork_starting_point
-        model = serializer.load_model()
-        super().__init__(model, config, self.tempOstream)
-        if self.config.fork_length > self.config.min_len:
-            logging.warning(('Fork length is greater than minimum password '
-                             'length. This may cause some passwords that should'
-                             ' be guessed to not show up in output. '))
 
     def recur(self, astring, prob):
         if len(astring) == self.config.fork_length:
@@ -1075,9 +1106,9 @@ def read_passwords(pwd_file, pwd_format, config):
     return plist
 
 def preprocessing(args, config):
-    if args['pwd_format'] == 'trie':
-        logging.info('Disk preprocessor')
-        disk_trie = DiskPreprocessor(config)
+    if args['pwd_format'] in BasePreprocessor.format_keys:
+        logging.info('Formatting preprocessor')
+        disk_trie = BasePreprocessor.byFormat(args['pwd_format'], config)
         disk_trie.begin(args['pwd_file'])
         return disk_trie
     preprocessor = BasePreprocessor.fromConfig(config)
@@ -1147,8 +1178,8 @@ def make_parser():
                         help = 'Output file for the model architecture. ')
     parser.add_argument('--weight-file',
                         help = 'Output file for the weights of the model. ')
-    parser.add_argument('--pwd-format', choices = ['trie', 'tsv', 'list'],
-                        default = 'list',
+    parser.add_argument('--pwd-format', default = 'list',
+                        choices = ['trie', 'tsv', 'list', 'im_trie'],
                         help = ('Format of pwd-file input. "list" format is one'
                                 'password per line. "tsv" format is tab '
                                 'separated values: first column is the '
