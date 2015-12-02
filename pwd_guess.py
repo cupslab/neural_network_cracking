@@ -1307,6 +1307,7 @@ class PasswordTemplateSerializer(object):
         self.chars = config.char_bag
         self.char_indices = ctable.char_indices
         self.post_image = ctable.rare_character_postimage
+        self.make_expander_cache()
 
     def lookup_in_cache(self, cache, template_char, character):
         return cache[template_char][character]
@@ -1333,16 +1334,23 @@ class PasswordTemplateSerializer(object):
         return self.lookup_in_cache(
             self.cache, template_char, character)
 
+    def make_expander_cache(self):
+        self.expander_cache = {}
+        for i, after_image_char in enumerate(self.chars):
+            if after_image_char not in self.post_image:
+                self.expander_cache[i] = self.char_indices[after_image_char]
+            else:
+                self.expander_cache[i] = self.char_indices[
+                    self.post_image[after_image_char]]
+
     def expand_conditional_probs(self, probs, context):
         answer = np.zeros(len(self.chars))
         for i, after_image_char in enumerate(self.chars):
-            if after_image_char not in self.post_image:
-                answer[i] = probs[self.char_indices[after_image_char]]
-            else:
-                post_image = self.post_image[after_image_char]
-                answer[i] = probs[self.char_indices[post_image]]
+            answer[i] = probs[self.expander_cache[i]]
+            if after_image_char in self.post_image:
                 answer[i] *= self.calc(
-                    post_image, after_image_char, context == '')
+                    self.post_image[after_image_char],
+                    after_image_char, context == '')
                 # TODO: relevel for the last character if the post image is
                 # PASSWORD_END
         return answer
@@ -1669,7 +1677,7 @@ class RandomWalkGuesser(Guesser):
             self.ostream.flush()
 
     def guess(self, pwd = '', prob = 1):
-        self.random_walk(self.calculate_probs_from_file())
+        self.random_walk(list(self.calculate_probs_from_file()))
 
 class GuesserBuilderError(Exception): pass
 
@@ -1807,8 +1815,8 @@ class ParallelGuesser(Guesser):
             try:
                 os.rmdir(self.config.guesser_intermediate_directory)
             except OSError as e:
-                logging.error('Cannot remove %s because it is not empty. ',
-                              self.config.guesser_intermediate_directory)
+                logging.warning('Cannot remove %s because it is not empty. ',
+                                self.config.guesser_intermediate_directory)
 
     @classmethod
     def subp_command(cls, argfname, logfile):
@@ -1934,7 +1942,7 @@ class ParallelRandomWalker(ParallelGuesser):
         builder = (GuesserBuilder(config).add_model(model)
                    .add_temp_file().add_parallel_setting(False))
         guesser = builder.build()
-        probs = ProbabilityCalculator(guesser).calc_probabilities(node)
+        probs = list(ProbabilityCalculator(guesser).calc_probabilities(node))
         guesser.random_walk(probs)
         builder.ostream.close()
         return guesser.generated, builder.ofile_path

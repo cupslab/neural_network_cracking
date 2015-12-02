@@ -1,8 +1,10 @@
+args <- commandArgs(trailingOnly = TRUE)
+
 library(ggplot2)
 library(scales)
 
-IFNAME = 'monte_carlo.tsv'
-IFNAME_EXACT = 'exact_numbers.tsv'
+ifname = args[1]
+ifname.exact = args[2]
 
 PERCENT_ERROR_Y_LABEL = "Estimated percent error (95% confidence interval)"
 OBSERVED_ERROR_Y_LABEL = "Observed percent error"
@@ -22,7 +24,7 @@ add_scales <- function (p) {
     p
 }
 
-estimates <- read.table(IFNAME, sep = "\t", quote = "\"")
+estimates <- read.table(ifname, sep = "\t", quote = "\"")
 estimates[7] <- (estimates[6] / estimates[3])
 colnames(estimates) <- COLNAMES
 p <- ggplot(estimates, aes(guess.number, percent.std.error))
@@ -32,14 +34,14 @@ p <- p + scale_y_continuous(labels = percent, limits = c(0, .5))
 p <- p + ylab(PERCENT_ERROR_Y_LABEL)
 ggsave(filename = OFNAME_ESTIMATE, plot = p)
 
-actual <- read.table(IFNAME_EXACT, sep = "\t", quote = "\"")
+actual <- read.table(ifname.exact, sep = "\t", quote = "\"")
 colnames(actual) <- COLNAMES_EXACT
 total <- merge(estimates, actual, by = "pwd")
 
 bothvalues <- total[total$guess.number.y > 0, ]
 print("Buggy passwords")
 print(bothvalues[ bothvalues$prob.x != bothvalues$prob.y, ]$pwd)
-bothvalues <- bothvalues[ bothvalues$prob.x == bothvalues$prob.y, ]
+## bothvalues <- bothvalues[ bothvalues$prob.x == bothvalues$prob.y, ]
 bothvalues$actual.percent.error <- (abs(
     bothvalues$guess.number.y - bothvalues$guess.number.x) /
     bothvalues$guess.number.y)
