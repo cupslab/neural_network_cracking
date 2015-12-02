@@ -67,13 +67,17 @@ class CharacterTable(object):
 
 class OptimizingCharacterTable(CharacterTable):
     def __init__(self, chars, maxlen, rare_characters, uppercase):
-        self.rare_characters = rare_characters
+        if uppercase:
+            self.rare_characters = ''.join(
+                c for c in rare_characters if c not in string.ascii_uppercase)
+        else:
+            self.rare_characters = rare_characters
         char_bag = chars
-        for r in rare_characters:
+        for r in self.rare_characters:
             char_bag = char_bag.replace(r, '')
-        char_bag += rare_characters[0]
-        self.rare_dict = dict([(char, rare_characters[0])
-                               for char in rare_characters])
+        char_bag += self.rare_characters[0]
+        self.rare_dict = dict([(char, self.rare_characters[0])
+                               for char in self.rare_characters])
         if uppercase:
             for c in string.ascii_uppercase:
                 if c not in chars:
