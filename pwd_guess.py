@@ -2486,8 +2486,8 @@ def main(args):
         config, args = read_config_args(args)
     else:
         config = ModelDefaults.fromFile(args['config'])
-    if args['arguments']:
-        with open(args['arguments'], 'r') as argfile:
+    if args['args']:
+        with open(args['args'], 'r') as argfile:
             args = json.load(argfile)
     init_logging(args)
     config.validate()
