@@ -162,7 +162,6 @@ class TrieSerializer(object):
         self.encoding = encoding
 
     def serialize(self, trie):
-        logging.info('Saving trie to %s', self.fname)
         directory = os.path.dirname(self.fname)
         if not os.path.exists(directory) and directory != '':
             logging.info('Making directory to save %s', directory)
@@ -177,7 +176,6 @@ class TrieSerializer(object):
         raise NotImplementedError()
 
     def deserialize(self):
-        logging.info('Loading trie from %s', self.fname)
         return self.do_deserialize()
 
     def do_deserialize(self):
