@@ -702,7 +702,7 @@ class Trainer(object):
             logging.info('Generation ' + str(gen + 1))
             accuracy = self.train_model_generation()
             logging.info('Generation accuracy: %s', accuracy)
-            if accuracy > max_accuracy:
+            if accuracy > max_accuracy or self.config.save_always:
                 max_accuracy = accuracy
                 serializer.save_model(self.model)
             if ((accuracy - prev_accuracy) <
