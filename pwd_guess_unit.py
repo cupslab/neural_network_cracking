@@ -906,9 +906,9 @@ aaa	0.0625
             # The GPU also computes at a rounding error higher than the original
             # computation
             self.assertEqual("""Total count: 8
-abb	0.144	4
-aab	0.096	7
-aaa	0.064	8
+abb	0.144	1
+aab	0.096	4
+aaa	0.064	7
 """, gfile.read())
 
     def test_do_guessing(self):
