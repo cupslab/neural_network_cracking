@@ -698,6 +698,128 @@ class PwdListTest(unittest.TestCase):
         self.assertEqual(list(concat_list.as_list()), [
             ('pass ', 1), ('word', 1), ('pass', 1), ('word', 1)])
 
+    def test_concat_second_time(self):
+        with tempfile.NamedTemporaryFile() as tf:
+            fnames = [os.path.join(self.tempdir, 'test.tsv'),
+                      os.path.join(self.tempdir, 'test.txt')]
+            config = pwd_guess.ModelDefaults(
+                intermediate_fname = tf.name,
+                simulated_frequency_optimization = False)
+            config.set_intermediate_info(
+                pwd_guess.ConcatenatingList.CONFIG_IM_KEY, {
+                    fnames[0] : 1,
+                    fnames[1] : .2
+                })
+            fact = pwd_guess.PwdList.getFactory(['tsv', 'list'], config)
+            concat_list = fact(fnames)
+            self.assertEqual(type(concat_list), pwd_guess.ConcatenatingList)
+            self.fcontent = 'pass \t1\tR\nword\t1\tR\n'
+            self.make_file('test.tsv', open)
+            self.fcontent = 'pass\nword9\n'
+            self.make_file('test.txt', open)
+            self.assertEqual(list(concat_list.as_list()), [
+                ('pass ', 1), ('word', 1), ('pass', .2), ('word9', .2)])
+
+    def test_concat_twice_same_weights(self):
+        with tempfile.NamedTemporaryFile() as tf:
+            config = pwd_guess.ModelDefaults(
+                intermediate_fname = tf.name,
+                simulated_frequency_optimization = False)
+            fnames = [os.path.join(self.tempdir, 'test.tsv'),
+                      os.path.join(self.tempdir, 'test.txt')]
+            fact = pwd_guess.PwdList.getFactory(['tsv', 'list'], config)
+            concat_list = fact(fnames)
+            self.assertEqual(type(concat_list), pwd_guess.ConcatenatingList)
+            self.fcontent = 'pass \t1\tR\nword\t1\tR\n'
+            self.make_file('test.tsv', open)
+            self.fcontent = 'pass\nword9\n'
+            self.make_file('test.txt', open)
+            self.assertEqual(list(concat_list.as_list()), [
+                ('pass ', 1), ('word', 1), ('pass', 1), ('word9', 1)])
+            concat_list.finish()
+            self.assertEqual(list(fact(fnames).as_list()), [
+                ('pass ', 1), ('word', 1), ('pass', 1), ('word9', 1)])
+
+    def test_concat_twice_diff_weights(self):
+        with tempfile.NamedTemporaryFile() as tf:
+            fnames = [os.path.join(self.tempdir, 'test.tsv'),
+                      os.path.join(self.tempdir, 'test.txt')]
+            config = pwd_guess.ModelDefaults(
+                intermediate_fname = tf.name,
+                pwd_list_weights = {
+                    fnames[0] : 1,
+                    fnames[1] : .2
+                },
+                simulated_frequency_optimization = False)
+            fact = pwd_guess.PwdList.getFactory(['tsv', 'list'], config)
+            concat_list = fact(fnames)
+            self.assertEqual(type(concat_list), pwd_guess.ConcatenatingList)
+            self.fcontent = 'pass \t1\tR\nword\t1\tR\n'
+            self.make_file('test.tsv', open)
+            self.fcontent = 'pass\nword9\n'
+            self.make_file('test.txt', open)
+            self.assertEqual(list(concat_list.as_list()), [
+                ('pass ', 1), ('word', 1), ('pass', 1), ('word9', 1)])
+            concat_list.finish()
+            self.assertEqual(list(fact(fnames).as_list()), [
+                ('pass ', 1), ('word', 1), ('pass', .2), ('word9', .2)])
+
+    def test_concat_three_diff_weights(self):
+        with tempfile.NamedTemporaryFile() as tf:
+            fnames = [os.path.join(self.tempdir, 'test.tsv'),
+                      os.path.join(self.tempdir, 'test.txt'),
+                      os.path.join(self.tempdir, 'test1.txt')]
+            config = pwd_guess.ModelDefaults(
+                intermediate_fname = tf.name,
+                pwd_list_weights = {
+                    fnames[0] : 1,
+                    fnames[1] : 1,
+                    fnames[2] : 1
+                },
+                simulated_frequency_optimization = False)
+            fact = pwd_guess.PwdList.getFactory(['tsv', 'list', 'list'], config)
+            concat_list = fact(fnames)
+            self.assertEqual(type(concat_list), pwd_guess.ConcatenatingList)
+            self.fcontent = 'pass \t1\tR\nword\t1\tR\n'
+            self.make_file('test.tsv', open)
+            self.fcontent = 'pass\nword9\n'
+            self.make_file('test.txt', open)
+            self.fcontent = 'pass\nword9\n'
+            self.make_file('test1.txt', open)
+            self.assertEqual(list(concat_list.as_list()), [
+                ('pass ', 1), ('word', 1), ('pass', 1), ('word9', 1),
+                ('pass', 1), ('word9', 1)])
+            concat_list.finish()
+            self.assertEqual(list(fact(fnames).as_list()), [
+                ('pass ', 1), ('word', 1), ('pass', 1), ('word9', 1),
+                ('pass', 1), ('word9', 1)])
+
+    def test_concat_twice_lopside(self):
+        with tempfile.NamedTemporaryFile() as tf:
+            fnames = [os.path.join(self.tempdir, 'test.tsv'),
+                      os.path.join(self.tempdir, 'test.txt')]
+            config = pwd_guess.ModelDefaults(
+                intermediate_fname = tf.name,
+                pwd_list_weights = {
+                    fnames[0] : 1,
+                    fnames[1] : .2
+                },
+                simulated_frequency_optimization = False)
+            fact = pwd_guess.PwdList.getFactory(['tsv', 'list'], config)
+            concat_list = fact(fnames)
+            self.assertEqual(type(concat_list), pwd_guess.ConcatenatingList)
+            self.fcontent = 'pass \t1\tR\nword\t1\tR\n'
+            self.make_file('test.tsv', open)
+            self.fcontent = 'pass\nword9\nppppp\n'
+            self.make_file('test.txt', open)
+            self.assertEqual(list(concat_list.as_list()), [
+                ('pass ', 1), ('word', 1), ('pass', 1),
+                ('word9', 1), ('ppppp', 1)])
+            concat_list.finish()
+            self.assertEqual(list(fact(fnames).as_list()), [
+                ('pass ', 1.25), ('word', 1.25), ('pass', 0.16666666666666669),
+                ('word9', 0.16666666666666669), ('ppppp', 0.16666666666666669)])
+
 class FiltererTest(unittest.TestCase):
     def test_pwd_is_valid(self):
         f = pwd_guess.Filterer(pwd_guess.ModelDefaults())
@@ -1734,6 +1856,71 @@ class ParallelRandomWalkGuesserTest(unittest.TestCase):
                     self.assertTrue(pwd == 'aaaa' or pwd == 'bbbBa')
                     self.assertEqual(prob, '0.0001638400000000001' if pwd == 'aaaa' else '0.0016777216000000014')
                     self.assertAlmostEqual(float(gn), 397 if pwd == 'aaaa' else 137, delta = 20)
+
+class PolicyTests(unittest.TestCase):
+    def test_basic(self):
+        config = Mock()
+        config.enforced_policy = 'basic'
+        policy = pwd_guess.BasePasswordPolicy.fromConfig(config)
+        self.assertTrue(type(policy), pwd_guess.BasicPolicy)
+        self.assertTrue(policy.pwd_complies('asdf'))
+        self.assertTrue(policy.pwd_complies('asdf' * 30))
+        self.assertTrue(policy.pwd_complies(''))
+
+    def test_basic_long(self):
+        config = Mock()
+        config.enforced_policy = 'basic_long'
+        policy = pwd_guess.BasePasswordPolicy.fromConfig(config)
+        self.assertTrue(type(policy), pwd_guess.PasswordPolicy)
+        self.assertFalse(policy.pwd_complies('asdf'))
+        self.assertFalse(policy.pwd_complies('asdfasd'))
+        self.assertFalse(policy.pwd_complies(''))
+        self.assertTrue(policy.pwd_complies('asdf' * 30))
+        self.assertTrue(policy.pwd_complies('asdfasdf'))
+        self.assertTrue(policy.pwd_complies('asdfasdfasdfasdf'))
+
+    def test_complex(self):
+        config = Mock()
+        config.enforced_policy = 'complex'
+        policy = pwd_guess.BasePasswordPolicy.fromConfig(config)
+        self.assertTrue(type(policy), pwd_guess.ComplexPasswordPolicy)
+
+        self.assertTrue(policy.has_group('asdf', policy.lowercase))
+        self.assertFalse(policy.has_group('1', policy.lowercase))
+        self.assertTrue(policy.has_group('10', policy.digits))
+        self.assertFalse(policy.has_group('a', policy.digits))
+        self.assertTrue(policy.has_group('A', policy.uppercase))
+        self.assertFalse(policy.has_group('a', policy.uppercase))
+        self.assertTrue(policy.all_from_group('asdf0A', policy.non_symbols))
+        self.assertFalse(policy.all_from_group('asdf*', policy.non_symbols))
+        self.assertTrue(policy.passes_blacklist('asdf*'))
+
+        self.assertFalse(policy.pwd_complies('asdf'))
+        self.assertFalse(policy.pwd_complies('asdfasd'))
+        self.assertFalse(policy.pwd_complies(''))
+        self.assertFalse(policy.pwd_complies('asdf' * 30))
+        self.assertFalse(policy.pwd_complies('asdfasdf'))
+        self.assertFalse(policy.pwd_complies('asdfasdfasdfasdf'))
+        self.assertFalse(policy.pwd_complies('1Aasdfasdfasdfasdf'))
+        self.assertFalse(policy.pwd_complies('1Aa*'))
+        self.assertFalse(policy.pwd_complies('1A*'))
+        self.assertFalse(policy.pwd_complies('111*asdf'))
+
+        self.assertTrue(policy.pwd_complies('1Aasdfasdfasdfasdf*'))
+        self.assertTrue(policy.pwd_complies('1Aa*asdf'))
+        self.assertTrue(policy.pwd_complies('999Apple*'))
+        self.assertTrue(policy.pwd_complies('111*Asdf'))
+        self.assertTrue(policy.pwd_complies('111*jjjJ'))
+
+        with tempfile.NamedTemporaryFile(mode = 'w') as temp_bl:
+            temp_bl.write('asdf\n')
+            temp_bl.write('apple\n')
+            temp_bl.flush()
+            policy.load_blacklist(temp_bl.name)
+
+        self.assertFalse(policy.pwd_complies('111*Asdf'))
+        self.assertFalse(policy.pwd_complies('999Apple*'))
+        self.assertTrue(policy.pwd_complies('111*jjjJ'))
 
 if __name__ == '__main__':
     unittest.main()

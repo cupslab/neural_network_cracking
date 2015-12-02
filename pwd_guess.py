@@ -591,6 +591,8 @@ class ModelDefaults(object):
     random_walk_confidence_percent = 5
     random_walk_upper_bound = 10
     no_end_word_cache = False
+    enforced_policy = 'basic'
+    pwd_list_weights = {}
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -1047,6 +1049,9 @@ class PwdList(object):
                 for item in self.as_list_iter(ifile):
                     yield item
 
+    def finish(self):
+        pass
+
     @staticmethod
     def getFactory(file_formats, config):
         assert type(file_formats) == list
@@ -1075,22 +1080,71 @@ class TsvSimulatedList(PwdList):
             yield (row[0], int(float.fromhex(row[1])))
 
 class ConcatenatingList(object):
+    CONFIG_IM_KEY = 'empirical_weighting'
+
     def __init__(self, config, file_list, file_formats):
         assert len(file_list) == len(file_formats)
         self.config = config
         self.file_tuples = zip(file_list, file_formats)
+        self.frequencies = collections.defaultdict(int)
 
     def get_iterable(self, file_tuple):
         file_name, file_format = file_tuple
         input_factory = PwdList.getFactory([file_format], self.config)
-        return input_factory([file_name])
+        return map(lambda t: t + (file_name,),
+                   input_factory([file_name]).as_list())
+
+    def finish(self):
+        answer = {}
+        if len(self.config.pwd_list_weights.keys()) == 0:
+            logging.info('Using equal weighting')
+            for key in self.frequencies.keys():
+                answer[key] = 1
+            self.config.set_intermediate_info(self.CONFIG_IM_KEY, answer)
+            return
+        try:
+            assert (set(self.config.pwd_list_weights.keys()) ==
+                    set(self.frequencies.keys()))
+        except AssertionError as e:
+            logging.critical(
+                'Error, given files do not match config weight files, %s, %s',
+                set(self.config.pwd_list_weights.keys()),
+                set(self.frequencies.keys()))
+            raise e
+        logging.info('Password frequencies are: %s', self.frequencies)
+        sum_all = 0
+        for key in self.frequencies.keys():
+            sum_all += self.frequencies[key]
+        for key in self.config.pwd_list_weights:
+            answer[key] = (self.config.pwd_list_weights[key] / len(
+                self.config.pwd_list_weights)) * (
+                    sum_all / self.frequencies[key])
+        logging.info('Weights are: %s', answer)
+        self.config.set_intermediate_info(self.CONFIG_IM_KEY, answer)
 
     def as_list(self):
         answer = []
+        try:
+            weighting = self.config.get_intermediate_info(self.CONFIG_IM_KEY)
+        except KeyError:
+            logging.info('First run through, no weighting')
+            weighting = False
+        current_fname = ''
+        def increment_freqs(pwd_tuple):
+            self.frequencies[pwd_tuple[2]] += pwd_tuple[1]
+            return pwd_tuple[:2]
+        def get_freqs(pwd_tuple):
+            return (pwd_tuple[0], pwd_tuple[1] * weighting[pwd_tuple[2]])
+        if weighting:
+            fn = get_freqs
+            logging.info('Using weighting')
+        else:
+            logging.info(
+                'Not using weighting, reading training data for the first time')
+            fn = increment_freqs
         for atuple in self.file_tuples:
-            iterable = self.get_iterable(atuple)
             logging.info('Reading from %s', atuple)
-            answer.append(iterable.as_list())
+            answer.append(map(fn, self.get_iterable(atuple)))
         return itertools.chain.from_iterable(answer)
 
 class Filterer(object):
@@ -1191,6 +1245,22 @@ class GuessSerializer(object):
         self.ostream.flush()
         self.ostream.close()
 
+class DelegatingSerializer(object):
+    def __init__(self, serializer):
+        self.serializer = serializer
+
+    def finish_collecting(self, real_output):
+        self.serializer.finish_collecting(real_output)
+
+    def collect_answer(self, real_output, istream):
+        self.serializer.collect_answer(real_output, istream)
+
+    def get_total_guessed(self):
+        return self.serializer.get_total_guessed()
+
+    def finish(self):
+        self.serializer.finish()
+
 class GuessNumberGenerator(GuessSerializer):
     TOTAL_COUNT_RE = re.compile('Total count: (\d*)\n')
     TOTAL_COUNT_FORMAT = 'Total count: %s\n'
@@ -1282,17 +1352,16 @@ class ProbabilityCalculator(object):
             input_string, next_char, output_prob = item
             if next_char != PASSWORD_END or self.prefixes is False:
                 prev_prob *= output_prob
-                logging.info('Ending password %s', prev_prob)
             if next_char == PASSWORD_END:
                 if self.template_probs:
                     prev_prob *= self.pts.find_real_pwd(
                         self.ctable.translate(input_string), input_string)
-                    logging.info('Template password %s', prev_prob)
                 yield (input_string, prev_prob)
                 prev_prob = 1
 
-class PasswordTemplateSerializer(object):
+class PasswordTemplateSerializer(DelegatingSerializer):
     def __init__(self, config, serializer = None, lower_prob_threshold = None):
+        super().__init__(serializer)
         ctable = CharacterTable.fromConfig(config)
         self.preimage = ctable.rare_character_preimage
         self.char_frequencies = config.get_intermediate_info(
@@ -1301,7 +1370,6 @@ class PasswordTemplateSerializer(object):
             'beginning_character_frequencies')
         self.end_char_frequencies = config.get_intermediate_info(
             'end_character_frequencies')
-        self.serializer = serializer
         self.lower_probability_threshold = (
             config.lower_probability_threshold
             if lower_prob_threshold is None else lower_prob_threshold)
@@ -1388,20 +1456,85 @@ class PasswordTemplateSerializer(object):
             self.recursive_helper(
                 cur_template[1:], cur_template[0] + cur_pwd, cur_prob)
 
-    def finish_collecting(self, real_output):
-        self.serializer.finish_collecting(real_output)
-
-    def collect_answer(self, real_output, istream):
-        self.serializer.collect_answer(real_output, istream)
-
     def serialize(self, pwd_template, prob):
         self.recursive_helper(pwd_template, '', prob)
 
-    def get_total_guessed(self):
-        return self.serializer.get_total_guessed()
+# Initialized later
+policy_list = {}
 
-    def finish(self):
-        self.serializer.finish()
+class BasePasswordPolicy(object):
+    def pwd_complies(self, pwd):
+        raise NotImplementedError()
+
+    @staticmethod
+    def fromConfig(config):
+        return policy_list[config.enforced_policy]
+
+class BasicPolicy(BasePasswordPolicy):
+    def pwd_complies(self, pwd):
+        return True
+
+class PasswordPolicy(BasePasswordPolicy):
+    def __init__(self, regexp):
+        self.re = re.compile(regexp)
+
+    def pwd_complies(self, pwd):
+        return self.re.match(pwd) is not None
+
+class ComplexPasswordPolicy(BasePasswordPolicy):
+    digits = set(string.digits)
+    uppercase = set(string.ascii_uppercase)
+    lowercase = set(string.ascii_lowercase)
+    upper_and_lowercase = set(string.ascii_uppercase + string.ascii_lowercase)
+    non_symbols = set(
+        string.digits + string.ascii_uppercase + string.ascii_lowercase)
+
+    def __init__(self):
+        self.blacklist = set()
+
+    def load_blacklist(self, fname):
+        with open(fname, 'r') as blacklist:
+            for line in blacklist:
+                self.blacklist.add(line.strip('\n'))
+
+    def has_group(self, pwd, group):
+        return any(map(lambda c: c in group, pwd))
+
+    def all_from_group(self, pwd, group):
+        return all(map(lambda c: c in group, pwd))
+
+    def passes_blacklist(self, pwd):
+        return (''.join(filter(
+            lambda c: c in self.upper_and_lowercase, pwd)).lower()
+                not in self.blacklist)
+
+    def pwd_complies(self, pwd):
+        if len(pwd) < 8:
+            return False
+        if not self.has_group(pwd, self.digits):
+            return False
+        if not self.has_group(pwd, self.uppercase):
+            return False
+        if not self.has_group(pwd, self.lowercase):
+            return False
+        if self.all_from_group(pwd, self.non_symbols):
+            return False
+        return self.passes_blacklist(pwd)
+
+policy_list = {
+    'complex' : ComplexPasswordPolicy(),
+    'basic' : BasicPolicy(),
+    'basic_long' : PasswordPolicy('.{8}.*')
+}
+
+class PasswordPolicyEnforcingSerializer(DelegatingSerializer):
+    def __init__(self, policy, serializer):
+        super().__init__(serializer)
+        self.policy = policy
+
+    def serialize(self, pwd, prob):
+        if self.policy.password_complies(pwd):
+            self.serializer.serialize(pwd, prob)
 
 class Guesser(object):
     def __init__(self, model, config, ostream, prob_cache = None):
@@ -1463,6 +1596,9 @@ class Guesser(object):
         if self.should_make_guesses_rare_char_optimizer:
             logging.info('Using template converting password serializer')
             answer = PasswordTemplateSerializer(self.config, answer)
+        if self.config.enforced_policy != 'basic':
+            answer = PasswordPolicyEnforcingSerializer(
+                BasePasswordPolicy.fromConfig(self.config), answer)
         return answer
 
     def relevel_prediction(self, preds, astring):
@@ -1637,6 +1773,7 @@ class RandomWalkGuesser(Guesser):
         assert False, "Shouldn't go here"
 
     def cost_of_node(self, pwd, prob):
+        # TODO: integrate the throwing out guesses
         if len(pwd) == 0 or pwd[-1] != PASSWORD_END:
             return 0
         return 1
@@ -1826,7 +1963,8 @@ class ParallelGuesser(Guesser):
         argfname, logfile, compiledir, output_fname = args
         logging.info('Launching process: %s', args)
         env = os.environ.copy()
-        env['THEANO_FLAGS'] = 'compiledir=%s,floatX=float32,device=gpu' % compiledir
+        env['THEANO_FLAGS'] = (
+            'compiledir=%s,floatX=float32,device=gpu' % compiledir)
         subp.check_call(cls.subp_command(argfname, logfile), env = env)
         with open(output_fname, 'r') as data:
             return json.load(data)
@@ -1986,9 +2124,11 @@ def read_passwords(pwd_file, pwd_format, config):
     input_factory = PwdList.getFactory(pwd_format, config)
     filt = Filterer(config)
     logging.info('Reading training set...')
-    for item in filt.filter(input_factory(pwd_file).as_list()):
+    input_list = input_factory(pwd_file)
+    for item in filt.filter(input_list.as_list()):
         pass
     filt.finish()
+    input_list.finish()
     logging.info('Done reading passwords...')
     return filt.filter(input_factory(pwd_file).as_list())
 

@@ -39,9 +39,6 @@ colnames(actual) <- COLNAMES_EXACT
 total <- merge(estimates, actual, by = "pwd")
 
 bothvalues <- total[total$guess.number.y > 0, ]
-print("Buggy passwords")
-print(bothvalues[ bothvalues$prob.x != bothvalues$prob.y, ]$pwd)
-bothvalues <- bothvalues[ bothvalues$prob.x == bothvalues$prob.y, ]
 bothvalues$actual.percent.error <- (abs(
     bothvalues$guess.number.y - bothvalues$guess.number.x) /
     bothvalues$guess.number.y)
@@ -59,7 +56,6 @@ p <- p + scale_y_continuous(labels = percent, limits = c(0, .5))
 p <- p + ylab(OBSERVED_ERROR_Y_LABEL)
 ggsave(filename = OFNAME_OBSERVED, plot = p)
 
+print("percent outside interval")
 print(sum(bothvalues$outside.interval) / nrow(bothvalues))
 print(sum(bothvalues$outside.interval))
-print(bothvalues[ bothvalues$actual.percent.error > .10, ]$pwd)
-print(nrow(bothvalues[ bothvalues$prob.x != bothvalues$prob.y, ]))
