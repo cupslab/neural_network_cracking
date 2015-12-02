@@ -1206,7 +1206,8 @@ class GuesserBuilder(object):
 def fork_starting_point(args):
     config_dict, serializer_args, node = args
     return ParallelGuesser.fork_entry_point(
-        ModelSerializer(*serializer_args), ModelDefaults(**config_dict), node)
+        ModelSerializer(*serializer_args).load_model(),
+        ModelDefaults(**config_dict), node)
 
 class ParallelGuesser(Guesser):
     def __init__(self, serializer, config, ostream):
