@@ -545,7 +545,8 @@ model_type_dict = {
     'JZS1' : recurrent.JZS1,
     'JZS2' : recurrent.JZS2,
     'JZS3' : recurrent.JZS3,
-    'GRU' : recurrent.GRU
+    'GRU' : recurrent.GRU,
+    'LSTM' : recurrent.LSTM
 }
 
 class ModelDefaults(object):
