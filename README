@@ -16,6 +16,8 @@ Setup
 
       datrie - pip install datrie
 
+      scikit-learn - pip install scikit-learn
+
 Tests
 -----
 

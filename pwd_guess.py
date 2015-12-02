@@ -8,8 +8,6 @@ from keras.optimizers import SGD
 from sklearn.utils import shuffle
 import numpy as np
 
-import datrie
-
 import sys
 import argparse
 import itertools
@@ -333,6 +331,7 @@ class ModelDefaults(object):
 
 class TriePwdList(object):
     def __init__(self, config = ModelDefaults()):
+        import datrie
         self.trie = datrie.BaseTrie(config.char_bag)
 
     def increment(self, key, value = 1):
