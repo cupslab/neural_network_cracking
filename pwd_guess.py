@@ -1578,7 +1578,10 @@ class GuesserBuilder(object):
         return class_builder(model_or_serializer, self.config, self.ostream)
 
 def fork_starting_point(args):
-    config_dict, serializer_args, nodes, ofname = args
+    config_dict = args['config']
+    serializer_args = args['model']
+    nodes = args['nodes']
+    ofname = args['ofile']
     model = ModelSerializer(*serializer_args).load_model()
     generated_list = []
     ofile_path_list = []
@@ -1618,13 +1621,8 @@ class ParallelGuesser(Guesser):
         self.recur(astring, prob)
         self.do_forking()
 
-    def prepare_argument_dict(self, node):
-        return (self.config.as_dict(), [
-                self.serializer.archfile, self.serializer.weightfile],
-                node)
-
     def arg_list(self):
-        return list(map(self.prepare_argument_dict, self.fork_points))
+        return self.fork_points
 
     def collect_answer(self, file_name_list):
         for file_name in file_name_list:
@@ -1675,7 +1673,13 @@ class ParallelGuesser(Guesser):
             argfname = prefix_sb_conf + pnum
             ofile = prefix_output + pnum
             with open(argfname, 'w') as config_fname:
-                json.dump({'args' : args, 'ofile' : ofile}, config_fname)
+                json.dump({
+                    'nodes' : args,
+                    'ofile' : ofile,
+                    'config' : self.config.as_dict(),
+                    'model' : [
+                        self.serializer.archfile, self.serializer.weightfile
+                    ]}, config_fname)
             return (argfname, prefix_pl_conf + pnum, tempfile.mkdtemp(
                 prefix = FNAME_PREFIX_THEANO_COMPILE + pnum,
                 dir = self.config.guesser_intermediate_directory),
@@ -1691,13 +1695,21 @@ class ParallelGuesser(Guesser):
         # conditions
         if not os.path.exists(self.config.guesser_intermediate_directory):
             os.mkdir(self.config.guesser_intermediate_directory)
-        pool = mp.Pool(min(len(arg_list), mp.cpu_count()))
-        result = pool.map_async(mp_fork_starting_point, self.map_pool(arg_list))
+        pool_count = min(len(arg_list), mp.cpu_count())
+        pool = mp.Pool(pool_count)
+        per_pool = math.ceil(len(arg_list) / pool_count)
+        result = pool.map_async(
+            mp_fork_starting_point, self.map_pool(arg_list, per_pool))
         try:
             pool.close()
             pool.join()
             answer = result.get(timeout = 1)
-            generated, files = zip(*answer)
+            generated = []
+            files = []
+            for chunk in answer:
+                for num_nodes in chunk:
+                    generated.append(num_nodes[0])
+                    files.append(num_nodes[1])
             self.generated = sum(generated) + self.generated
             self.collect_answer(files)
         except KeyboardInterrupt as e:
@@ -1810,7 +1822,6 @@ def read_config_args(args):
         logging.warning(('Profile argument must be given at command line. '
                          'Proceeding without profiling. '))
     config = ModelDefaults(config_args['config'])
-    config.validate()
     return config, arg_ret
 
 def read_fork_args(argfile):
@@ -1830,6 +1841,7 @@ def main(args):
     else:
         config = ModelDefaults.fromFile(args['config'])
     init_logging(args)
+    config.validate()
     logging.info('Configuration: %s', json.dumps(config.as_dict(), indent = 4))
     if theano.config.floatX == 'float64':
         logging.warning(('Using float64 instead of float32 for theano will'

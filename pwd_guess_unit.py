@@ -1479,6 +1479,49 @@ class RandomWalkGuesserTest(unittest.TestCase):
                     self.assertEqual(prob, '0.0004' if pwd == 'aaaa' else '0.02048')
                     self.assertAlmostEqual(float(gn), 50 if pwd == 'aaaa' else 15, 0)
 
+    def test_guess_simulated(self):
+        with tempfile.NamedTemporaryFile(mode = 'w') as gf, \
+             tempfile.NamedTemporaryFile() as intermediatef:
+            gf.write('aaaa\nbbbba\n')
+            gf.flush()
+            pw = pwd_guess.PwdList(gf.name)
+            self.assertEqual(list(pw.as_list()), [('aaaa', 1), ('bbbba', 1)])
+            config = pwd_guess.ModelDefaults(
+                parallel_guessing = False, char_bag = 'abAB\n', min_len = 3,
+                max_len = 5, password_test_fname = gf.name,
+                uppercase_character_optimization = True,
+                random_walk_seed_num = 10000,
+                intermediate_fname = intermediatef.name
+                relevel_not_matching_passwords = True,
+                guess_serialization_method = 'random_walk')
+            config.set_intermediate_info(
+                'rare_character_bag', [])
+            freqs = {
+                'a' : .4, 'b' : .4, 'A' : .1, 'B' : .1,
+            }
+            config.set_intermediate_info('character_frequencies', freqs)
+            config.set_intermediate_info(
+                'beginning_character_frequencies', freqs)
+            config.set_intermediate_info(
+                'end_character_frequencies', freqs)
+            self.assertTrue(pwd_guess.Filterer(config).pwd_is_valid('aaa'))
+            builder = pwd_guess.GuesserBuilder(config)
+            mock_model = Mock()
+            mock_model.predict = mock_predict_smart_parallel_skewed
+            builder.add_model(mock_model).add_file(self.tempf.name)
+            guesser = builder.build()
+            guesser.complete_guessing()
+            with open(self.tempf.name, 'r') as output:
+                reader = list(csv.reader(
+                    output, delimiter = '\t', quotechar = None))
+                self.assertEqual(len(reader), 2)
+                print(reader)
+                for row in reader:
+                    pwd, prob, gn = row
+                    self.assertTrue(pwd == 'aaaa' or pwd == 'bbbba')
+                    self.assertEqual(prob, '0.0004' if pwd == 'aaaa' else '0.02048')
+                    self.assertAlmostEqual(float(gn), 50 if pwd == 'aaaa' else 15, 0)
+
 
 if __name__ == '__main__':
     unittest.main()
