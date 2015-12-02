@@ -134,10 +134,10 @@ class Tabulator(object):
         self.cracked_num = 0
         self.runs.append([])
 
-    def record(self, outcome):
+    def record(self, outcome, pwd = None):
         self.cracked_num += 1
         if outcome:
-            self.runs[self.run_num].append(self.cracked_num)
+            self.runs[self.run_num].append((self.cracked_num, pwd))
 
     def output(self, ofile, summary_ofile):
         writer = csv.writer(ofile, delimiter = '\t', quotechar = None,
@@ -145,9 +145,9 @@ class Tabulator(object):
         average_accum = 0
         for run_idx in range(len(self.runs)):
             hashes = self.runs[run_idx]
-            for ahash_num in hashes:
+            for ahash_num, pwd in hashes:
                 average_accum += 1
-                writer.writerow([run_idx + 1, ahash_num])
+                writer.writerow([run_idx + 1, ahash_num, pwd if pwd else ''])
         summary_ofile.write(str(average_accum / (len(self.runs) - 1)) +
                             os.linesep)
 
@@ -172,7 +172,7 @@ class Simulator(object):
             self.guess_logger.write('%s\t%s\n' % (pwd, self.guess_number))
         self.prev_pwd = pwd
         outcome = (self.test_pwds[idx] == pwd)
-        self.tabulator.record(outcome)
+        self.tabulator.record(outcome, pwd)
         self.strategy.store_result(outcome)
 
     def run(self, nsteps):

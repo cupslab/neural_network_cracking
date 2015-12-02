@@ -169,7 +169,7 @@ class TestTabulator(unittest.TestCase):
         tabulator = sim.Tabulator()
         tabulator.record(False)
         tabulator.record(False)
-        tabulator.record(True)
+        tabulator.record(True, 'asdf')
         tabulator.record(False)
         tabulator.record(False)
         tabulator.record(True)
@@ -177,7 +177,7 @@ class TestTabulator(unittest.TestCase):
         ostream = io.StringIO()
         summary_ofile = io.StringIO()
         tabulator.output(ostream, summary_ofile)
-        self.assertEqual(os.linesep.join(['1\t3', '1\t6']) + os.linesep,
+        self.assertEqual(os.linesep.join(['1\t3\tasdf', '1\t6\t']) + os.linesep,
                          ostream.getvalue())
         self.assertEqual('2.0\n', summary_ofile.getvalue())
 
@@ -196,6 +196,7 @@ class TestTabulator(unittest.TestCase):
         ostream = io.StringIO()
         summary_ofile = io.StringIO()
         tabulator.output(ostream, summary_ofile)
-        self.assertEqual(os.linesep.join(['1\t3', '1\t6', '2\t2']) + os.linesep,
+        self.assertEqual(os.linesep.join(
+            ['1\t3\t', '1\t6\t', '2\t2\t']) + os.linesep,
                          ostream.getvalue())
         self.assertEqual('3.0\n', summary_ofile.getvalue())

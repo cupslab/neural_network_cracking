@@ -32,6 +32,7 @@ import unittest
 import math
 from unittest.mock import Mock
 import re
+import io
 
 import generator
 
@@ -491,6 +492,27 @@ class OptimizingCharacterTable(CharacterTable):
     def translate(self, astring):
         return astring.translate(self.translate_table)
 
+class ScheduledSamplingCharacterTable(object):
+    def __init__(self, config):
+        self.real_ctable = CharacterTable.fromConfig(config)
+        self.chars = self.real_ctable.chars
+        self.config = config
+        self.probability_calculator = None
+
+    def init_model(self, model):
+        self.probability_calculator = ProbabilityCalculator(
+            Guesser(model, self.config, io.StringIO()), prefixes = True)
+
+    def encode(self, ystr, maxlen = None):
+        return self.real_ctable.encode(ystr, maxlen)
+
+    def get_char_index(self, char):
+        return self.real_ctable.get_char_index(char)
+
+    def encode_many(self, xstrs):
+        assert self.probability_calculator is not None
+        return self.real_ctable.encode_many(xstrs)
+
 class ModelSerializer(object):
     def __init__(self, archfile = None, weightfile = None, versioned = False):
         self.archfile = archfile
@@ -606,6 +628,7 @@ class ModelDefaults(object):
     dropouts = False
     dropout_ratio = .25
     fuzzy_training_smoothing = False
+    scheduled_sampling = False
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -922,18 +945,24 @@ class Trainer(object):
         self.config = config
         self.chunk = 0
         self.generation = 0
-        self.ctable = CharacterTable.fromConfig(self.config)
         self.model = None
         self.pwd_list = pwd_list
+        if config.scheduled_sampling:
+            self.ctable = ScheduledSamplingCharacterTable(self.config)
+        else:
+            self.ctable = CharacterTable.fromConfig(self.config)
 
     def next_train_set_as_np(self):
         x_strs, y_str_list, weight_list = self.pwd_list.next_chunk()
-        x_vec = self.ctable.encode_many(x_strs)
+        x_vec = self.prepare_x_data(x_strs)
         y_vec = self.prepare_y_data(y_str_list)
         weight_vec = np.zeros((len(weight_list), 1, 1))
         for i, weight in enumerate(weight_list):
             weight_vec[i] = weight
         return shuffle(x_vec, y_vec, weight_vec)
+
+    def prepare_x_data(self, x_strs):
+        return self.ctable.encode_many(x_strs)
 
     def prepare_y_data(self, y_str_list):
         y_vec = np.zeros((len(y_str_list), 1, len(self.ctable.chars)),
@@ -964,6 +993,8 @@ class Trainer(object):
     def train_model(self, serializer):
         prev_accuracy = 0
         max_accuracy = 0
+        if self.config.scheduled_sampling:
+            self.ctable.init_model(self.model)
         for gen in range(self.config.generations):
             self.generation = gen + 1
             logging.info('Generation ' + str(gen + 1))

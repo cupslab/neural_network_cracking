@@ -532,6 +532,19 @@ class TrainerTest(unittest.TestCase):
         t.train_model(pwd_guess.ModelSerializer())
         self.assertEqual(t.generation, 2)
 
+    def test_train_model_scheduled_sampling(self):
+        config = pwd_guess.ModelDefaults(max_len = 5, generations = 20,
+                                         scheduled_sampling = True)
+        pre = pwd_guess.Preprocessor(config)
+        pre.begin([('pass', 1)])
+        t = pwd_guess.Trainer(pre, config)
+        mock_model = Mock()
+        mock_model.train_on_batch = MagicMock(return_value = (0.5, 0.5))
+        mock_model.test_on_batch = MagicMock(return_value = (0.5, 0.5))
+        t.model = mock_model
+        t.train_model(pwd_guess.ModelSerializer())
+        self.assertEqual(t.generation, 2)
+
     def test_char_table_no_error(self):
         t = pwd_guess.Trainer(None)
         self.assertNotEqual(None, t.ctable)
