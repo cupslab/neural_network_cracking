@@ -680,6 +680,7 @@ class ModelDefaults(object):
     scheduled_sampling = False
     final_schedule_ratio  = .05
     context_length = None
+    train_backwards = False
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -1028,21 +1029,24 @@ class Trainer(object):
 
     def build_model(self):
         model = Sequential()
-        model.add(self.config.model_type_exec()(
+        model_type = self.config.model_type_exec()
+        model.add(model_type(
             self.config.hidden_size,
-            input_shape = (self.config.context_length, len(self.ctable.chars)),
-            truncate_gradient = self.config.model_truncate_gradient))
+            input_shape=(self.config.context_length, len(self.ctable.chars)),
+            truncate_gradient=self.config.model_truncate_gradient,
+            go_backwards=self.config.train_backwards))
         model.add(RepeatVector(1))
         for _ in range(self.config.layers):
             if self.config.dropouts:
                 model.add(Dropout(self.config.dropout_ratio))
-            model.add(self.config.model_type_exec()(
-                self.config.hidden_size, return_sequences = True,
-                truncate_gradient = self.config.model_truncate_gradient))
+            model.add(model_type(
+                self.config.hidden_size, return_sequences=True,
+                truncate_gradient=self.config.model_truncate_gradient,
+                go_backwards=self.config.train_backwards))
         model.add(TimeDistributedDense(len(self.ctable.chars)))
         model.add(Activation('softmax'))
         model.compile(loss='categorical_crossentropy',
-                      optimizer = self.config.model_optimizer)
+                      optimizer=self.config.model_optimizer)
         self.model = model
 
     def train_model(self, serializer):
