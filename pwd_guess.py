@@ -1192,9 +1192,6 @@ class Guesser(object):
             preds[i] = v / sum_per
 
     def relevel_prediction_many(self, pred_list, str_list):
-        if (self.filterer.pwd_is_valid(str_list[0]) and
-            len(str_list[0]) != self.max_len):
-            return
         for i in range(len(pred_list)):
             self.relevel_prediction(pred_list[i][0], str_list[i])
 
@@ -1210,25 +1207,23 @@ class Guesser(object):
             self.relevel_prediction_many(answer, astring_list)
         return answer
 
-    def super_node_recur(self, node_list):
+    def handle_nodes(self, node_list):
         prefixes = list(map(lambda x: x[0], node_list))
-        if len(prefixes) == 0:
-            return
-        logging.info('Super node buffer size %s, guess number %s',
-                     len(prefixes), self.generated)
         predictions = self.conditional_probs_many(prefixes)
-        node_batch = []
         for i, cur_node in enumerate(node_list):
             astring, prob = cur_node
             for next_node in generator.next_nodes(
                     self, astring, prob, predictions[i][0]):
-                node_batch.append(next_node)
-                if len(node_batch) == self.chunk_size_guesser:
-                    self.super_node_recur(node_batch)
-                    node_batch = []
-        if len(node_batch) > 0:
-            self.super_node_recur(node_batch)
-            node_batch = []
+                yield next_node
+
+    def super_node_recur(self, node_list):
+        stack = node_list[:]
+        while len(stack) > 0:
+            logging.info('Super node buffer size %s, guess number %s',
+                         self.generated)
+            first_chunk = stack[:self.chunk_size_guesser]
+            stack = stack[self.chunk_size_guesser:]
+            stack = list(self.handle_nodes(first_chunk)) + stack
 
     def recur(self, astring = '', prob = 1):
         self.super_node_recur([(astring, prob)])
