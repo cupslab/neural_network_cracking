@@ -434,7 +434,7 @@ class ModelDefaults(object):
     trie_serializer_encoding = 'utf8'
     trie_serializer_type = 'reg'
     save_always = True
-    randomize_training_order = False
+    randomize_training_order = True
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
