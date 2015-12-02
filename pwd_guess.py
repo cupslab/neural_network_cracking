@@ -523,6 +523,7 @@ class ScheduledSamplingCharacterTable(object):
         self.generation += 1
         self.generation_counter = 0
         self.set_sigma()
+        logging.info('Scheduled sampling sigma', self.sigma)
 
     def set_sigma(self):
         if self.generation != 0:
@@ -994,6 +995,7 @@ class Trainer(object):
         self.model = None
         self.pwd_list = pwd_list
         if config.scheduled_sampling:
+            logging.info('Using scheduled sampling')
             self.ctable = ScheduledSamplingCharacterTable(self.config)
         else:
             self.ctable = CharacterTable.fromConfig(self.config)
