@@ -1191,6 +1191,9 @@ class Guesser(object):
             preds[i] = v / sum_per
 
     def relevel_prediction_many(self, pred_list, str_list):
+        if (self.filterer.pwd_is_valid(str_list[0]) and
+            len(str_list[0]) != self.max_len):
+            return
         for i in range(len(pred_list)):
             self.relevel_prediction(pred_list[i][0], str_list[i])
 
@@ -1207,18 +1210,18 @@ class Guesser(object):
         return answer
 
     def next_nodes(self, astring, total_preds):
-        for charidx in range(len(self.ctable.chars)):
-            chain_prob = total_preds[charidx]
+        for char in self.ctable.chars:
+            chain_prob = total_preds[self.ctable.get_char_index(char)]
+            chain_pass = astring + char
             if chain_prob < self.lower_probability_threshold:
                 continue
-            char = self.ctable.chars[charidx]
             if char == PASSWORD_END:
-                self.output_serializer.serialize(astring + char, chain_prob)
+                self.output_serializer.serialize(chain_pass, chain_prob)
                 self.generated += 1
             elif len(astring) + 1 > self.max_len:
                 continue
             elif char != PASSWORD_END:
-                yield astring + char, chain_prob
+                yield chain_pass, chain_prob
 
     def calculate_abs_probs_many_compile(self):
         abs_probs_tensor = T.vector()

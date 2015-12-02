@@ -22,6 +22,9 @@ Setup
         floatX = float32
         warn_float64 = warn
 
+        Note: as of 10/23, the current version of theano for some reason runs a
+        lot slower than previously. I reverted to version
+        0.7.0.dev-dab522df32a84085cb9f60beaf012ae010a07b82 which is better.
 
       keras - at time of writing, the version on pip is not current and will
       cause model saving to fail. Use the version from github instead
