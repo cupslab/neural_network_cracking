@@ -712,7 +712,6 @@ class ModelDefaults(object):
                 logging.error(('Error loading config. Config file is not valid'
                                ' JSON format. %s'), str(e))
                 return None
-        answer.validate()
         return answer
 
     def validate(self):
@@ -734,6 +733,7 @@ class ModelDefaults(object):
                 ' output guesses may ignore case or special characters')
         assert self.guess_serialization_method in serializer_type_list
         assert self.context_length <= self.max_len
+        assert self.model_type in model_type_dict
 
     def as_dict(self):
         answer = dict(vars(ModelDefaults).copy())
@@ -1108,8 +1108,7 @@ class Trainer(object):
             chunk += 1
         instances = map(lambda x: x[0], accuracy_accum)
         logging.info('Trained on %s instances this generation', instances)
-        return sum(map(lambda x: x[0] * x[1], accuracy_accum)) / sum(
-            instances)
+        return sum(map(lambda x: x[0] * x[1], accuracy_accum)) / sum(instances)
 
     def train(self, serializer):
         logging.info('Building model...')
@@ -2490,7 +2489,11 @@ def main(args):
         with open(args['args'], 'r') as argfile:
             args = json.load(argfile)
     init_logging(args)
-    config.validate()
+    try:
+        config.validate()
+    except AssertionError as e:
+        logging.critical('Configuration not valid %s', str(e))
+        sys.exit(1)
     logging.info('Configuration: %s', json.dumps(config.as_dict(), indent = 4))
     if theano.config.floatX == 'float64':
         logging.warning(('Using float64 instead of float32 for theano will'
