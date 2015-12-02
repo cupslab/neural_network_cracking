@@ -617,6 +617,11 @@ class NodeTriePreprocessor(TriePreprocessor):
         self.reset()
 
 class SuperTriePreprocessor(NodeTriePreprocessor):
+    def set_generator(self):
+        self.current_generator = list(self.trie.sampled_training())
+        # TODO: make memory efficient
+        random.shuffle(self.current_generator)
+
     def next_chunk(self):
         x, y, w = [], [], []
         for item in list(itertools.islice(
@@ -1078,7 +1083,9 @@ def preprocessing(args, config):
         config.trie_implementation = 'dummy'
         if config.node_serializer_type == 'super':
             disk_trie = SuperDiskPreprocessor(config)
+            logging.info('Super disk preprocessor')
         else:
+            logging.info('Disk preprocessor')
             disk_trie = DiskPreprocessor(config)
         disk_trie.begin()
         return disk_trie
@@ -1086,16 +1093,18 @@ def preprocessing(args, config):
     if (config.trie_implementation == 'node_trie' and
         config.simulated_frequency_optimization):
         if config.node_serializer_type == 'super':
+            logging.info('Super trie preprocessor')
             preprocessor = SuperTriePreprocessor(config)
         else:
+            logging.info('Node trie preprocessor')
             preprocessor = NodeTriePreprocessor(config)
         preprocessor.begin(plist)
         logging.info('Saving preprocessing step...')
         NodeTrieSerializer.fromConfig(config).serialize(preprocessor.trie)
     elif (config.trie_implementation is not None and
           config.simulated_frequency_optimization):
+        logging.info('Trie preprocessor...')
         preprocessor = TriePreprocessor(config)
-        logging.info('Inserting into trie...')
         preprocessor.begin(Preprocessor(plist, config))
     else:
         preprocessor = Preprocessor(plist, config)
@@ -1107,8 +1116,10 @@ def preprocessing(args, config):
 def train(args, config):
     preprocessor = preprocessing(args, config)
     if config.node_serializer_type == 'super':
+        logging.info('Super trie trainer')
         trainer = SuperTrieTrainer(preprocessor, config)
     else:
+        logging.info('Trainer')
         trainer = Trainer(preprocessor, config)
     serializer = ModelSerializer(args['arch_file'], args['weight_file'])
     if args['retrain']:
