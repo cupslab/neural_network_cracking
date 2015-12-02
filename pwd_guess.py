@@ -186,7 +186,7 @@ class ModelDefaults(object):
       performance.
 
     trie_implementation - Trie implementation. DB or trie or None for no
-      commpression. TODO: DB is broken for training generation.
+      commpression.
 
     trie_fname - File name for disk-backed trie's. Currently only used for DB.
       Can by ':memory:' for a memory only DB.
@@ -401,7 +401,7 @@ class TriePreprocessor(object):
             x, y, w = self.prep.next_chunk()
             if self.prep.chunk % self.config.chunk_print_interval == 0:
                 logging.info('Done compressing chunk %s of %s',
-                             prep.chunk, prep.total_chunks())
+                             self.prep.chunk, self.prep.total_chunks())
         self._total_size = math.ceil(
             self.trie.size() / self.config.training_chunk)
 
