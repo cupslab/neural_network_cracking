@@ -534,6 +534,7 @@ class ModelDefaults(object):
     use_mmap = True
     compute_stats = False
     password_test_fname = None
+    chunk_size_guesser = 10000
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -1157,6 +1158,7 @@ class Guesser(object):
         self.ctable = CharacterTable.fromConfig(self.config)
         self.filterer = Filterer(self.config)
         self.output_serializer = self.make_serializer(ostream)
+        self.chunk_size_guesser = self.config.chunk_size_guesser
 
     def make_serializer(self, ostream):
         if self.config.guess_serialization_method == 'human':
@@ -1229,6 +1231,10 @@ class Guesser(object):
             elif char != PASSWORD_END:
                 yield chain_pass, chain_prob
 
+    def next_node_chunker(self, astring, prob, cached_prefixes):
+        for next_node in self.next_nodes(astring, prob, cached_prefixes):
+            yield next_node
+
     def super_node_recur(self, node_list):
         prefixes = list(
             filter(lambda x: len(x) <= self.max_len,
@@ -1244,9 +1250,15 @@ class Guesser(object):
         node_batch = []
         for cur_node in node_list:
             astring, prob = cur_node
-            for next_node in self.next_nodes(astring, prob, cached_prefixes):
+            for next_node in self.next_node_chunker(
+                    astring, prob, cached_prefixes):
                 node_batch.append(next_node)
-        self.super_node_recur(node_batch)
+                if len(node_batch) == self.chunk_size_guesser:
+                    self.super_node_recur(node_batch)
+                    node_batch = []
+        if len(node_batch) > 0:
+            self.super_node_recur(node_batch)
+            node_batch = []
 
     def recur(self, astring = '', prob = 1):
         self.super_node_recur([(astring, prob)])
