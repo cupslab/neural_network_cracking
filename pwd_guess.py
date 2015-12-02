@@ -372,19 +372,21 @@ class CharacterTable(object):
 
     def encode_many(self, string_list, maxlen = None):
         maxlen = maxlen if maxlen else self.maxlen
-        x_str_list = list(map(
-            lambda x: self.pad_to_len(x, maxlen), string_list))
-        x_vec = np.zeros((len(x_str_list), maxlen, len(self.chars)),
+        x_str_list = map(lambda x: self.pad_to_len(x, maxlen), string_list)
+        x_vec = np.zeros((len(string_list), maxlen, len(self.chars)),
                          dtype = np.bool)
         for i, xstr in enumerate(x_str_list):
-            x_vec[i] = self.encode(xstr, maxlen = maxlen)
+            self._encode_into(x_vec[i], xstr)
         return x_vec
+
+    def _encode_into(self, X, C):
+        for i, c in enumerate(C):
+            X[i, self.char_indices[c]] = 1
 
     def encode(self, C, maxlen=None):
         maxlen = maxlen if maxlen else self.maxlen
         X = np.zeros((maxlen, len(self.chars)))
-        for i, c in enumerate(C):
-            X[i, self.char_indices[c]] = 1
+        self._encode_into(X, C)
         return X
 
     def decode(self, X, calc_argmax=True):
@@ -427,18 +429,8 @@ class OptimizingCharacterTable(CharacterTable):
                 char_bag = char_bag.replace(c, '')
                 assert c.lower() in char_bag
         super().__init__(char_bag, maxlen)
-
-    def replace_all(self, astring):
-        return ''.join(map(
-            lambda c: self.rare_dict[c] if c in self.rare_dict else c, astring))
-
-    def encode(self, C, maxlen = None):
-        return super().encode(self.replace_all(C), maxlen)
-
-    def get_char_index(self, character):
-        if character in self.rare_dict:
-            return super().get_char_index(self.rare_dict[character])
-        return super().get_char_index(character)
+        for key in self.rare_dict:
+            self.char_indices[key] = self.char_indices[self.rare_dict[key]]
 
 class ModelSerializer(object):
     def __init__(self, archfile = None, weightfile = None):
