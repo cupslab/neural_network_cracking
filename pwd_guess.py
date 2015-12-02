@@ -26,6 +26,7 @@ import io
 import collections
 import sqlite3
 import struct
+import os.path
 
 PASSWORD_END = '\n'
 
@@ -72,6 +73,9 @@ class NodeTrieSerializer(object):
         self.previous_carry_over = ''.encode(NODE_SERIALIZER_ENCODING)
         self.fmt = '<' + str(self.config.max_len) + 'sQ'
         self.chunk_size = struct.calcsize(self.fmt)
+
+    def num_records(self):
+        return os.path.getsize(self.config.trie_fname) / self.chunk_size
 
     def serialize(self, trie):
         with gzip.open(self.config.trie_fname, 'wb') as afile:
@@ -196,7 +200,8 @@ class ModelSerializer(object):
         return model
 
 class ModelDefaults(object):
-    """Configuration information for guessing and training. Can be read from a file
+    """
+    Configuration information for guessing and training. Can be read from a file
     in json format.
 
     Attributes:
@@ -504,6 +509,10 @@ class NodeTriePreprocessor(TriePreprocessor):
 class DiskPreprocessor(TriePreprocessor):
     def begin(self):
         self.reset()
+        self._size = self.serializer.num_records()
+
+    def total_chunks(self):
+        return math.ceil(self._size / self.config.training_chunk)
 
     def reset(self):
         self.serializer = NodeTrieSerializer(self.config)
@@ -992,9 +1001,7 @@ def make_parser():
         --enumerate-ofile will guess passwords based on an existing model.
         Version """ +
         get_version_string()))
-    parser.add_argument('--pwd-file',
-                        help=('Input file name. Will be interpreted as a '
-                              'gziped file if this argument ends in `.gz\'. '))
+    parser.add_argument('--pwd-file', help=('Input file name. '))
     parser.add_argument('--arch-file',
                         help = 'Output file for the model architecture. ')
     parser.add_argument('--weight-file',
