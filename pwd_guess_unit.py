@@ -9,7 +9,7 @@ import pwd_guess
 
 class TrainerTest(unittest.TestCase):
     def test_training_set(self):
-        t = pwd_guess.Trainer(['pass'], 40)
+        t = pwd_guess.Trainer(['pass'], pwd_guess.ModelDefaults(max_len = 40))
         prefix, suffix = t.next_train_chunk()
         self.assertEqual(([x + ('\n' * (40 - len(x)))
                            for x in ['', 'p', 'pa', 'pas', 'pass']],
@@ -27,13 +27,23 @@ class TrainerTest(unittest.TestCase):
         t.next_train_set_as_np()
 
     def test_verification_set(self):
-        t = pwd_guess.Trainer(['pass'])
-        s = t.verification_set()
+        t = pwd_guess.Trainer(['pass', 'word'],
+                              pwd_guess.ModelDefaults(training_chunk = 1,
+                                                      train_test_split = 0.2))
+        x_all, y_all = t.next_train_set_as_np()
+        s = t.verification_set(x_all, y_all)
         t_x, v_x, t_y, v_y = s
-        self.assertNotEqual(0, len(t_x))
-        self.assertNotEqual(0, len(v_x))
-        self.assertNotEqual(0, len(t_y))
-        self.assertNotEqual(0, len(v_y))
+        self.assertEqual(4, len(t_x))
+        self.assertEqual(1, len(v_x))
+        self.assertEqual(4, len(t_y))
+        self.assertEqual(1, len(v_y))
+        x_all, y_all = t.next_train_set_as_np()
+        s = t.verification_set(x_all, y_all)
+        t_x, v_x, t_y, v_y = s
+        self.assertEqual(4, len(t_x))
+        self.assertEqual(1, len(v_x))
+        self.assertEqual(4, len(t_y))
+        self.assertEqual(1, len(v_y))
 
     def test_build_model(self):
         t = pwd_guess.Trainer(['pass'])
@@ -48,9 +58,24 @@ class TrainerTest(unittest.TestCase):
         t.next_train_set_as_np()
 
     def test_train_set_np_digits(self):
-        t = pwd_guess.Trainer(['pass', '1235', '<>;p[003]', '$$$$$$ '])
+        t = pwd_guess.Trainer(['pass', '1235', '<>;p[003]', '$$$$$$ '],
+                              pwd_guess.ModelDefaults(
+                                  training_chunk = 1, visualize_errors = False))
         m = t.train()
+        self.assertEqual(4, t.chunk)
 
+class ModelDefaultsTest(unittest.TestCase):
+    def test_get_default(self):
+        m = pwd_guess.ModelDefaults()
+        self.assertEqual(pwd_guess.ModelDefaults.hidden_size, m.hidden_size)
+
+    def test_get_set(self):
+        m = pwd_guess.ModelDefaults(hidden_size = 8)
+        self.assertEqual(8, m.hidden_size)
+
+    def test_get_set_dict(self):
+        m = pwd_guess.ModelDefaults({'hidden_size' : 8})
+        self.assertEqual(8, m.hidden_size)
 
 class PwdListTest(unittest.TestCase):
     def setUp(self):
@@ -99,9 +124,7 @@ class PwdListTest(unittest.TestCase):
 
 class FiltererTest(unittest.TestCase):
     def test_pwd_is_valid(self):
-        f = pwd_guess.Filterer(
-            pwd_guess.ModelDefaults.default_char_bag,
-            pwd_guess.ModelDefaults.MAX_LEN, pwd_guess.ModelDefaults.MIN_LEN)
+        f = pwd_guess.Filterer(pwd_guess.ModelDefaults())
         # Normal characters are good
         self.assertTrue(f.pwd_is_valid('pass'))
         self.assertTrue(f.pwd_is_valid('passWord'))
@@ -119,9 +142,7 @@ class FiltererTest(unittest.TestCase):
         self.assertEqual(3, f.filtered_out)
 
     def test_filter(self):
-        f = pwd_guess.Filterer(
-            pwd_guess.ModelDefaults.default_char_bag,
-            pwd_guess.ModelDefaults.MAX_LEN, pwd_guess.ModelDefaults.MIN_LEN)
+        f = pwd_guess.Filterer(pwd_guess.ModelDefaults())
         self.assertEqual(['pass'], list(f.filter(['asdf£jfj', 'pass'])))
 
 # TODO: test for model training too short
