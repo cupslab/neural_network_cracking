@@ -524,6 +524,17 @@ class BasePreprocessor(object):
     def finish(self):
         pass
 
+    def stats(self):
+        self.reset()
+        x_vec, y_vec, weights = self.next_chunk()
+        count_instances = 0
+        while len(x_vec) != 0:
+            count_instances += len(x_vec)
+            x_vec, y_vec, weights = self.next_chunk()
+        logging.info('Number of training instances %s', count_instances)
+        self.finish()
+        return count_instances
+
     @staticmethod
     def fromConfig(config):
         if (config.trie_implementation == 'node_trie' and
@@ -756,6 +767,7 @@ class Trainer(object):
                              accuracy - prev_accuracy)
                 break
             prev_accuracy = accuracy
+        self.pwd_list.finish()
 
     def test_set(self, x_all, y_all, w_all):
         split_at = len(x_all) - max(
@@ -793,8 +805,10 @@ class Trainer(object):
                              tr_loss, te_loss, te_acc)
             x_all, y_all, w_all = self.next_train_set_as_np()
             chunk += 1
+        instances = map(lambda x: x[0], accuracy_accum)
+        logging.info('Trained on %s instances this generation', instances)
         return sum(map(lambda x: x[0] * x[1], accuracy_accum)) / sum(
-            map(lambda x: x[0], accuracy_accum))
+            instances)
 
     def train(self, serializer):
         logging.info('Building model...')
@@ -865,7 +879,7 @@ class TsvList(PwdList):
         answer = []
         for row in csv.reader(agen, delimiter = '\t', quotechar = None):
             pwd, freq = row[:2]
-            for i in range(int(float.fromhex(freq))):
+            for _ in range(int(float.fromhex(freq))):
                 answer.append(sys.intern(pwd))
         return answer
 
@@ -1151,12 +1165,15 @@ def preprocessing(args, config):
     preprocessor.begin(
         read_passwords(args['pwd_file'], args['pwd_format'], config))
     if args['pre_processing_only']:
+        preprocessor.stats()
         logging.info('Only performing pre-processing. ')
-        sys.exit(0)
+        return None
     return preprocessor
 
 def train(args, config):
     preprocessor = preprocessing(args, config)
+    if preprocessor is None:
+        return
     trainer = (Trainer.getFactory(config))(preprocessor, config)
     serializer = ModelSerializer(args['arch_file'], args['weight_file'])
     if args['retrain']:

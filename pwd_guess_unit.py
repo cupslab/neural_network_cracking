@@ -18,6 +18,8 @@ import csv
 import time
 import string
 import random
+import re
+import logging
 
 import pwd_guess
 
@@ -816,6 +818,68 @@ class ParallelGuesserTest(unittest.TestCase):
                           ('bab', .125),
                           ('bba', .125),
                           ('bbb', .125)], sort_freq)
+
+class PreprocessingStepTest(unittest.TestCase):
+    base_config = {
+        "training_chunk" : 64,
+        "layers" : 3,
+        "hidden_size" : 128,
+        "generations" : 1,
+        "min_len" : 3,
+        "max_len" : 5,
+        "char_bag" : "ab\n",
+        "training_accuracy_threshold": -1,
+        "trie_fname" : ":memory:"
+    }
+
+    def setUp(self):
+        self.input_file = tempfile.NamedTemporaryFile(mode = 'w')
+
+    def tearDown(self):
+        self.input_file.close()
+
+    def do_preprocessing(self, config):
+        real_config_dict = self.base_config.copy()
+        real_config_dict.update(config)
+        real_config = pwd_guess.ModelDefaults(real_config_dict)
+        self.input_file.write("""aaaa\t2
+abbbb\t4
+abab\t1
+aaab\t3""")
+        self.input_file.flush()
+        preprocessor = pwd_guess.BasePreprocessor.fromConfig(real_config)
+        preprocessor.begin(pwd_guess.read_passwords(
+            self.input_file.name, 'tsv', real_config))
+        return preprocessor.stats()
+
+    def test_normal(self):
+        self.assertEqual(self.do_preprocessing({
+            'simulated_frequency_optimization' : False
+        }), 54)
+
+    def test_simulated_freq(self):
+        self.assertEqual(self.do_preprocessing({
+            'simulated_frequency_optimization' : True
+        }), 21)
+
+    def test_trie_db(self):
+        self.assertEqual(self.do_preprocessing({
+            'simulated_frequency_optimization' : True,
+            'trie_implementation' : 'DB'
+        }), 15)
+
+    def test_trie_reg(self):
+        self.assertEqual(self.do_preprocessing({
+            'simulated_frequency_optimization' : True,
+            'trie_implementation' : 'node_trie'
+        }), 15)
+
+    def test_trie_super(self):
+        self.assertEqual(self.do_preprocessing({
+            'simulated_frequency_optimization' : True,
+            'trie_implementation' : 'node_trie',
+            'node_serializer_type' : 'super'
+        }), 12)
 
 if __name__ == '__main__':
     unittest.main()
