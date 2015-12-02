@@ -12,8 +12,9 @@ import pwd_guess as pg
 def main(args):
     config = pg.ModelDefaults.fromFile(args.config)
     pwd_lister = pg.PwdList.getFactory(args.format, config)(args.ifile)
+    filterer = pg.Filterer(config)
     sample_buffer = []
-    for i, pwd in enumerate(pwd_lister.as_list()):
+    for i, pwd in enumerate(filterer.filter(pwd_lister.as_list())):
         pwd, weight = pwd
         for j in range(weight):
             num_seen = i + j
