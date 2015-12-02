@@ -580,6 +580,7 @@ class ModelDefaults(object):
     random_walk_seed_num = 1000
     random_walk_seed_iterations = 1
     max_gpu_prediction_size = 25000
+    gpu_fork_bias = 2
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -1461,8 +1462,9 @@ class Guesser(object):
 
     def batch_prob(self, node_list):
         prefixes = list(map(lambda x: x[0], node_list))
-        logging.info('Super node buffer size %s, guess number %s',
-                     len(prefixes), self.generated)
+        logging.info(
+            'Super node buffer size %s, guess number %s, gpu_batch: %s',
+            len(prefixes), self.generated, self.max_gpu_prediction_size)
         if len(prefixes) > self.max_gpu_prediction_size:
             answer = np.zeros((0, 1, self.max_len))
             max_chunks = math.ceil(self.max_gpu_prediction_size / len(prefixes))
@@ -1611,6 +1613,7 @@ class GuesserBuilder(object):
         self.ostream = None
         self.ofile_path = None
         self.parallel = self.config.parallel_guessing
+        self.seed_probs = None
 
     def add_model(self, model):
         self.model = model
@@ -1639,6 +1642,10 @@ class GuesserBuilder(object):
         self.parallel = setting
         return self
 
+    def add_seed_probs(self, probs):
+        self.seed_probs = probs
+        return self
+
     def build(self):
         if self.parallel:
             model_or_serializer = self.serializer
@@ -1655,7 +1662,9 @@ class GuesserBuilder(object):
         if self.config.guess_serialization_method == 'random_walk':
             assert not self.parallel
             class_builder = RandomWalkGuesser
-        return class_builder(model_or_serializer, self.config, self.ostream)
+        answer = class_builder(model_or_serializer, self.config, self.ostream)
+        answer._calc_prob_cache = self.seed_probs
+        return answer
 
 def fork_starting_point(args):
     config_dict = args['config']
@@ -1663,6 +1672,7 @@ def fork_starting_point(args):
     nodes = args['nodes']
     ofname = args['ofile']
     model = ModelSerializer(*serializer_args).load_model()
+    probs = args['probs']
     generated_list = []
     ofile_path_list = []
     config = ModelDefaults(**config_dict)
@@ -1757,11 +1767,13 @@ class ParallelGuesser(Guesser):
             ofile = prefix_output + pnum
             config_mod = self.config.as_dict()
             config_mod['max_gpu_prediction_size'] = math.floor(
-                self.config.max_gpu_prediction_size / pool_count)
+                self.config.max_gpu_prediction_size / (
+                    pool_count * self.config.gpu_fork_bias))
             with open(argfname, 'w') as config_fname:
                 json.dump({
                     'nodes' : args,
                     'ofile' : ofile,
+                    'probs' : self._calc_prob_cache,
                     'config' : config_mod,
                     'model' : [
                         self.serializer.archfile, self.serializer.weightfile
@@ -1801,9 +1813,11 @@ class ParallelGuesser(Guesser):
             pool.terminate()
 
     @staticmethod
-    def fork_entry_point(model, config, node):
+    def fork_entry_point(model, config, node, probs = None):
         builder = (GuesserBuilder(config).add_model(model).add_temp_file()
                    .add_parallel_setting(False))
+        if probs is not None:
+            builder.add_seed_probs(probs)
         guesser = builder.build()
         start_str, start_prob = node
         guesser.complete_guessing(start_str, start_prob)
