@@ -588,6 +588,7 @@ class ModelDefaults(object):
     random_walk_confidence_bound_z_value = 1.96
     random_walk_confidence_percent = 5
     random_walk_upper_bound = 10
+    no_end_word_cache = False
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -1301,6 +1302,8 @@ class PasswordTemplateSerializer(object):
         self.beg_cache = self.cache_freqs(self.beginning_char_frequencies)
         self.end_cache = self.cache_freqs(self.end_char_frequencies)
         self.cache = self.cache_freqs(self.char_frequencies)
+        if config.no_end_word_cache:
+            self.end_cache = self.cache
         self.chars = config.char_bag
         self.char_indices = ctable.char_indices
         self.post_image = ctable.rare_character_postimage

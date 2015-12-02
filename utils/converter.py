@@ -6,12 +6,19 @@ import csv
 import os.path
 
 class PgsFile(object):
-    def __init__(self, ifile, gcolumn = 2):
+    def __init__(self, ifile, gcolumn = 2, rounding = False):
         self.ifile = ifile
         self.gcolumn = gcolumn
 
     def as_tuples(self):
-        answer = [(row[0], row[self.gcolumn - 1]) for row in csv.reader(
+        def get_value(row):
+            value = row[self.gcolumn - 1]
+            try:
+                value = float(value)
+                return str(round(value))
+            except ValueError:
+                return value
+        answer = [(row[0], get_value(row)) for row in csv.reader(
             self.ifile, delimiter = '\t', quotechar=None)]
         self.ifile.close()
         return answer
@@ -21,7 +28,13 @@ class PgsFile(object):
 
     @staticmethod
     def max_in_dict(adict):
-        return max(map(lambda k: int(adict[k]), adict))
+        def try_int(k):
+            value = adict[k]
+            try:
+                return int(value)
+            except ValueError:
+                return round(float(value))
+        return max(map(try_int, adict))
 
 USER_COLUMN = 'no_user'
 PROBABILITY_COLUMN = '0x0.1p-1'
@@ -130,13 +143,13 @@ class ConditionNamesCsv(ConditionNames):
         return answer
 
 def main_args(ifile, condition_files, condition_names_file,
-              odir, csv_format = False, gcolumn = 2):
+              odir, csv_format = False, gcolumn = 2, rounding = False):
     if csv_format:
         c = ConditionNamesCsv(condition_files, condition_names_file)
     else:
         c = ConditionNamesPlain(condition_files, condition_names_file)
     ConditionFiles(c.file_list(), c.get_names()).write_weir_files(
-        PgsFile(ifile, gcolumn).as_dict(), odir)
+        PgsFile(ifile, gcolumn, rounding).as_dict(), odir)
 
 def main(args):
     main_args(args.ifile, args.condition_files, args.condition_names_file,
@@ -172,4 +185,6 @@ column is the password. """)
     parser.add_argument('--guess-column', type=int, default=2,
                         help=('Column number of the guess column in the input'
                               ' file. Default is 2. This column is 1-indexed'))
+    parser.add_argument('--rounding', action='store_true',
+                        help='Round floats')
     main(parser.parse_args())

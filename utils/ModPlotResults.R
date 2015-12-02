@@ -1094,7 +1094,7 @@ MakePlotFromCurrentDirectory <-
                        graph.equalizecutoff = T,
                        ...)
   } else {
-    guesscutoff <- max(values(results.list$guesscutoffs))
+    guesscutoff <- max(unlist(values(results.list$guesscutoffs)))
     PlotGuessingCurves(lookup.results = lookup.results,
                        guesscutoff = guesscutoff,
 					   guesscutoffs = results.list$guesscutoffs,
