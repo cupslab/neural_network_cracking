@@ -631,20 +631,11 @@ class BasePreprocessor(object):
     @staticmethod
     def fromConfig(config):
         logging.info('Preprocessor type %s...', config.trie_implementation)
-        try:
-            return BasePreprocessor.config_keys[
-                config.trie_implementation](config)
-        except KeyError as e:
-            logging.error('Cannot find trie_implementation %s',
-                          config.trie_implementation)
-            raise
+        return BasePreprocessor.config_keys[config.trie_implementation](config)
 
     @staticmethod
     def byFormat(pwd_format, config):
-        try:
-            return BasePreprocessor.format_keys[pwd_format](config)
-        except KeyError as e:
-            logging.error('Cannot find preprocessor from format %s', pwd_format)
+        return BasePreprocessor.format_keys[pwd_format](config)
 
 class Preprocessor(BasePreprocessor):
     def __init__(self, config = ModelDefaults()):
@@ -1341,9 +1332,11 @@ def preprocessing(args, config):
         disk_trie = BasePreprocessor.byFormat(args['pwd_format'][0], config)
         disk_trie.begin(args['pwd_file'][0])
         return disk_trie
+    # read_passwords must be called before creating the preprocessor because it
+    # initializes statistics needed for some preprocessors
+    plist = read_passwords(args['pwd_file'], args['pwd_format'], config)
     preprocessor = BasePreprocessor.fromConfig(config)
-    preprocessor.begin(
-        read_passwords(args['pwd_file'], args['pwd_format'], config))
+    preprocessor.begin(plist)
     if args['pre_processing_only']:
         logging.info('Only performing pre-processing. ')
         if config.compute_stats:

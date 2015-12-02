@@ -982,8 +982,8 @@ abbbb\t4
 abab\t1
 aaab\t3""")
         self.input_file.flush()
-        plist = list(pwd_guess.read_passwords(
-            [self.input_file.name], ['tsv'], real_config))
+        plist = pwd_guess.read_passwords(
+            [self.input_file.name], ['tsv'], real_config)
         preprocessor = pwd_guess.BasePreprocessor.fromConfig(real_config)
         preprocessor.begin(plist)
         return preprocessor.stats()
@@ -1043,7 +1043,10 @@ aaab\t3""")
                 'trie_fname' : 'trie_storage',
                 'trie_intermediate_storage' : 'trie_intermediate',
                 'intermediate_fname' : 'intermediate_data.sqlite',
-                'preprocess_trie_on_disk' : True
+                'preprocess_trie_on_disk' : True,
+                'rare_character_optimization' : True,
+                'rare_character_lowest_threshold' : 1,
+                'char_bag' : 'abc\n'
             }), 12)
             self.assertFalse(os.path.exists(":memory:"))
             pre = pwd_guess.BasePreprocessor.byFormat('im_trie',
