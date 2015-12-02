@@ -498,10 +498,15 @@ class ScheduledSamplingCharacterTable(object):
         self.chars = self.real_ctable.chars
         self.config = config
         self.probability_calculator = None
+        self.sigma = 0
+        self.generation_size = 0
+        self.generation_counter = 0
+        self.total_size = 0
+        self.generation = 0
+        self.generations = self.config.generations
 
     def init_model(self, model):
-        self.probability_calculator = ProbabilityCalculator(
-            Guesser(model, self.config, io.StringIO()), prefixes = True)
+        self.probability_calculator = Guesser(model, self.config, io.StringIO())
 
     def encode(self, ystr, maxlen = None):
         return self.real_ctable.encode(ystr, maxlen)
@@ -509,9 +514,49 @@ class ScheduledSamplingCharacterTable(object):
     def get_char_index(self, char):
         return self.real_ctable.get_char_index(char)
 
+    def end_generation(self):
+        if self.generation == 0:
+            self.generation_size = self.generation_counter
+            self.total_size = self.config.generations * self.generation_size
+            self.steepness_value = - (2 / self.total_size) * math.log(
+                1 / self.config.final_schedule_ratio  - 1 )
+        self.generation += 1
+        self.generation_counter = 0
+        self.set_sigma()
+
+    def set_sigma(self):
+        if self.generation != 0:
+            cur_value = (self.generation * self.generation_size +
+                         self.generation_counter)
+            self.sigma = 1 - (1 / (1 + math.exp(- self.steepness_value * (
+                cur_value - (self.total_size / 2)))))
+
+    def generate_replacements(self, strs):
+        cond_probs = self.probability_calculator.batch_prob(strs)
+        choices = self.chars
+        for i in range(len(cond_probs)):
+            yield np.random.choice(choices, p = cond_probs[i][0])
+
     def encode_many(self, xstrs):
         assert self.probability_calculator is not None
-        return self.real_ctable.encode_many(xstrs)
+        answer = self.real_ctable.encode_many(xstrs)
+        replacements = np.random.binomial(1, self.sigma, size = len(xstrs))
+        replacement_strs, replacement_idx = [], []
+        for i in range(len(xstrs)):
+            astring = xstrs[i]
+            if replacements[i] and len(astring) > 0:
+                replacement_strs.append(astring[:-1])
+                replacement_idx.append(i)
+        self.generation_counter += len(xstrs)
+        self.set_sigma()
+        if len(replacement_strs) == 0:
+            return answer
+        replacements = self.generate_replacements(replacement_strs)
+        for idx, char in enumerate(replacements):
+            answer[replacement_idx[idx]][len(
+                replacement_strs[idx])] = self.real_ctable.encode(
+                char, maxlen = 1)
+        return answer
 
 class ModelSerializer(object):
     def __init__(self, archfile = None, weightfile = None, versioned = False):
@@ -629,6 +674,7 @@ class ModelDefaults(object):
     dropout_ratio = .25
     fuzzy_training_smoothing = False
     scheduled_sampling = False
+    final_schedule_ratio  = .05
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -1009,6 +1055,8 @@ class Trainer(object):
                              accuracy - prev_accuracy)
                 break
             prev_accuracy = accuracy
+            if self.config.scheduled_sampling:
+                self.ctable.end_generation()
 
     def test_set(self, x_all, y_all, w_all):
         split_at = len(x_all) - max(

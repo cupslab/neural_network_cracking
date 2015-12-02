@@ -58,24 +58,58 @@ class NaiveStrategy(Strategy):
         return answer
 
 class MontyStrat(NaiveStrategy):
-    PREV_PROBS = 2
-
     def calculate_hash_nums(self):
-        answer = super().calculate_hash_nums()
-        prob_accum = 1
-        prev_n_probs = []
-        for i, pwd_tuple in enumerate(slef.guessing_list):
+        answer = [self.NOT_CRACKED] * len(self.test_set)
+        test_map = self.calculate_index_map()
+        self.row_width = len(self.test_set)
+        self.guess_accum = 0
+        accum_prob = 1
+        prev_probs = []
+
+        def flush():
+            depth = len(prev_probs)
+            first_accum = prev_probs[0][2]
+            total_hits = []
+            previous_not_done = []
+            for j, p in enumerate(prev_probs):
+                _, prev_pwd, _ = p
+                hit_indices = test_map[prev_pwd]
+                previous_not_done.append([0] * len(hit_indices))
+                prev, accum = 0, 0
+                for l, index in enumerate(hit_indices):
+                    for k in range(prev, index):
+                        if answer[k] != self.NOT_CRACKED:
+                            accum += 1
+                    previous_not_done[j][l] = accum
+                    prev = index
+            for j, p in enumerate(prev_probs):
+                _, prev_pwd, _ = p
+                hit_indices = test_map[prev_pwd]
+                for l, index in enumerate(hit_indices):
+                    answer[index] = first_accum + (
+                        depth * (index - previous_not_done[j][l]) + j + 1)
+                    total_hits.append((index, j))
+                self.row_width -= len(hit_indices)
+            total_hits.sort()
+            accum = 0
+            for item in total_hits:
+                index, j = item
+                answer[index] -= accum
+                accum += len(prev_probs) - j - 1
+            self.guess_accum -= accum
+
+        for i, pwd_tuple in enumerate(self.guessing_list):
             pwd, prob = pwd_tuple
-            actual_prob = prob / prob_accum
-            for j, prev in enumerate(prev_n_probs):
-                if actual_prob > prev:
-                    self.reorder(answer, j, i)
-            if len(prev_n_probs) < self.PREV_PROBS:
-                prev_n_probs += [actual_prob]
-            else:
-                prev_n_probs.append(actual_prob)
-                prev_n_probs.pop(0)
-            prob_accum -= prob
+            accum_prob -= prob
+            real_prob = prob / accum_prob
+            if len(prev_probs) > 0 and (real_prob < prev_probs[-1][0]):
+                flush()
+                prev_probs = []
+            prev_probs.append( (real_prob, pwd, self.guess_accum) )
+            self.guess_accum += self.row_width
+            assert self.row_width >= 0
+        if len(prev_probs) > 0:
+            flush()
         return answer
 
 strat_map = {

@@ -29,6 +29,37 @@ class ReadfileTests(unittest.TestCase):
             self.assertEqual(['asdf', 'jjj'],
                              list(sc.read_password_file(tf.name)))
 
+class MontyStrategyTest(unittest.TestCase):
+    def test_simple(self):
+        a = sc.MontyStrat([('a', .2), ('b', .19), ('x', .001)], ['b', 'c'])
+        self.assertEqual([2, -1], a.calculate_hash_nums())
+
+    def test_simple_flushing(self):
+        a = sc.MontyStrat([('a', .2), ('b', .19)], ['b', 'c'])
+        self.assertEqual([2, -1], a.calculate_hash_nums())
+
+    def test_multiple(self):
+        a = sc.MontyStrat([('a', .2), ('b', .19), ('c', .18)], ['b', 'c', 'c'])
+        self.assertEqual([2, 5, 8], a.calculate_hash_nums())
+
+    def test_multiple_overlap(self):
+        a = sc.MontyStrat([('a', .2), ('b', .19), ('c', .18)], ['b', 'a', 'c'])
+        self.assertEqual([2, 3, 6], a.calculate_hash_nums())
+
+    def test_complex(self):
+        a = sc.MontyStrat([('a', .2), ('b', .19), ('c', .001)], ['b', 'c', 'c'])
+        self.assertEqual([2, 7, 8], a.calculate_hash_nums())
+
+    def test_complex(self):
+        a = sc.MontyStrat([('a', .2), ('b', .19), ('c', .001)],
+                          ['b', 'c', 'c', 'a', 'a', 'x', 'z'])
+        self.assertEqual([2, 13, 14, 7, 8, -1, -1], a.calculate_hash_nums())
+
+    def test_complex_other(self):
+        a = sc.MontyStrat([('a', .2), ('b', .19), ('c', .001), ('d', .001)],
+                          ['b', 'd', 'c', 'a', 'd', 'x', 'z'])
+        self.assertEqual([2, 15, 16, 7, 18, -1, -1], a.calculate_hash_nums())
+
 class NaiveStrategyTest(unittest.TestCase):
     def test_calculate_index_map(self):
         a = sc.NaiveStrategy([('asdf', .2), ('jjj', .1)],

@@ -545,6 +545,19 @@ class TrainerTest(unittest.TestCase):
         t.train_model(pwd_guess.ModelSerializer())
         self.assertEqual(t.generation, 2)
 
+    def test_train_model_scheduled_sampling_high_sigma(self):
+        config = pwd_guess.ModelDefaults(max_len = 5, generations = 20,
+                                         scheduled_sampling = True)
+        pre = pwd_guess.Preprocessor(config)
+        pre.begin([('pass', 1)])
+        t = pwd_guess.Trainer(pre, config)
+        mock_model = Mock()
+        mock_model.train_on_batch = MagicMock(return_value = (0.5, 0.5))
+        mock_model.test_on_batch = MagicMock(return_value = (0.5, 0.5))
+        t.model = mock_model
+        t.train_model(pwd_guess.ModelSerializer())
+        self.assertEqual(t.generation, 2)
+
     def test_char_table_no_error(self):
         t = pwd_guess.Trainer(None)
         self.assertNotEqual(None, t.ctable)
@@ -2066,6 +2079,43 @@ class PasswordPolicyEnforcingSerializerTest(unittest.TestCase):
         mock_serializer.serialize.reset_mock()
         serializer.serialize('A111*aajf', .1)
         mock_serializer.serialize.assert_called_once_with('A111*aajf', .1)
+
+class ScheduledSamplingTest(unittest.TestCase):
+    def test_set_sigma(self):
+        mock_model = Mock()
+        mock_model.predict = mock_predict_smart_parallel_skewed
+        config = pwd_guess.ModelDefaults(
+            max_len = 3, generations = 20, char_bag = 'ab\n',
+            scheduled_sampling = True)
+        testable = pwd_guess.ScheduledSamplingCharacterTable(config)
+        testable.init_model(mock_model)
+        np.testing.assert_array_equal(testable.encode_many(['bb', 'ab']),
+                                      np.array([[[0, 0, 1],
+                                                 [0, 0, 1],
+                                                 [1, 0, 0]],
+                                                [[0, 1, 0],
+                                                 [0, 0, 1],
+                                                 [1, 0, 0]]]))
+        testable.end_generation()
+
+        self.assertEqual(testable.generation_size, 2)
+        self.assertEqual(testable.generations, 20)
+        self.assertEqual(testable.generation_counter, 0)
+        self.assertEqual(testable.generation, 1)
+        self.assertEqual(testable.total_size, 40)
+        self.assertAlmostEqual(testable.steepness_value, -0.147221948959)
+        self.assertAlmostEqual(testable.sigma, 0.0659893126558)
+        for _ in range(9):
+            testable.end_generation()
+        self.assertEqual(0, testable.generation_counter)
+        self.assertEqual(10, testable.generation)
+        self.assertAlmostEqual(testable.sigma, 0.5)
+        for _ in range(10):
+            testable.end_generation()
+        self.assertEqual(0, testable.generation_counter)
+        self.assertEqual(20, testable.generation)
+        self.assertTrue(testable.sigma > 0.9)
+        testable.encode_many(['ba', 'ab'])
 
 if __name__ == '__main__':
     unittest.main()
