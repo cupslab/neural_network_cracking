@@ -1027,7 +1027,8 @@ aaab\t3""")
                 'trie_serializer_type' : 'fuzzy',
                 'trie_fname' : 'trie_storage',
                 'trie_intermediate_storage' : 'trie_intermediate',
-                'intermediate_fname' : 'intermediate_data.sqlite'
+                'intermediate_fname' : 'intermediate_data.sqlite',
+                'preprocess_trie_on_disk' : True
             }), 12)
             self.assertFalse(os.path.exists(":memory:"))
             pre = pwd_guess.BasePreprocessor.byFormat('im_trie',

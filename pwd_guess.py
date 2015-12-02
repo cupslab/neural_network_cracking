@@ -30,6 +30,9 @@ import os.path
 PASSWORD_END = '\n'
 PASSWORD_FRAGMENT_DELIMITER = '\0'
 
+FNAME_PREFIX_PREPROCESSOR = 'disk_cache.'
+FNAME_PREFIX_TRIE = 'trie_nodes.'
+
 class BaseTrie(object):
     def increment(self, aword, weight = 1):
         raise NotImplementedError()
@@ -121,7 +124,7 @@ class DiskBackedTrie(BaseTrie):
 
     def sanitize(self, prefix):
         assert prefix in self.keys
-        return str(self.keys.index(prefix))
+        return FNAME_PREFIX_TRIE + str(self.keys.index(prefix))
 
     def close_branch(self):
         if self.current_branch_key is not None:
@@ -506,6 +509,7 @@ class ModelDefaults(object):
     trie_fname = ':memory:'
     trie_intermediate_storage = ':memory:'
     intermediate_fname = ':memory:'
+    preprocess_trie_on_disk = False
     trie_serializer_encoding = 'utf8'
     trie_serializer_type = 'reg'
     save_always = True
@@ -701,11 +705,6 @@ class TriePreprocessor(BasePreprocessor):
         logging.info('Saving preprocessing step...')
         TrieSerializer.fromConfig(self.config).serialize(self.trie)
 
-    def compress_list(self, x, y, w):
-        for i in range(len(x)):
-            self.trie.increment(x[i] + y[i], w[i])
-            self.instances += 1
-
     def reset(self):
         self.set_iterator()
         if self.config.randomize_training_order and not self.ordered_randomly:
@@ -750,19 +749,62 @@ class IntermediatePreprocessor(TriePreprocessor):
         self.trie = DiskBackedTrie.fromIntermediate(self.config)
 
 class HybridDiskPreprocessor(TriePreprocessor):
+    class MemoryCache(object):
+        def __init__(self):
+            self.cache = collections.defaultdict(list)
+
+        def add_key(self, key, value):
+            self.cache[key].append(value)
+
+        def read(self):
+            for key in sorted(self.cache.keys()):
+                subkeys = self.cache[key]
+                for item in subkeys:
+                    yield item
+
+    class DiskCache(object):
+        def __init__(self, config):
+            self.file_map = {}
+            self.writer_map = {}
+            self.file_name_mapping = {}
+            self.storage_dir = config.trie_intermediate_storage
+            if not os.path.exists(self.storage_dir):
+                os.mkdir(self.storage_dir)
+
+        def _santize(self, key):
+            answer = FNAME_PREFIX_PREPROCESSOR + str(len(self.file_map))
+            self.file_name_mapping[key] = answer
+            return os.path.join(self.storage_dir, answer)
+
+        def _unsantize(self, key):
+            return os.path.join(self.storage_dir, self.file_name_mapping[key])
+
+        def add_key(self, key, value):
+            if key not in self.file_map:
+                self.file_map[key] = open(self._santize(key), 'w')
+                self.writer_map[key] = csv.writer(
+                    self.file_map[key], delimiter = '\t', quotechar = None)
+            self.writer_map[key].writerow(value)
+
+        def read(self):
+            for key in self.file_map:
+                self.file_map[key].close()
+            for key in sorted(self.file_map.keys()):
+                with open(self._unsantize(key), 'r') as istr:
+                    for item in csv.reader(
+                            istr, delimiter = '\t', quotechar = None):
+                        yield (item[0], int(item[1]))
+
     def preprocess(self, pwd_list):
-        # TODO: make memory efficient
-        out_pwd_list = collections.defaultdict(list)
+        if (self.config.trie_intermediate_storage == ':memory:' and
+            not self.config.preprocess_trie_on_disk):
+            out_pwd_list = HybridDiskPreprocessor.MemoryCache()
+        else:
+            out_pwd_list = HybridDiskPreprocessor.DiskCache(self.config)
         fork_len = self.config.fork_length
         for item in super().preprocess(pwd_list):
-            out_pwd_list[item[0][:fork_len]].append(item)
-        return self.read(out_pwd_list)
-
-    def read(self, pwd_list):
-        for key in sorted(pwd_list.keys()):
-            subkeys = pwd_list[key]
-            for item in subkeys:
-                yield item
+            out_pwd_list.add_key(item[0][:fork_len], item)
+        return out_pwd_list.read()
 
 class Trainer(object):
     def __init__(self, pwd_list, config = ModelDefaults()):
@@ -1313,16 +1355,16 @@ def read_config_args(args):
     config_arg_file = open(args['config_args'], 'r')
     try:
         config_args = json.load(config_arg_file)
-        arg_ret = args.copy()
-        arg_ret.update(config_args['args'])
-        if 'profile' in config_args['args']:
-            logging.warning(('Profile argument must be given at command line. '
-                             'Proceeding without profiling. '))
-        config = ModelDefaults(config_args['config'])
-        config.validate()
-        return (config, arg_ret)
     finally:
         config_arg_file.close()
+    arg_ret = args.copy()
+    arg_ret.update(config_args['args'])
+    if 'profile' in config_args['args']:
+        logging.warning(('Profile argument must be given at command line. '
+                         'Proceeding without profiling. '))
+    config = ModelDefaults(config_args['config'])
+    config.validate()
+    return config, arg_ret
 
 def main(args):
     if args['version']:
