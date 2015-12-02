@@ -26,6 +26,7 @@ import subprocess as subp
 import collections
 import struct
 import os.path
+import mmap
 
 PASSWORD_END = '\n'
 PASSWORD_FRAGMENT_DELIMITER = '\0'
@@ -231,6 +232,7 @@ class BinaryTrieSerializer(TrieSerializer):
         self.max_len = config.max_len
         self.encoding = config.trie_serializer_encoding
         self.toc_chunk_size = config.toc_chunk_size
+        self.use_mmap = config.use_mmap
 
     def do_serialize(self, trie):
         records = 0
@@ -249,6 +251,7 @@ class BinaryTrieSerializer(TrieSerializer):
                 afile.write(struct.pack(self._fmt, key, table_of_contents[key]))
         assert toc_start > 0
         with self.open_file('r+b') as afile:
+            logging.info('Wrote %s records', records)
             afile.write(struct.pack(self._fmt, records, toc_start))
 
     def deserialize(self):
@@ -282,7 +285,11 @@ class BinaryTrieSerializer(TrieSerializer):
             yield item
 
     def random_access(self):
-        with self.open_file('rb') as afile:
+        with self.open_file('rb') as afile_obj:
+            if self.use_mmap:
+                afile = mmap.mmap(afile_obj.fileno(), 0, prot = mmap.PROT_READ)
+            else:
+                afile = afile_obj
             toc, toc_start = self.read_toc(afile)
             toc_locations = list(map(lambda k: toc[k], sorted(toc.keys())))
             start_pos = [self._fmt_size] + toc_locations
@@ -519,6 +526,8 @@ class ModelDefaults(object):
     model_optimizer = 'adam'
     guesser_intermediate_directory = 'guesser_files'
     cleanup_guesser_files = True
+    use_mmap = True
+    compute_stats = False
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -1325,7 +1334,8 @@ def preprocessing(args, config):
     preprocessor.begin(plist)
     if args['pre_processing_only']:
         logging.info('Only performing pre-processing. ')
-        preprocessor.stats()
+        if config.compute_stats:
+            preprocessor.stats()
         return None
     return preprocessor
 
