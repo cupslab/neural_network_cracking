@@ -248,10 +248,11 @@ class ModelDefaults(object):
 
     simulated_frequency_optimization - Only for TSV files. If set to true, then
       multiple instances of the same password are simulated. This improves
-      performance.
+      performance. Recommended.
 
-    trie_implementation - Trie implementation. DB or trie or None for no
-      commpression.
+    trie_implementation - Trie implementation. 'DB' for sqlite database. 'trie'
+      for datrie C implementation. 'node_trie' for custom implementation. None
+      for no trie optimization. 'node_trie' is recommended.
 
     trie_fname - File name for disk-backed trie's. Currently only used for DB.
       Can by ':memory:' for a memory only DB.
@@ -499,6 +500,14 @@ class NodeTriePreprocessor(TriePreprocessor):
                              chunk, len(self.pwd_list))
             chunk += 1
         self.reset()
+
+class DiskPreprocessor(TriePreprocessor):
+    def begin(self):
+        self.reset()
+
+    def reset(self):
+        self.serializer = NodeTrieSerializer(self.config)
+        self.current_generator = self.serializer.deserialize()
 
 class Trainer(object):
     def __init__(self, pwd_list, config = ModelDefaults()):
@@ -887,7 +896,11 @@ def init_logging(args, config):
     sys.excepthook = except_hook
 
 def preprocessing(args, config):
-    if args['tsv']:
+    if args['pwd_format'] == 'trie':
+        disk_trie = DiskPreprocessor(config)
+        disk_trie.begin()
+        return disk_trie
+    elif args['pwd_format'] == 'tsv':
         if config.simulated_frequency_optimization:
             input_const = TsvSimulatedList
         else:
@@ -910,6 +923,7 @@ def preprocessing(args, config):
         preprocessor = NodeTriePreprocessor(config)
         preprocessor.begin(plist)
         if args['pre_processing_only']:
+            logging.info('Saving preprocessing step...')
             NodeTrieSerializer(config).serialize(preprocessor.trie)
     elif (config.trie_implementation is not None and
         config.simulated_frequency_optimization):
@@ -985,11 +999,14 @@ def make_parser():
                         help = 'Output file for the model architecture. ')
     parser.add_argument('--weight-file',
                         help = 'Output file for the weights of the model. ')
-    parser.add_argument('--tsv', action='store_true',
-                        help=('Input file from --pwd-file is in TSV format. '
-                              'The first column of the TSV should be the'
-                              ' password. Second column is the frequency count '
-                              'of the password'))
+    parser.add_argument('--pwd-format', choices = ['trie', 'tsv', 'list'],
+                        default = 'list',
+                        help = ('Format of pwd-file input. "list" format is one'
+                                'password per line. "tsv" format is tab '
+                                'separated values: first column is the '
+                                'password, second is the frequency in floating'
+                                ' hex. "trie" is a custom binary format created'
+                                ' by another step of this tool. '))
     parser.add_argument('--enumerate-ofile',
                         help = 'Enumerate guesses output file')
     parser.add_argument('--retrain', action='store_true',
