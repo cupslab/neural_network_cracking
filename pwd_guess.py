@@ -1465,14 +1465,13 @@ class Guesser(object):
             'Super node buffer size %s, guess number %s, gpu_batch: %s',
             len(prefixes), self.generated, self.max_gpu_prediction_size)
         if len(prefixes) > self.max_gpu_prediction_size:
-            answer = np.zeros((0, 1, self.max_len))
-            max_chunks = math.ceil(self.max_gpu_prediction_size / len(prefixes))
-            for chunk_num in range(max_chunks):
-                prefix_chunk = prefixes[
-                    self.max_gpu_prediction_size * chunk_num:
-                    self.max_gpu_prediction_size * (chunk_num + 1)]
-                answer_chunk = self.conditional_probs_many(prefix_chunk)
-                np.concatenate((answer, answer_chunk), 0, answer)
+            answer = np.zeros((0, 1, len(self.chars_list)))
+            for chunk_num in range(
+                    math.ceil(len(prefixes) / self.max_gpu_prediction_size)):
+                answer = np.concatenate(
+                    (answer, self.conditional_probs_many(prefixes[
+                        self.max_gpu_prediction_size * chunk_num:
+                        self.max_gpu_prediction_size * (chunk_num + 1)])), 0)
             return answer
         return self.conditional_probs_many(prefixes)
 
