@@ -194,7 +194,7 @@ class EndToEndTest(unittest.TestCase):
         json.dump({
             "chunk_print_interval" : 100,
             "training_chunk" : 64,
-            "layers" : 3,
+            "layers" : 2,
             "hidden_size" : 20,
             "generations" : 5,
             "min_len" : 3,

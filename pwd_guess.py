@@ -30,13 +30,38 @@ import os.path
 
 PASSWORD_END = '\n'
 
-class NodeTrie(object):
+class BaseTrie(object):
+    def finish(self):
+        pass
+
+    def increment(self, aword, weight = 1):
+        raise NotImplementedError()
+
+    def random_iterate(self):
+        raise NotImplementedError()
+
+    def size(self):
+        raise NotImplementedError()
+
+    @staticmethod
+    def fromConfig(config):
+        if config.trie_implementation == 'DB':
+            return DBTrie(config)
+        elif config.trie_implementation == 'trie':
+            return TriePwdList(config)
+        elif config.trie_implementation == 'node_trie':
+            return NodeTrie()
+        logging.warning('Unknown trie type %s. Using trie',
+                        config.trie_implementation)
+        return TriePwdList(config)
+
+class NodeTrie(BaseTrie):
     def __init__(self):
         self.nodes = collections.defaultdict(NodeTrie)
         self.weight = 0
         self._size = 0
 
-    def increment(self, aword, weight):
+    def increment(self, aword, weight = 1):
         self.weight += weight
         answer = 0
         if len(aword) != 0:
@@ -59,15 +84,10 @@ class NodeTrie(object):
             for item in others:
                 yield item
 
-    def finish(self):
-        pass
-
 NODE_SERIALIZER_ENCODING = 'utf8'
 PASSWORD_FRAGMENT_DELIMITER = '\0'
 
 class NodeTrieSerializer(object):
-    num_record = 100
-
     def __init__(self, config):
         self.config = config
         self.previous_carry_over = ''.encode(NODE_SERIALIZER_ENCODING)
@@ -335,7 +355,7 @@ class ModelDefaults(object):
             logging.warning('Unknown model type %s', self.model_type)
             return None
 
-class TriePwdList(object):
+class TriePwdList(BaseTrie):
     def __init__(self, config = ModelDefaults()):
         import datrie
         self.trie = datrie.BaseTrie(config.char_bag)
@@ -346,13 +366,10 @@ class TriePwdList(object):
     def random_iterate(self):
         return self.trie.items()
 
-    def finish(self):
-        pass
-
     def size(self):
         return len(self.trie)
 
-class DBTrie(object):
+class DBTrie(BaseTrie):
     def __init__(self, config):
         self.conn = sqlite3.connect(config.trie_fname)
         self.cur = self.conn.cursor()
@@ -441,16 +458,7 @@ class TriePreprocessor(object):
     def __init__(self, config = ModelDefaults()):
         self.config = config
         self.instances = 0
-        if self.config.trie_implementation == 'DB':
-            self.trie = DBTrie(config)
-        elif self.config.trie_implementation == 'trie':
-            self.trie = TriePwdList(config)
-        elif self.config.trie_implementation == 'node_trie':
-            self.trie = NodeTrie()
-        else:
-            logging.warning('Unknown trie type %s. Using trie',
-                            self.config.trie_implementation)
-            self.trie = TriePwdList(config)
+        self.trie = BaseTrie.fromConfig(config)
 
     def begin(self, prep):
         self.prep = prep
@@ -885,6 +893,7 @@ log_level_map = {
 
 def get_version_string():
     p = subp.Popen(['git', 'describe'],
+                   cwd = os.path.dirname(os.path.realpath(__file__)),
                    stdin=subp.PIPE, stdout=subp.PIPE, stderr=subp.PIPE)
     output, err = p.communicate()
     return output.decode('utf-8').strip('\n')
@@ -906,12 +915,8 @@ def init_logging(args, config):
         sys.stderr.write('Uncaught exception!')
     sys.excepthook = except_hook
 
-def preprocessing(args, config):
-    if args['pwd_format'] == 'trie':
-        disk_trie = DiskPreprocessor(config)
-        disk_trie.begin()
-        return disk_trie
-    elif args['pwd_format'] == 'tsv':
+def read_passwords(args, config):
+    if args['pwd_format'] == 'tsv':
         if config.simulated_frequency_optimization:
             input_const = TsvSimulatedList
         else:
@@ -929,6 +934,14 @@ def preprocessing(args, config):
     if len(plist) == 0:
         logging.error('Empty training set! Quiting...')
         sys.exit(1)
+    return plist
+
+def preprocessing(args, config):
+    if args['pwd_format'] == 'trie':
+        disk_trie = DiskPreprocessor(config)
+        disk_trie.begin()
+        return disk_trie
+    plist = read_passwords(args, config)
     if (config.trie_implementation == 'node_trie' and
         config.simulated_frequency_optimization):
         preprocessor = NodeTriePreprocessor(config)
@@ -943,13 +956,13 @@ def preprocessing(args, config):
         preprocessor.begin(Preprocessor(plist, config))
     else:
         preprocessor = Preprocessor(plist, config)
+    if args['pre_processing_only']:
+        logging.info('Only performing pre-processing. ')
+        sys.exit(0)
     return preprocessor
 
 def train(args, config):
     preprocessor = preprocessing(args, config)
-    if args['pre_processing_only']:
-        logging.info('Only performing pre-processing. ')
-        sys.exit(0)
     trainer = Trainer(preprocessor, config)
     serializer = ModelSerializer(args['arch_file'], args['weight_file'])
     if args['retrain']:
