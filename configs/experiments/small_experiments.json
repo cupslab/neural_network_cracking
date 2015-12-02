@@ -5,7 +5,7 @@
             "config" : {
                 "config" : {
                     "chunk_print_interval" : 1000,
-                    "training_chunk" : 1000,
+                    "training_chunk" : 20000,
                     "layers" : 0,
                     "hidden_size" : 256,
                     "generations" : 500,
