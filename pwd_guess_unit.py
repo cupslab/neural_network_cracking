@@ -310,6 +310,20 @@ class HybridPreprocessorTest(unittest.TestCase):
         self.assertEqual([('aaa', 1), ('aab', 5), ('caa', 2)], list(
             pre.preprocess([('aaa', 1), ('caa', 2), ('aab', 5)])))
 
+    def test_preprocess_disk(self):
+        tf = tempfile.mkdtemp()
+        try:
+            pre = pwd_guess.HybridDiskPreprocessor(pwd_guess.ModelDefaults(
+                min_len = 3, trie_serializer_type = 'fuzzy',
+                trie_implementation = 'disk', intermediate_fname = ':memory:',
+                trie_intermediate_storage = tf,
+                preprocess_trie_on_disk = True,
+                preprocess_trie_on_disk_buff_size = 2))
+            self.assertEqual([('aaa', 1), ('aab', 5), ('caa', 2)], list(
+                pre.preprocess([('aaa', 1), ('caa', 2), ('aab', 5)])))
+        finally:
+            shutil.rmtree(tf)
+
 class DiskPreprocessorTest(unittest.TestCase):
     def setUp(self):
         self.tempfile = tempfile.NamedTemporaryFile()

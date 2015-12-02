@@ -517,7 +517,7 @@ class ModelDefaults(object):
     trie_intermediate_storage = ':memory:'
     intermediate_fname = ':memory:'
     preprocess_trie_on_disk = False
-    preprocess_trie_on_disk_buff_size = 10000
+    preprocess_trie_on_disk_buff_size = 100000
     trie_serializer_encoding = 'utf8'
     trie_serializer_type = 'reg'
     save_always = True
@@ -795,6 +795,7 @@ class HybridDiskPreprocessor(TriePreprocessor):
                     for value in values:
                         writer.writerow(value)
             self.buff_size = 0
+            self.buffer = HybridDiskPreprocessor.MemoryCache()
 
         def add_key(self, key, value):
             self.buffer.add_key(key, value)
