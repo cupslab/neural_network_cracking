@@ -250,6 +250,7 @@ class HybridPreprocessorTest(unittest.TestCase):
             # trie_serializer_type = 'fuzzy',
             trie_implementation = 'disk'))
         pre.begin([('aaa', 1), ('caa', 2), ('aab', 5)])
+        pre.reset()
         prefix, suffix, weight = pre.next_chunk()
         exp_prefix = ['', 'a', 'aa', 'aa', '', 'c', 'ca', 'aaa', 'aab', 'caa']
         exp_suffix = ['a', 'a', 'a', 'b', 'c', 'a', 'a', '\n', '\n', '\n']
@@ -283,6 +284,7 @@ class DiskPreprocessorTest(unittest.TestCase):
 
         pre = pwd_guess.DiskPreprocessor(self.config)
         pre.begin()
+        pre.reset()
         prefix, suffix, weight = pre.next_chunk()
         exp_prefix = ['', 'a', 'aa', 'aa']
         exp_suffix = ['a', 'a', 'a', 'b']
@@ -332,6 +334,7 @@ class TriePreprocessorTest(unittest.TestCase):
             max_len = 40, trie_implementation = 'trie')
         trie_p = pwd_guess.TriePreprocessor(config)
         trie_p.begin([('pass', 1)])
+        trie_p.reset()
         prefix, suffix, weight = trie_p.next_chunk()
         self.assertEqual(set(zip(['', 'p', 'pa', 'pas', 'pass'],
                                  ['p', 'a', 's', 's', '\n'],
@@ -343,6 +346,7 @@ class TriePreprocessorTest(unittest.TestCase):
             max_len = 3, min_len = 3, trie_implementation = 'trie')
         trie_p = pwd_guess.TriePreprocessor(config)
         trie_p.begin([('aaa', 1)])
+        trie_p.reset()
         prefix, suffix, weight = trie_p.next_chunk()
         self.assertEqual(set(zip(['', 'a', 'aa', 'aaa'], ['a', 'a', 'a', '\n'],
                                  [1, 1, 1, 1])),
@@ -354,6 +358,7 @@ class TriePreprocessorTest(unittest.TestCase):
             trie_implementation = 'trie')
         p = pwd_guess.TriePreprocessor(config)
         p.begin([('pass', 2)])
+        p.reset()
         prefix, suffix, weight = p.next_chunk()
         self.assertEqual(set(zip(['', 'p', 'pa', 'pas', 'pass'],
                                  ['p', 'a', 's', 's', '\n'],
@@ -367,6 +372,7 @@ class TriePreprocessorTest(unittest.TestCase):
             chunk_print_interval = 1)
         p = pwd_guess.TriePreprocessor(config)
         p.begin([('pass', 2), ('pasw', 3)])
+        p.reset()
         prefix, suffix, weight = p.next_chunk()
         expected_chunks = ['', 'p', 'pa', 'pas', 'pasw', 'pas', 'pass']
         expected_out = ['p', 'a', 's', 'w', '\n', 's', '\n']

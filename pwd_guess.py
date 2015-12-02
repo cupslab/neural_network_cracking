@@ -36,20 +36,19 @@ class BaseTrie(object):
     def increment(self, aword, weight = 1):
         raise NotImplementedError()
 
-    def iterate(self):
+    def iterate(self, serial_type):
         raise NotImplementedError()
 
-    def size(self):
-        raise NotImplementedError()
+    config_keys = {
+        'trie' : lambda _: NodeTrie(),
+        'disk' : lambda c: DiskBackedTrie(c),
+        None : lambda _: BaseTrie()
+    }
 
     @staticmethod
     def fromConfig(config):
-        if config.trie_implementation == 'trie':
-            return NodeTrie()
-        elif config.trie_implementation == 'disk':
-            return DiskBackedTrie(config)
-        elif config.trie_implementation is None:
-            return BaseTrie()
+        if config.trie_implementation in BaseTrie.config_keys:
+            return BaseTrie.config_keys[config.trie_implementation](config)
         logging.error('Unknown trie type %s. ', config.trie_implementation)
 
 class NodeTrie(BaseTrie):
@@ -57,6 +56,9 @@ class NodeTrie(BaseTrie):
         self.nodes = collections.defaultdict(NodeTrie)
         self.weight = 0
         self._size = 0
+
+    def size(self):
+        return self._size
 
     def increment(self, aword, weight = 1):
         self.weight += weight
@@ -69,9 +71,6 @@ class NodeTrie(BaseTrie):
             self._size += returned + answer
             return returned + answer
         return answer
-
-    def size(self):
-        return self._size
 
     def random_iterate(self, cur = ''):
         if cur != '':
@@ -151,10 +150,6 @@ class DiskBackedTrie(BaseTrie):
             yield s
         self.current_branch_key = None
 
-    def size(self):
-        logging.warning('Size on trie is not implemented')
-        return -1
-
 class TrieSerializer(object):
     def __init__(self, fname, max_len, encoding):
         self.fname = fname
@@ -172,9 +167,6 @@ class TrieSerializer(object):
         raise NotImplementedError()
 
     def deserialize(self):
-        return self.do_deserialize()
-
-    def do_deserialize(self):
         raise NotImplementedError()
 
     @staticmethod
@@ -231,7 +223,7 @@ class NodeTrieSerializer(TrieSerializer):
                 .strip(PASSWORD_FRAGMENT_DELIMITER),
                 weight)
 
-    def do_deserialize(self):
+    def deserialize(self):
         with gzip.open(self.fname, 'rb') as afile:
             while True:
                 chunk = afile.read(self.chunk_size)
@@ -276,7 +268,7 @@ class TrieFuzzySerializer(TrieSerializer):
                 pwd, records = item
                 self.write_record(afile, pwd, records)
 
-    def do_deserialize(self):
+    def deserialize(self):
         with gzip.open(self.fname, 'rb') as afile:
             while True:
                 answer = self.read_record(afile)
@@ -517,16 +509,18 @@ class BasePreprocessor(object):
         logging.info('Number of training instances %s', count_instances)
         return count_instances
 
+    config_keys = {
+        'trie' : lambda c: TriePreprocessor(c),
+        'disk' : lambda c: HybridDiskPreprocessor(c),
+        None : lambda c: Preprocessor(c)
+    }
+
     @staticmethod
     def fromConfig(config):
-        if config.trie_implementation == 'trie':
-            logging.info('Trie preprocessor...')
-            return TriePreprocessor(config)
-        elif config.trie_implementation == 'disk':
-            logging.info('Disk trie preprocessor...')
-            return HybridDiskPreprocessor(config)
-        elif config.trie_implementation is None:
-            return Preprocessor(config)
+        logging.info('Preprocessor type %s...', config.trie_implementation)
+        if config.trie_implementation in BasePreprocessor.config_keys:
+            return BasePreprocessor.config_keys[
+                config.trie_implementation](config)
         logging.error('Cannot find trie_implementation %s',
                       config.trie_implementation)
 
@@ -589,16 +583,13 @@ class TriePreprocessor(BasePreprocessor):
         return pwd_list
 
     def begin(self, pwd_list):
-        chunk = 0
         out_pwd_list = self.preprocess(pwd_list)
         for item in out_pwd_list:
             pwd, weight = item
             self.instances += len(pwd) + 1
             self.trie.increment(pwd + PASSWORD_END, weight)
-            chunk += 1
         logging.info('Saving preprocessing step...')
         TrieSerializer.fromConfig(self.config).serialize(self.trie)
-        self.reset()
 
     def compress_list(self, x, y, w):
         for i in range(len(x)):
@@ -606,13 +597,15 @@ class TriePreprocessor(BasePreprocessor):
             self.instances += 1
 
     def reset(self):
-        self.current_generator = self.trie.iterate(
-            self.config.trie_serializer_type)
-
+        self.set_iterator()
         if self.config.randomize_training_order:
             self.current_generator = list(self.current_generator)
             random.shuffle(self.current_generator)
             self.current_generator = iter(self.current_generator)
+
+    def set_iterator(self):
+        self.current_generator = self.trie.iterate(
+            self.config.trie_serializer_type)
 
     def next_chunk(self):
         x, y, w = [], [], []
@@ -631,13 +624,11 @@ class TriePreprocessor(BasePreprocessor):
 
 class DiskPreprocessor(TriePreprocessor):
     def begin(self, pwd_file = None):
-        trie_file = pwd_file if pwd_file is not None else self.config.trie_fname
         self.serializer = TrieSerializer.getFactory(self.config)(
-            trie_file, self.config.max_len,
-            self.config.trie_serializer_encoding)
-        self.reset()
+            pwd_file if pwd_file is not None else self.config.trie_fname,
+            self.config.max_len, self.config.trie_serializer_encoding)
 
-    def reset(self):
+    def set_iterator(self):
         self.current_generator = self.serializer.deserialize()
 
 class HybridDiskPreprocessor(TriePreprocessor):
