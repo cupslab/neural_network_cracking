@@ -4,6 +4,7 @@ from __future__ import print_function
 from keras.models import Sequential, slice_X, model_from_json
 from keras.layers.core import Activation, Dense, RepeatVector, TimeDistributedDense, Dropout
 from keras.layers import recurrent
+import keras.utils.layer_utils as layer_utils
 from keras.optimizers import SGD
 from seya.layers.recurrent import Bidirectional
 from sklearn.utils import shuffle
@@ -589,7 +590,7 @@ class ModelSerializer(object):
 
     def load_model(self):
         # To be able to load models
-        globals()['Bidirectional'] = Bidirectional
+        layer_utils.Bidirectional = Bidirectional
 
         # This is for unittesting
         def mock_predict_smart_parallel(distribution, input_vec, **kwargs):
