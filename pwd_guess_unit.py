@@ -22,6 +22,7 @@ import re
 import logging
 import itertools
 import sys
+import glob
 
 import pwd_guess
 import generator
@@ -916,6 +917,24 @@ class ModelSerializerTest(unittest.TestCase):
                 serializer.model_creator_from_json = MagicMock(
                     return_value = mock)
                 serializer.load_model()
+
+    def test_model_serializer_versioned(self):
+        mock = Mock()
+        write_value = '{}'
+        mock.to_json = MagicMock(return_value = write_value)
+        mock.save_weights = MagicMock()
+        mock.load_weights = MagicMock()
+        with tempfile.NamedTemporaryFile() as fp:
+            with tempfile.NamedTemporaryFile() as tp:
+                serializer = pwd_guess.ModelSerializer(fp.name, tp.name,
+                                                       versioned = True)
+                serializer.save_model(mock)
+                mock.save_weights.assert_called_once_with(
+                    tp.name + '.1', overwrite = True)
+                mock.save_weights.reset_mock()
+                serializer.save_model(mock)
+                mock.save_weights.assert_called_once_with(
+                    tp.name + '.2', overwrite = True)
 
 class GuesserTest(unittest.TestCase):
     def mock_model(self, config, distribution):
@@ -1921,6 +1940,19 @@ class PolicyTests(unittest.TestCase):
         self.assertFalse(policy.pwd_complies('111*Asdf'))
         self.assertFalse(policy.pwd_complies('999Apple*'))
         self.assertTrue(policy.pwd_complies('111*jjjJ'))
+
+class PasswordPolicyEnforcingSerializerTest(unittest.TestCase):
+    def test_serializer(self):
+        config = Mock()
+        config.enforced_policy = 'complex'
+        policy = pwd_guess.BasePasswordPolicy.fromConfig(config)
+        mock_serializer = Mock()
+        mock_serializer.serialize = MagicMock()
+        serializer = pwd_guess.PasswordPolicyEnforcingSerializer(
+            policy, mock_serializer)
+        serializer.serialize('asdfasdf', .2)
+        serializer.serialize('A111*aajf', .1)
+        mock_serializer.serialize.assert_called_once_with('A111*aajf', .1)
 
 if __name__ == '__main__':
     unittest.main()

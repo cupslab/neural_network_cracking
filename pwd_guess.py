@@ -492,10 +492,12 @@ class OptimizingCharacterTable(CharacterTable):
         return astring.translate(self.translate_table)
 
 class ModelSerializer(object):
-    def __init__(self, archfile = None, weightfile = None):
+    def __init__(self, archfile = None, weightfile = None, versioned = False):
         self.archfile = archfile
         self.weightfile = weightfile
         self.model_creator_from_json = model_from_json
+        self.versioned = versioned
+        self.saved_counter = 0
 
     def save_model(self, model):
         if self.archfile is None or self.weightfile is None:
@@ -506,7 +508,11 @@ class ModelSerializer(object):
         with open(self.archfile, 'w') as arch:
             arch.write(model.to_json())
         logging.info('Saving model weights')
-        model.save_weights(self.weightfile, overwrite = True)
+        self.saved_counter += 1
+        weight_fname = self.weightfile
+        if self.versioned:
+            weight_fname += '.' + str(self.saved_counter)
+        model.save_weights(weight_fname, overwrite = True)
         logging.info('Done saving model')
 
     def load_model(self):
@@ -573,6 +579,7 @@ class ModelDefaults(object):
     trie_serializer_encoding = 'utf8'
     trie_serializer_type = 'reg'
     save_always = True
+    save_model_versioned = False
     randomize_training_order = True
     toc_chunk_size = 1000
     model_truncate_gradient = -1
@@ -1535,7 +1542,7 @@ class PasswordPolicyEnforcingSerializer(DelegatingSerializer):
         self.policy = policy
 
     def serialize(self, pwd, prob):
-        if self.policy.password_complies(pwd):
+        if self.policy.pwd_complies(pwd):
             self.serializer.serialize(pwd, prob)
 
 class Guesser(object):
@@ -2171,7 +2178,8 @@ def train(args, config):
     if preprocessor is None:
         return
     trainer = (Trainer.getFactory(config))(preprocessor, config)
-    serializer = ModelSerializer(args['arch_file'], args['weight_file'])
+    serializer = ModelSerializer(args['arch_file'], args['weight_file'],
+                                 config.save_model_versioned)
     if args['retrain']:
         logging.info('Retraining model...')
         trainer.model = serializer.load_model()
