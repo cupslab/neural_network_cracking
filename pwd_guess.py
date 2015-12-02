@@ -1175,9 +1175,6 @@ class Guesser(object):
         logging.error('Unknown serialization method %s',
                       config.guess_serialization_method)
 
-    def cond_prob_from_preds(self, char, preds):
-        return preds[self.ctable.get_char_index(char)]
-
     def relevel_prediction(self, preds, astring):
         if not self.filterer.pwd_is_valid(astring, quick = True):
             preds[self.ctable.get_char_index(PASSWORD_END)] = 0
@@ -1228,22 +1225,18 @@ class Guesser(object):
             elif char != PASSWORD_END:
                 yield chain_pass, chain_prob
 
-    def next_node_chunker(self, astring, prob, cached_prefixes):
-        for next_node in self.next_nodes(astring, prob, cached_prefixes):
-            yield next_node
-
     def super_node_recur(self, node_list):
         prefixes = list(map(lambda x: x[0], node_list))
         if len(prefixes) == 0:
             return
-        logging.info('Super node buffer size %s', len(prefixes))
+        logging.info('Super node buffer size %s, guess number %s',
+                     len(prefixes), self.generated)
         predictions = self.conditional_probs_many(prefixes)
         cached_prefixes = dict(zip(prefixes, predictions))
         node_batch = []
         for cur_node in node_list:
             astring, prob = cur_node
-            for next_node in self.next_node_chunker(
-                    astring, prob, cached_prefixes):
+            for next_node in self.next_nodes(astring, prob, cached_prefixes):
                 node_batch.append(next_node)
                 if len(node_batch) == self.chunk_size_guesser:
                     self.super_node_recur(node_batch)
