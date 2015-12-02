@@ -1474,7 +1474,7 @@ class RandomWalkGuesserTest(unittest.TestCase):
                     output, delimiter = '\t', quotechar = None))
                 self.assertEqual(len(reader), 2)
                 for row in reader:
-                    pwd, prob, gn = row
+                    pwd, prob, gn, *_ = row
                     self.assertTrue(pwd == 'aaa' or pwd == 'bbb')
                     self.assertEqual(prob, '0.008' if pwd == 'aaa' else '0.512')
                     self.assertAlmostEqual(float(gn), 8 if pwd == 'aaa' else 1, delta = 2)
@@ -1503,7 +1503,7 @@ class RandomWalkGuesserTest(unittest.TestCase):
                     output, delimiter = '\t', quotechar = None))
                 self.assertEqual(len(reader), 2)
                 for row in reader:
-                    pwd, prob, gn = row
+                    pwd, prob, gn, *_ = row
                     self.assertTrue(pwd == 'aaaa' or pwd == 'bbbba')
                     self.assertEqual(prob, '0.0004' if pwd == 'aaaa' else '0.02048')
                     self.assertAlmostEqual(float(gn), 50 if pwd == 'aaaa' else 15, delta = 2)

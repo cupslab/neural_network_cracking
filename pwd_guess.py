@@ -1513,6 +1513,8 @@ class RandomWalkSerializer(GuessSerializer):
         self.total_guessed += 1
 
 class RandomWalkGuesser(Guesser):
+    ERROR_BOUNDS_95_PERCENT_THETA = 1.96
+
     def super_node_recur(self, node_list):
         real_node_list = []
         done_node_list = []
@@ -1521,8 +1523,7 @@ class RandomWalkGuesser(Guesser):
             if len(pwd) <= self.max_len:
                 real_node_list.append(node)
             elif len(pwd) > self.max_len and pwd[-1] == PASSWORD_END:
-                self.cost_sum += cost_fn
-                self.cost_num += 1
+                self.estimates.append(cost_fn)
         if len(real_node_list) == 0:
             return
         predictions = self.batch_prob(real_node_list)
@@ -1531,8 +1532,7 @@ class RandomWalkGuesser(Guesser):
             astring, prob, d_accum, cost_accum = cur_node
             poss_next = list(self.next_nodes(astring, prob, predictions[i][0]))
             if len(poss_next) == 0:
-                self.cost_sum += cost_accum
-                self.cost_num += 1
+                self.estimates.append(cost_accum)
                 continue
             pwd, prob, pred = self.choose_next_node(poss_next)
             d_accum_next = d_accum / pred
@@ -1582,18 +1582,23 @@ class RandomWalkGuesser(Guesser):
             pwd, prob = prob_node
             logging.info('Calculating guess number for %s at %s', pwd, prob)
             self.lower_probability_threshold = prob
-            self.cost_sum = 0
-            self.cost_num = 0
+            self.estimates = []
             for _ in range(self.config.random_walk_seed_iterations):
                 self.super_node_recur(list(self.seed_data()))
-            if self.cost_num != 0:
-                cost = self.cost_sum / self.cost_num
+            if len(self.estimates) != 0:
+                cost = np.average(self.estimates)
+                stdev = np.std(self.estimates)
+                error = self.ERROR_BOUNDS_95_PERCENT_THETA * (
+                    stdev / math.sqrt(len(self.estimates)))
             else:
                 logging.error(("Number of passwords guessed is 0 for all "
                                "branches! I don't know what this means"
                                "but its probably a bug. "))
-                cost = 1
-            self.ostream.write('%s\t%s\t%s\n' % (pwd, prob, cost))
+                cost = -1
+                stdev = -1
+                error = -1
+            self.ostream.write('%s\t%s\t%s\t%s\t%s\t%s\n' % (
+                pwd, prob, cost, stdev, len(self.estimates), error))
             self.ostream.flush()
 
 class GuesserBuilderError(Exception): pass
@@ -1749,11 +1754,14 @@ class ParallelGuesser(Guesser):
         def prepare(args, pnum):
             argfname = prefix_sb_conf + pnum
             ofile = prefix_output + pnum
+            config_mod = self.config.as_dict()
+            config_mod['max_gpu_prediction_size'] = math.floor(
+                self.config.max_gpu_prediction_size / pool_size)
             with open(argfname, 'w') as config_fname:
                 json.dump({
                     'nodes' : args,
                     'ofile' : ofile,
-                    'config' : self.config.as_dict(),
+                    'config' : config_mod,
                     'model' : [
                         self.serializer.archfile, self.serializer.weightfile
                     ]}, config_fname)
