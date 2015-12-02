@@ -1159,6 +1159,7 @@ class Guesser(object):
         self.filterer = Filterer(self.config)
         self.chunk_size_guesser = self.config.chunk_size_guesser
         self.output_serializer = self.make_serializer(ostream)
+        self.chars_list = self.ctable.chars
 
     def make_serializer(self, ostream):
         if self.config.guess_serialization_method == 'human':
@@ -1215,11 +1216,11 @@ class Guesser(object):
     def next_nodes(self, astring, prob, cache):
         prediction = self._conditional_probs(astring, cache)
         total_preds = np.array(prediction) * prob
-        for char in self.ctable.chars:
-            chain_pass = astring + char
-            chain_prob = total_preds[self.ctable.get_char_index(char)]
+        for i, char in enumerate(self.chars_list):
+            chain_prob = total_preds[i]
             if chain_prob < self.lower_probability_threshold:
                 continue
+            chain_pass = astring + char
             if char == PASSWORD_END:
                 self.output_serializer.serialize(chain_pass, chain_prob)
                 self.generated += 1
