@@ -858,7 +858,7 @@ aaa	0.0625
                 min_len = 3, max_len = 3, char_bag = 'ab\n',
                 lower_probability_threshold = 10**-2,
                 guess_serialization_method = 'calculator',
-                password_test_list = pwd_file.name)
+                password_test_fname = pwd_file.name)
             mock_model = Mock()
             mock_model.predict = smart_mock_predict
             guesser = (pwd_guess.GuesserBuilder(config)

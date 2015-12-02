@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# William Melicher
+# author: William Melicher
 from __future__ import print_function
 from keras.models import Sequential, slice_X, model_from_json
 from keras.layers.core import Activation, Dense, RepeatVector, TimeDistributedDense
@@ -1146,6 +1146,10 @@ class Guesser(object):
     def __init__(self, model, config, ostream):
         self.model = model
         self.config = config
+        self.max_len = config.max_len
+        self.lower_probability_threshold = config.lower_probability_threshold
+        self.relevel_not_matching_passwords = (
+            config.relevel_not_matching_passwords)
         self.generated = 0
         self.ctable = CharacterTable.fromConfig(self.config)
         self.filterer = Filterer(self.config)
@@ -1167,7 +1171,7 @@ class Guesser(object):
     def relevel_prediction(self, preds, astring):
         if not self.filterer.pwd_is_valid(astring):
             preds[self.ctable.get_char_index(PASSWORD_END)] = 0
-        elif len(astring) == self.config.max_len:
+        elif len(astring) == self.max_len:
             for c in self.ctable.chars:
                 preds[self.ctable.get_char_index(c)] = (
                     1 if c == PASSWORD_END else 0)
@@ -1185,15 +1189,15 @@ class Guesser(object):
     def conditional_probs_many(self, astring_list):
         answer = self.model.predict(self.ctable.encode_many(astring_list),
                                     verbose = 0)
-        if self.config.relevel_not_matching_passwords:
+        if self.relevel_not_matching_passwords:
             self.relevel_prediction_many(answer, astring_list)
         return answer
 
     def recur(self, astring = '', prob = 1):
-        if prob < self.config.lower_probability_threshold:
+        if prob < self.lower_probability_threshold:
             return
-        if len(astring) > self.config.max_len:
-            if len(astring.strip(PASSWORD_END)) == self.config.max_len:
+        if len(astring) > self.max_len:
+            if len(astring.strip(PASSWORD_END)) == self.max_len:
                 self.output_serializer.serialize(astring, prob)
                 self.generated += 1
             return
