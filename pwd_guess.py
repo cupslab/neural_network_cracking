@@ -769,6 +769,7 @@ class HybridDiskPreprocessor(TriePreprocessor):
             self.file_name_mapping = {}
             self.storage_dir = config.trie_intermediate_storage
             self.buff_size = 0
+            self.flush_count = 0
             self.chunk_size = config.preprocess_trie_on_disk_buff_size
             if not os.path.exists(self.storage_dir):
                 os.mkdir(self.storage_dir)
@@ -783,6 +784,8 @@ class HybridDiskPreprocessor(TriePreprocessor):
             return os.path.join(self.storage_dir, self.file_name_mapping[key])
 
         def flush_buff(self):
+            logging.info('Flushing %s passwords: num_flushed %s',
+                         self.chunk_size, self.flush_count)
             for key in sorted(self.buffer.cache.keys()):
                 if key not in self.file_name_mapping:
                     fname = self.santize(key)
@@ -796,6 +799,7 @@ class HybridDiskPreprocessor(TriePreprocessor):
                         writer.writerow(value)
             self.buff_size = 0
             self.buffer = HybridDiskPreprocessor.MemoryCache()
+            self.flush_count += 1
 
         def add_key(self, key, value):
             self.buffer.add_key(key, value)
