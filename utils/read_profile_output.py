@@ -4,7 +4,7 @@ import pstats
 
 def main(args):
     stat = pstats.Stats(args.ifile)
-    stat.sort_stats('cumtime')
+    stat.sort_stats('tottime')
     stat.print_stats()
 
 if __name__=='__main__':

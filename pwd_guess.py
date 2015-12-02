@@ -544,8 +544,6 @@ class ModelDefaults(object):
             assert self.simulated_frequency_optimization
             assert self.trie_implementation is not None
         assert self.fork_length < self.min_len
-        if self.model_truncate_gradient != -1:
-            assert self.model_truncate_gradient < self.max_len
 
     def as_dict(self):
         answer = dict(vars(ModelDefaults).copy())
