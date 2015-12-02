@@ -815,6 +815,20 @@ aa	0.125
 aaa	0.0625
 """, ostream.getvalue())
 
+    def test_guesser_small_batch(self):
+        config = pwd_guess.ModelDefaults(
+            min_len = 3, max_len = 3, char_bag = 'a\n',
+            lower_probability_threshold = 10**-2,
+            max_gpu_prediction_size = 3,
+            relevel_not_matching_passwords = False)
+        guesser, ostream = self.make(config, [0.5, 0.5])
+        guesser.guess()
+        self.assertEqual("""	0.5
+a	0.25
+aa	0.125
+aaa	0.0625
+""", ostream.getvalue())
+
     def test_guesser_small_chunk(self):
         config = pwd_guess.ModelDefaults(
             min_len = 3, max_len = 3, char_bag = 'a\n',

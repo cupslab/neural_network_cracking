@@ -50,7 +50,8 @@ def grouper(iterable, n, fillvalue=None):
     "Collect data into fixed-length chunks or blocks"
     # grouper('ABCDEFG', 3, 'x') --> ABC DEF Gxx"
     args = [iter(iterable)] * n
-    return itertools.zip_longest(*args, fillvalue=fillvalue)
+    return map(lambda x: filter(lambda y: y, x),
+               itertools.zip_longest(*args, fillvalue=fillvalue))
 
 class BaseTrie(object):
     def increment(self, aword, weight = 1):
@@ -578,6 +579,7 @@ class ModelDefaults(object):
     chunk_size_guesser = 1000
     random_walk_seed_num = 1000
     random_walk_seed_iterations = 1
+    max_gpu_prediction_size = 25000
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -1360,6 +1362,7 @@ class Guesser(object):
         self.config = config
         self.max_len = config.max_len
         self.char_bag = config.char_bag
+        self.max_gpu_prediction_size = config.max_gpu_prediction_size
         self.lower_probability_threshold = config.lower_probability_threshold
         self.relevel_not_matching_passwords = (
             config.relevel_not_matching_passwords)
@@ -1460,6 +1463,16 @@ class Guesser(object):
         prefixes = list(map(lambda x: x[0], node_list))
         logging.info('Super node buffer size %s, guess number %s',
                      len(prefixes), self.generated)
+        if len(prefixes) > self.max_gpu_prediction_size:
+            answer = np.zeros((0, 1, self.max_len))
+            max_chunks = math.ceil(self.max_gpu_prediction_size / len(prefixes))
+            for chunk_num in range(max_chunks):
+                prefix_chunk = prefixes[
+                    self.max_gpu_prediction_size * chunk_num:
+                    self.max_gpu_prediction_size * (chunk_num + 1)]
+                answer_chunk = self.conditional_probs_many(prefix_chunk)
+                np.concatenate((answer, answer_chunk), 0, answer)
+            return answer
         return self.conditional_probs_many(prefixes)
 
     def super_node_recur(self, node_list):
@@ -1581,6 +1594,7 @@ class RandomWalkGuesser(Guesser):
                                "but its probably a bug. "))
                 cost = 1
             self.ostream.write('%s\t%s\t%s\n' % (pwd, prob, cost))
+            self.ostream.flush()
 
 class GuesserBuilderError(Exception): pass
 
@@ -1729,6 +1743,9 @@ class ParallelGuesser(Guesser):
             self.config.guesser_intermediate_directory,
             FNAME_PREFIX_PROCESS_OUT)
         logging.info('Preparing subprocess data')
+        prefix_tdir = os.path.join(
+            self.config.guesser_intermediate_directory,
+            FNAME_PREFIX_THEANO_COMPILE)
         def prepare(args, pnum):
             argfname = prefix_sb_conf + pnum
             ofile = prefix_output + pnum
@@ -1740,9 +1757,7 @@ class ParallelGuesser(Guesser):
                     'model' : [
                         self.serializer.archfile, self.serializer.weightfile
                     ]}, config_fname)
-            return (argfname, prefix_pl_conf + pnum, tempfile.mkdtemp(
-                prefix = FNAME_PREFIX_THEANO_COMPILE + pnum,
-                dir = self.config.guesser_intermediate_directory), ofile)
+            return (argfname, prefix_pl_conf + pnum, prefix_tdir + pnum, ofile)
         subarglist = []
         for i, arg_chunk in enumerate(grouper(arglist, pool_size)):
             subarglist.append(prepare(list(arg_chunk), str(i + 1)))
