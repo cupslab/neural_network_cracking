@@ -588,6 +588,13 @@ class TrainerTest(unittest.TestCase):
         t.build_model()
         self.assertNotEqual(None, t.model)
 
+    def test_build_model_bidirectional(self):
+        t = pwd_guess.Trainer(['pass'], pwd_guess.ModelDefaults(
+            hidden_size = 12, layers = 1,
+            bidirectional_rnn = True))
+        t.build_model()
+        self.assertNotEqual(None, t.model)
+
     def test_train_set_np_two(self):
         config = pwd_guess.ModelDefaults()
         pre = pwd_guess.Preprocessor(config)

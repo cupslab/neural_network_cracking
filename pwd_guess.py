@@ -5,6 +5,7 @@ from keras.models import Sequential, slice_X, model_from_json
 from keras.layers.core import Activation, Dense, RepeatVector, TimeDistributedDense, Dropout
 from keras.layers import recurrent
 from keras.optimizers import SGD
+from seya.layers.recurrent import Bidirectional
 from sklearn.utils import shuffle
 import numpy as np
 from sqlitedict import SqliteDict
@@ -681,6 +682,7 @@ class ModelDefaults(object):
     final_schedule_ratio  = .05
     context_length = None
     train_backwards = False
+    bidirectional_rnn = False
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -1039,10 +1041,16 @@ class Trainer(object):
         for _ in range(self.config.layers):
             if self.config.dropouts:
                 model.add(Dropout(self.config.dropout_ratio))
-            model.add(model_type(
+            actual_layer = lambda: model_type(
                 self.config.hidden_size, return_sequences=True,
                 truncate_gradient=self.config.model_truncate_gradient,
-                go_backwards=self.config.train_backwards))
+                go_backwards=self.config.train_backwards)
+            if self.config.bidirectional_rnn:
+                model.add(Bidirectional(
+                    actual_layer(), actual_layer(), return_sequences=True,
+                    truncate_gradient=self.config.model_truncate_gradient))
+            else:
+                model.add(actual_layer())
         model.add(TimeDistributedDense(len(self.ctable.chars)))
         model.add(Activation('softmax'))
         model.compile(loss='categorical_crossentropy',
@@ -1623,8 +1631,9 @@ class ComplexPasswordPolicy(BasePasswordPolicy):
     non_symbols = set(
         string.digits + string.ascii_uppercase + string.ascii_lowercase)
 
-    def __init__(self):
+    def __init__(self, required_length = 8):
         self.blacklist = set()
+        self.required_length = required_length
 
     def load_blacklist(self, fname):
         with open(fname, 'r') as blacklist:
@@ -1644,7 +1653,7 @@ class ComplexPasswordPolicy(BasePasswordPolicy):
 
     def pwd_complies(self, pwd):
         pwd = pwd.strip(PASSWORD_END)
-        if len(pwd) < 8:
+        if len(pwd) < self.required_length:
             return False
         if not self.has_group(pwd, self.digits):
             return False
@@ -1659,7 +1668,7 @@ class ComplexPasswordPolicy(BasePasswordPolicy):
 class ComplexPasswordPolicyLowercase(ComplexPasswordPolicy):
     def pwd_complies(self, pwd):
         pwd = pwd.strip(PASSWORD_END)
-        if len(pwd) < 8:
+        if len(pwd) < self.required_length:
             return False
         if not self.has_group(pwd, self.digits):
             return False
@@ -1673,7 +1682,9 @@ policy_list = {
     'complex' : ComplexPasswordPolicy(),
     'basic' : BasicPolicy(),
     'basic_long' : PasswordPolicy('.{8}.*'),
-    'complex_lowercase' : ComplexPasswordPolicyLowercase()
+    'complex_lowercase' : ComplexPasswordPolicyLowercase(),
+    'complex_long' : ComplexPasswordPolicy(16),
+    'complex_long_lowercase' : ComplexPasswordPolicyLowercase(16)
 }
 
 class PasswordPolicyEnforcingSerializer(DelegatingSerializer):
