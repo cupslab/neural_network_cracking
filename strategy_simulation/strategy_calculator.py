@@ -16,8 +16,11 @@ class Strategy(object):
     def calculate_hash_nums(self):
         raise NotImplementedError
 
-    def output(self, ofile):
-        answer = sorted(self.calculate_hash_nums())
+    def output(self, ofile, sort = True):
+        answer = self.calculate_hash_nums()
+        if not sort:
+            return answer
+        answer = sorted(answer)
         try:
             last_one = (len(answer) - 1) - answer[::-1].index(self.NOT_CRACKED)
             answer = answer[last_one + 1:] + answer[:last_one + 1]
@@ -136,13 +139,14 @@ def main(args):
     strat = strat_map[args.strategy](
         read_probability_file(args.probability_file),
         read_password_file(args.test_password_file))
-    strat.output(args.ofile)
+    strat.output(args.ofile, args.no_sort)
 
 if __name__=='__main__':
     parser = argparse.ArgumentParser(description='Simulate strategies')
     parser.add_argument('strategy', choices = sorted(strat_map.keys()))
     parser.add_argument('test_password_file')
     parser.add_argument('probability_file')
+    parser.add_argument('--no-sort', action='store_false')
     parser.add_argument('--ofile', default=sys.stdout,
                         type=argparse.FileType('w'))
     main(parser.parse_args())
