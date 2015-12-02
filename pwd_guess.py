@@ -446,9 +446,8 @@ class Filterer(object):
         char_freqs = {}
         for key in self.frequencies:
             char_freqs[key] = self.frequencies[key] / self.total_characters
-        logging.info('Character distributions: %s',
-                     json.dumps(char_freqs, indent = 4))
         self.config.rare_character_bag = self.rare_characters()
+        logging.info('Rare characters: %s', self.config.rare_character_bag)
 
     def filter(self, alist):
         return filter(self.pwd_is_valid, alist)
