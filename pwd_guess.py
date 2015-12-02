@@ -607,7 +607,8 @@ class ModelDefaults(object):
             assert self.trie_implementation is not None
         assert self.fork_length < self.min_len
         assert self.max_len <= 255
-        if self.guess_serialization_method == 'calculator':
+        if (self.guess_serialization_method == 'calculator' and
+            self.password_test_fname):
             assert os.path.exists(self.password_test_fname)
         if self.rare_character_optimization_guessing:
             assert (self.rare_character_optimization or
@@ -1345,13 +1346,28 @@ class Guesser(object):
         return self.conditional_probs_many([astring])[0][0].copy()
 
     def conditional_probs_many(self, astring_list):
-        answer = np.array(
-            self.model.predict(self.ctable.encode_many(astring_list),
-                               verbose = 0,
-                               batch_size = self.chunk_size_guesser))
+        answer = self.model.predict(self.ctable.encode_many(astring_list),
+                                    verbose = 0,
+                                    batch_size = self.chunk_size_guesser)
+        answer = np.array(answer)
         if self.relevel_not_matching_passwords:
             self.relevel_prediction_many(answer, astring_list)
         return answer
+
+    def next_nodes(self, astring, prob, prediction):
+        total_preds = prediction * prob
+        for i, char in enumerate(self.chars_list):
+            chain_prob = total_preds[i]
+            if chain_prob < self.lower_probability_threshold:
+                continue
+            chain_pass = astring + char
+            if char == PASSWORD_END:
+                self.output_serializer.serialize(chain_pass, chain_prob)
+                self.generated += 1
+            elif len(chain_pass) > self.max_len:
+                continue
+            elif char != PASSWORD_END:
+                yield chain_pass, chain_prob
 
     def super_node_recur(self, node_list):
         prefixes = list(map(lambda x: x[0], node_list))
@@ -1363,8 +1379,7 @@ class Guesser(object):
         node_batch = []
         for i, cur_node in enumerate(node_list):
             astring, prob = cur_node
-            for next_node in generator.next_nodes(
-                    self, astring, prob, predictions[i][0]):
+            for next_node in self.next_nodes(astring, prob, predictions[i][0]):
                 node_batch.append(next_node)
                 if len(node_batch) == self.chunk_size_guesser:
                     self.super_node_recur(node_batch)

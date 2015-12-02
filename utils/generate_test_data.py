@@ -6,15 +6,22 @@
 import sys
 import argparse
 import random
+import collections
 
 import pwd_guess as pg
 
-def main(args):
-    config = pg.ModelDefaults.fromFile(args.config)
-    pwd_lister = pg.PwdList.getFactory(args.format, config)(args.ifile)
+TEST_SUFFIX = '.test'
+TRAIN_SUFFIX = '.train'
+
+def pwds(ifile, fmt, config_file):
+    config = pg.ModelDefaults.fromFile(config_file)
+    pwd_lister = pg.PwdList.getFactory(fmt, config)(ifile)
     filterer = pg.Filterer(config)
+    return filterer.filter(pwd_lister.as_list())
+
+def main(args):
     sample_buffer = []
-    for i, pwd in enumerate(filterer.filter(pwd_lister.as_list())):
+    for i, pwd in enumerate(pwds(args.ifile, args.format, args.config)):
         pwd, weight = pwd
         for j in range(weight):
             num_seen = i + j
@@ -23,12 +30,16 @@ def main(args):
             elif (num_seen >= args.num and
                   random.random() < args.num / float(num_seen + 1)):
                 sample_buffer[random.randint(0, len(sample_buffer) - 1)] = pwd
-    ofname = config.password_test_fname
-    if args.ofile:
-        ofname = args.ofile
-    with open(ofname, 'w') as ofile:
+    ofname = args.oprefix
+    with open(ofname + TEST_SUFFIX, 'w') as ofile:
         for pwd in sample_buffer:
             ofile.write('%s\n' % pwd)
+    sample_buf_pwds = collections.Counter(sample_buffer)
+    with open(ofname + TRAIN_SUFFIX, 'w') as ofile:
+        for pwd_tup in pwds(args.ifile, args.format, args.config):
+            pwd, weight = pwd_tup
+            new_weight = weight - sample_buf_pwds[weight]
+            ofile.write('%s\t%s\n' % (pwd, float.hex(float(new_weight))))
 
 if __name__=='__main__':
     parser = argparse.ArgumentParser(description='Generate test data')
@@ -36,9 +47,8 @@ if __name__=='__main__':
                         nargs='+', required=True)
     parser.add_argument('-f', '--format', help='Format of input file (s). ',
                         nargs='+', required=True)
-    parser.add_argument('-o', '--ofile',
-                        help=('Output file. If not given, will use '
-                              '"password_test_fname" from the config file. '))
+    parser.add_argument('-o', '--oprefix', required = True,
+                        help=('Output file prefix. '))
     parser.add_argument('-c', '--config', help='Config file. ', required=True)
     parser.add_argument('-n', '--num', type=int, default=10,
                         help='Number of passwords to sample. ')

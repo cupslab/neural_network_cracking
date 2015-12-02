@@ -1350,5 +1350,4 @@ class PasswordTemplateSerializerTest(unittest.TestCase):
             ('B!', .4 * (1/3) * (.1 / .4))]))
 
 if __name__ == '__main__':
-    # logging.basicConfig(level = logging.CRITICAL)
     unittest.main()

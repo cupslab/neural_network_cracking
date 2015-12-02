@@ -1,13 +1,10 @@
-# -*- mode: Python -*-
-# pwd_guess_ctypes.pyx
-
 import numpy as np
 cimport numpy as np
 
-PASSWORD_END = '\n'
+cdef str PASSWORD_END = '\n'
 
 def next_nodes(self, str astring, double prob, np.ndarray prediction):
-    total_preds = prediction * prob
+    cdef np.ndarray total_preds = prediction * prob
     cdef double chain_prob
     cdef str chain_pass
     for i, char in enumerate(self.chars_list):
