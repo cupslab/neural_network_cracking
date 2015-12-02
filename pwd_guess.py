@@ -703,7 +703,8 @@ class DiskPreprocessor(TriePreprocessor):
     def begin(self, pwd_file = None):
         trie_file = pwd_file if pwd_file is not None else self.config.trie_fname
         self.serializer = TrieSerializer.getFactory(self.config)(
-            trie_file, config.max_len, config.trie_serializer_encoding)
+            trie_file, self.config.max_len,
+            self.config.trie_serializer_encoding)
         self.reset()
         self._total_chunks = math.ceil(
             self.serializer.num_records() / self.config.training_chunk)
