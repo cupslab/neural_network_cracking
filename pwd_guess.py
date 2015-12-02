@@ -1205,7 +1205,7 @@ class Guesser(object):
 
     def conditional_probs_many(self, astring_list):
         answer = self.model.predict(self.ctable.encode_many(astring_list),
-                                    verbose = 0)
+                                    verbose = 0, self.chunk_size_guesser)
         if self.relevel_not_matching_passwords:
             answer = np.array(answer)
             self.relevel_prediction_many(answer, astring_list)
