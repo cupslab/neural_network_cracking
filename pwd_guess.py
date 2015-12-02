@@ -625,7 +625,7 @@ class ModelDefaults(object):
         elif (self.rare_character_optimization or
               self.uppercase_character_optimization):
             logging.warning(
-                'Warning, without rare_character_optimization_guessing setting,'
+                'Without rare_character_optimization_guessing setting,'
                 ' output guesses may ignore case or special characters')
 
     def as_dict(self):
