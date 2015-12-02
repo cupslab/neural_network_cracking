@@ -1653,10 +1653,24 @@ class ComplexPasswordPolicy(BasePasswordPolicy):
             return False
         return self.passes_blacklist(pwd)
 
+class ComplexPasswordPolicyLowercase(ComplexPasswordPolicy):
+    def pwd_complies(self, pwd):
+        pwd = pwd.strip(PASSWORD_END)
+        if len(pwd) < 8:
+            return False
+        if not self.has_group(pwd, self.digits):
+            return False
+        if not self.has_group(pwd, self.upper_and_lowercase):
+            return False
+        if self.all_from_group(pwd, self.non_symbols):
+            return False
+        return self.passes_blacklist(pwd)
+
 policy_list = {
     'complex' : ComplexPasswordPolicy(),
     'basic' : BasicPolicy(),
-    'basic_long' : PasswordPolicy('.{8}.*')
+    'basic_long' : PasswordPolicy('.{8}.*'),
+    'complex_lowercase' : ComplexPasswordPolicyLowercase()
 }
 
 class PasswordPolicyEnforcingSerializer(DelegatingSerializer):
@@ -2415,8 +2429,10 @@ def train(args, config):
         logging.info('Retraining model...')
         trainer.model = serializer.load_model()
     trainer.train(serializer)
-    (GuesserBuilder(config).add_serializer(serializer).add_model(trainer.model)
-     .add_file(args['enumerate_ofile'])).build().complete_guessing()
+    if args['enumerate_ofile']:
+        (GuesserBuilder(config).add_serializer(serializer)
+         .add_model(trainer.model)
+         .add_file(args['enumerate_ofile'])).build().complete_guessing()
 
 def guess(args, config):
     logging.info('Loading model...')
@@ -2466,6 +2482,9 @@ def main(args):
         config, args = read_config_args(args)
     else:
         config = ModelDefaults.fromFile(args['config'])
+    if args['arguments']:
+        with open(args['arguments'], 'r') as argfile:
+            args = json.load(argfile)
     init_logging(args)
     config.validate()
     logging.info('Configuration: %s', json.dumps(config.as_dict(), indent = 4))
@@ -2510,6 +2529,7 @@ def make_parser():
                                 'training the model in the weight-file and '
                                 'arch-file arguments. '))
     parser.add_argument('--config', help = 'Config file in json. ')
+    parser.add_argument('--args', help='Argument file in json. ')
     parser.add_argument('--profile',
                         help = 'Profile execution and save to the given file. ')
     parser.add_argument('--log-file')
