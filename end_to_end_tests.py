@@ -255,3 +255,40 @@ aaab\t30""")
                 sorted(pwd_freq, key = lambda x: x[1], reverse = True)))
         print(sort_freq)
         self.assertEqual(['abbbb', 'aaab', 'aaaa', 'abab'], sort_freq[:4])
+
+    def test_skewed_simulate_frequency_super(self):
+        json.dump({
+            "training_chunk" : 64,
+            "layers" : 3,
+            "hidden_size" : 128,
+            "generations" : 10000,
+            "min_len" : 3,
+            "max_len" : 5,
+            "char_bag" : "ab\n",
+            "training_accuracy_threshold": -1,
+            "simulated_frequency_optimization" : True,
+            "trie_implementation" : 'node_trie',
+            "node_serializer_type" : "super",
+            "trie_fname" : ":memory:"
+        }, self.config_file)
+        self.input_file.write("""aaaa\t20
+abbbb\t40
+abab\t10
+aaab\t30""")
+        self.config_file.flush()
+        self.input_file.flush()
+        pwd_guess.main(vars(pwd_guess.make_parser().parse_args([
+            '--pwd-file', self.input_file.name, '--tsv',
+            '--config', self.config_file.name,
+            '--enumerate-ofile', self.output_file.name,
+            '--arch-file', self.archfile.name,
+            '--weight-file', self.weightfile.name,
+            '--log-level', 'error'
+        ])))
+        pwd_freq = [(row[0], float(row[1])) for row in
+                    csv.reader(self.output_file, delimiter = '\t')]
+        sort_freq = list(
+            map(lambda x: x[0],
+                sorted(pwd_freq, key = lambda x: x[1], reverse = True)))
+        print(sort_freq)
+        self.assertEqual(['abbbb', 'aaab', 'aaaa', 'abab'], sort_freq[:4])

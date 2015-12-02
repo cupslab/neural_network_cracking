@@ -1,0 +1,14 @@
+{
+    "training_chunk" : 64,
+    "layers" : 3,
+    "hidden_size" : 128,
+    "generations" : 10000,
+    "min_len" : 3,
+    "max_len" : 5,
+    "char_bag" : "ab\n",
+    "training_accuracy_threshold": -1,
+    "simulated_frequency_optimization" : true,
+    "trie_implementation" : "node_trie",
+    "node_serializer_type" : "super",
+    "trie_fname" : ":memory:"
+}
