@@ -573,6 +573,8 @@ class ModelDefaults(object):
             assert self.trie_implementation is not None
         assert self.fork_length < self.min_len
         assert self.max_len <= 255
+        if self.guess_serialization_method == 'calculator':
+            assert os.path.exists(self.password_test_list)
 
     def as_dict(self):
         answer = dict(vars(ModelDefaults).copy())
