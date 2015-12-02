@@ -1212,22 +1212,18 @@ class Guesser(object):
         return answer
 
     def next_nodes(self, astring, prob, cache):
-        if prob < self.lower_probability_threshold:
-            return
-        if len(astring) > self.max_len:
-            if len(astring.strip(PASSWORD_END)) == self.max_len:
-                self.output_serializer.serialize(astring, prob)
-                self.generated += 1
-            return
         prediction = self._conditional_probs(astring, cache)
         total_preds = np.array(prediction) * prob
         for char in self.ctable.chars:
             chain_pass = astring + char
             chain_prob = total_preds[self.ctable.get_char_index(char)]
-            if (char == PASSWORD_END and
-                chain_prob >= self.lower_probability_threshold):
+            if chain_prob < self.lower_probability_threshold:
+                continue
+            if char == PASSWORD_END:
                 self.output_serializer.serialize(chain_pass, chain_prob)
                 self.generated += 1
+            elif len(chain_pass) > self.max_len:
+                continue
             elif char != PASSWORD_END:
                 yield chain_pass, chain_prob
 
@@ -1236,12 +1232,7 @@ class Guesser(object):
             yield next_node
 
     def super_node_recur(self, node_list):
-        prefixes = list(
-            filter(lambda x: len(x) <= self.max_len,
-                   map(lambda x: x[0],
-                       filter(
-                           lambda x: x[1] >= self.lower_probability_threshold,
-                           node_list))))
+        prefixes = list(map(lambda x: x[0], node_list))
         if len(prefixes) == 0:
             return
         logging.info('Super node buffer size %s', len(prefixes))
