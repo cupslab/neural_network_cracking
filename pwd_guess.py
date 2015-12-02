@@ -534,7 +534,7 @@ class ModelDefaults(object):
     use_mmap = True
     compute_stats = False
     password_test_fname = None
-    chunk_size_guesser = 10000
+    chunk_size_guesser = 1000
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -1157,8 +1157,8 @@ class Guesser(object):
         self.generated = 0
         self.ctable = CharacterTable.fromConfig(self.config)
         self.filterer = Filterer(self.config)
-        self.output_serializer = self.make_serializer(ostream)
         self.chunk_size_guesser = self.config.chunk_size_guesser
+        self.output_serializer = self.make_serializer(ostream)
 
     def make_serializer(self, ostream):
         if self.config.guess_serialization_method == 'human':
@@ -1205,7 +1205,8 @@ class Guesser(object):
 
     def conditional_probs_many(self, astring_list):
         answer = self.model.predict(self.ctable.encode_many(astring_list),
-                                    verbose = 0, self.chunk_size_guesser)
+                                    verbose = 0,
+                                    batch_size = self.chunk_size_guesser)
         if self.relevel_not_matching_passwords:
             answer = np.array(answer)
             self.relevel_prediction_many(answer, astring_list)
