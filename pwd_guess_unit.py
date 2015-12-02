@@ -763,7 +763,7 @@ class PwdListTest(unittest.TestCase):
                 ('pass ', 1), ('word', 1), ('pass', 1), ('word9', 1)])
             concat_list.finish()
             self.assertEqual(list(fact(fnames).as_list()), [
-                ('pass ', 2), ('word', 2), ('pass', .4), ('word9', .4)])
+                ('pass ', 1), ('word', 1), ('pass', .2), ('word9', .2)])
 
     def test_concat_three_diff_weights(self):
         with tempfile.NamedTemporaryFile() as tf:
@@ -792,8 +792,8 @@ class PwdListTest(unittest.TestCase):
                 ('pass', 1), ('word9', 1)])
             concat_list.finish()
             self.assertEqual(list(fact(fnames).as_list()), [
-                ('pass ', 3), ('word', 3), ('pass', 3), ('word9', 3),
-                ('pass', 3), ('word9', 3)])
+                ('pass ', 1), ('word', 1), ('pass', 1), ('word9', 1),
+                ('pass', 1), ('word9', 1)])
 
     def test_concat_twice_lopside(self):
         with tempfile.NamedTemporaryFile() as tf:
@@ -818,8 +818,8 @@ class PwdListTest(unittest.TestCase):
                 ('word9', 1), ('ppppp', 1)])
             concat_list.finish()
             self.assertEqual(list(fact(fnames).as_list()), [
-                ('pass ', 2.5), ('word', 2.5), ('pass', 0.33333333333333337),
-                ('word9', 0.33333333333333337), ('ppppp', 0.33333333333333337)])
+                ('pass ', 1), ('word', 1), ('pass', 0.2),
+                ('word9', 0.2), ('ppppp', 0.2)])
 
 class FiltererTest(unittest.TestCase):
     def test_pwd_is_valid(self):

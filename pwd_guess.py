@@ -2,7 +2,7 @@
 # author: William Melicher
 from __future__ import print_function
 from keras.models import Sequential, slice_X, model_from_json
-from keras.layers.core import Activation, Dense, RepeatVector, TimeDistributedDense
+from keras.layers.core import Activation, Dense, RepeatVector, TimeDistributedDense, Dropout
 from keras.layers import recurrent
 from keras.optimizers import SGD
 from sklearn.utils import shuffle
@@ -602,6 +602,8 @@ class ModelDefaults(object):
     no_end_word_cache = False
     enforced_policy = 'basic'
     pwd_list_weights = {}
+    dropouts = False
+    dropout_ratio = .25
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -946,6 +948,8 @@ class Trainer(object):
             truncate_gradient = self.config.model_truncate_gradient))
         model.add(RepeatVector(1))
         for _ in range(self.config.layers):
+            if self.config.dropouts:
+                model.add(Dropout(self.config.dropout_ratio))
             model.add(self.config.model_type_exec()(
                 self.config.hidden_size, return_sequences = True,
                 truncate_gradient = self.config.model_truncate_gradient))
@@ -1128,8 +1132,7 @@ class ConcatenatingList(object):
         for key in self.config.pwd_list_weights:
             logging.info('Number of unfiltered passwords in %s = %s',
                          key, self.frequencies[key])
-            answer[key] = self.config.pwd_list_weights[key] * (
-                sum_all / self.frequencies[key])
+            answer[key] = self.config.pwd_list_weights[key]
         logging.info('Weights are: %s', answer)
         self.config.set_intermediate_info(self.CONFIG_IM_KEY, answer)
 
