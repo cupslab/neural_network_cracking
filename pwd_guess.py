@@ -1118,7 +1118,8 @@ class ConcatenatingList(object):
         for key in self.config.pwd_list_weights:
             logging.info('Number of unfiltered passwords in %s = %s',
                          key, self.frequencies[key])
-            answer[key] = self.config.pwd_list_weights[key]
+            answer[key] = self.config.pwd_list_weights[key] * (
+                sum_all / self.frequencies[key])
         logging.info('Weights are: %s', answer)
         self.config.set_intermediate_info(self.CONFIG_IM_KEY, answer)
 
