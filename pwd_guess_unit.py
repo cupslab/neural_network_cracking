@@ -21,6 +21,7 @@ import random
 import re
 import logging
 import itertools
+import sys
 
 import pwd_guess
 
@@ -950,28 +951,28 @@ def mock_predict_smart_parallel(input_vec, **kwargs):
         answer.append([[0.5, 0.25, 0.25].copy()])
     return answer
 
-def mock_fork_starter(args):
-    config_dict, serializer_args, node = args
-    mock_model = Mock()
-    mock_model.predict = mock_predict_smart_parallel
-    return pwd_guess.ParallelGuesser.fork_entry_point(
-        mock_model, pwd_guess.ModelDefaults(**config_dict), node)
-
 class ParallelGuesserTest(unittest.TestCase):
     mock_model = Mock()
 
     def setUp(self):
         self.mock_model.predict = mock_predict_smart_parallel
+        self.intermediate_dir = tempfile.mkdtemp()
         self.config = pwd_guess.ModelDefaults(
-            min_len = 3, max_len = 3, char_bag = 'ab\n',
-            fork_length = 2)
+            min_len = 3, max_len = 3, char_bag = 'ab\n', fork_length = 2,
+            guesser_intermediate_directory = self.intermediate_dir)
         self.mock_output = io.StringIO()
-        self.archfile = tempfile.NamedTemporaryFile()
-        self.weightfile = tempfile.NamedTemporaryFile()
+        self.archfile = tempfile.NamedTemporaryFile(mode = 'w', delete = False)
+        self.weightfile = tempfile.NamedTemporaryFile(
+            mode = 'w', delete = False)
         self.serializer = Mock()
         self.serializer.archfile = self.archfile.name
         self.serializer.weightfile = self.weightfile.name
         self.serializer.load_model = MagicMock(return_value = self.mock_model)
+
+    def tearDown(self):
+        shutil.rmtree(self.intermediate_dir)
+        os.remove(self.archfile.name)
+        os.remove(self.weightfile.name)
 
     def test_get_fork_points(self):
         config_dict = self.config.as_dict()
@@ -998,7 +999,10 @@ class ParallelGuesserTest(unittest.TestCase):
     def test_forking(self):
         parallel_guesser = pwd_guess.ParallelGuesser(
             self.serializer, self.config, self.mock_output)
-        parallel_guesser.fork_starter = mock_fork_starter
+        json.dump({
+            'mock_model' : [0.5, 0.25, 0.25]
+        }, self.archfile)
+        self.archfile.flush()
         parallel_guesser.guess()
         pwd_freq = [(row[0], float(row[1])) for row in
                     csv.reader(io.StringIO(self.mock_output.getvalue()),
@@ -1009,6 +1013,17 @@ class ParallelGuesserTest(unittest.TestCase):
                           ('baa', .125), ('bab', .125),
                           ('bba', .125), ('bbb', .125)], sort_freq)
         self.assertEqual(8, parallel_guesser.generated)
+
+    def test_parse_cmd(self):
+        cmd = pwd_guess.ParallelGuesser.subp_command('argfname', 'logfile')
+        self.assertEqual(cmd[2:], [
+            '--forked', '--config-args', 'argfname', '--log-file', 'logfile'])
+        pwd_guess.make_parser().parse_args(cmd[2:])
+
+    def test_map_pool(self):
+        pg = pwd_guess.ParallelGuesser(
+            self.serializer, self.config, self.mock_output)
+        pg.map_pool([(self.config.as_dict(), ['na', 'na'], ['aa', 0.125])])
 
 class GuesserBuilderTest(unittest.TestCase):
     def setUp(self):
@@ -1335,5 +1350,5 @@ class PasswordTemplateSerializerTest(unittest.TestCase):
             ('B!', .4 * (1/3) * (.1 / .4))]))
 
 if __name__ == '__main__':
-    logging.basicConfig(level = logging.CRITICAL)
+    # logging.basicConfig(level = logging.CRITICAL)
     unittest.main()

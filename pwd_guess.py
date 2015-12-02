@@ -28,6 +28,8 @@ import struct
 import os.path
 import mmap
 import bisect
+import unittest
+from unittest.mock import Mock
 
 import generator
 
@@ -35,6 +37,13 @@ PASSWORD_END = '\n'
 
 FNAME_PREFIX_PREPROCESSOR = 'disk_cache.'
 FNAME_PREFIX_TRIE = 'trie_nodes.'
+
+FNAME_PREFIX_SUBPROCESS_CONFIG = 'child_process.'
+FNAME_PREFIX_THEANO_COMPILE = 'theanocompiledir.'
+FNAME_PREFIX_PROCESS_LOG = 'log.child_process.'
+FNAME_PREFIX_PROCESS_OUT = 'out.child_process.'
+
+FORKED_FLAG = 'forked'
 
 class BaseTrie(object):
     def increment(self, aword, weight = 1):
@@ -487,9 +496,24 @@ class ModelSerializer(object):
         logging.info('Done saving model')
 
     def load_model(self):
+        # This is for unittesting
+        def mock_predict_smart_parallel(distribution, input_vec, **kwargs):
+            answer = []
+            for i in range(len(input_vec)):
+                answer.append([distribution.copy()])
+            return answer
         logging.info('Loading model architecture')
         with open(self.archfile, 'r') as arch:
-            model = self.model_creator_from_json(arch.read())
+            arch_data = arch.read()
+            as_json = json.loads(arch_data)
+            if 'mock_model' in as_json:
+                model = Mock()
+                model.predict = lambda x, **kwargs: mock_predict_smart_parallel(
+                    as_json['mock_model'], x, **kwargs)
+                logging.info(
+                    'Using mock model. You should not see this in production. ')
+                return model
+            model = self.model_creator_from_json(arch_data)
         logging.info('Loading model weights')
         model.load_weights(self.weightfile)
         logging.info('Done loading model')
@@ -1278,6 +1302,7 @@ class Guesser(object):
         self.chars_list = self.ctable.chars
         if (type(self.ctable) == OptimizingCharacterTable and
             config.rare_character_optimization_guessing):
+            logging.info('Using template converting password serializer')
             self.output_serializer = PasswordTemplateSerializer(
                 config, self.output_serializer)
 
@@ -1416,10 +1441,15 @@ class GuesserBuilder(object):
         return class_builder(model_or_serializer, self.config, self.ostream)
 
 def fork_starting_point(args):
-    config_dict, serializer_args, node = args
-    return ParallelGuesser.fork_entry_point(
+    config_dict, serializer_args, node, ofname = args
+    generated, ofile_path = ParallelGuesser.fork_entry_point(
         ModelSerializer(*serializer_args).load_model(),
         ModelDefaults(**config_dict), node)
+    with open(ofname, 'w') as outdata:
+        json.dump([generated, ofile_path], outdata)
+
+def mp_fork_starting_point(args):
+    return ParallelGuesser.run_cmd_process(args)
 
 class ParallelGuesser(Guesser):
     def __init__(self, serializer, config, ostream):
@@ -1431,7 +1461,6 @@ class ParallelGuesser(Guesser):
         self.intermediate_files = []
         self.serializer = serializer
         self.real_output = ostream
-        self.fork_starter = fork_starting_point
 
     def super_node_recur(self, node_list):
         continue_nodes = []
@@ -1470,16 +1499,58 @@ class ParallelGuesser(Guesser):
                               self.config.guesser_intermediate_directory)
         self.real_output.flush()
 
+    @staticmethod
+    def subp_command(argfname, logfile):
+        return [sys.executable, os.path.realpath(__file__),
+                '--' + FORKED_FLAG,
+                '--config-args', argfname,
+                '--log-file', logfile]
+
+    @staticmethod
+    def run_cmd_process(args):
+        argfname, logfile, compiledir, output_fname = args
+        logging.info('Launching process: %s', args)
+        env = os.environ.copy()
+        env['THEANO_FLAGS'] = 'compiledir=%s' % compiledir
+        subp.check_call(
+            ParallelGuesser.subp_command(argfname, logfile), env = env)
+        with open(output_fname, 'r') as data:
+            return json.load(data)
+
+    def map_pool(self, arglist):
+        prefix_sb_conf = os.path.join(
+            self.config.guesser_intermediate_directory,
+            FNAME_PREFIX_SUBPROCESS_CONFIG)
+        prefix_pl_conf = os.path.join(
+            self.config.guesser_intermediate_directory,
+            FNAME_PREFIX_PROCESS_LOG)
+        prefix_output = os.path.join(
+            self.config.guesser_intermediate_directory,
+            FNAME_PREFIX_PROCESS_OUT)
+        logging.info('Preparing subprocess data')
+        def prepare(args, pnum):
+            argfname = prefix_sb_conf + pnum
+            ofile = prefix_output + pnum
+            with open(argfname, 'w') as config_fname:
+                json.dump(args + (ofile,), config_fname)
+            return (argfname, prefix_pl_conf + pnum, tempfile.mkdtemp(
+                prefix = FNAME_PREFIX_THEANO_COMPILE + pnum,
+                dir = self.config.guesser_intermediate_directory),
+                    ofile)
+        subarglist = []
+        for i, arg in enumerate(arglist):
+            subarglist.append(prepare(arg, str(i + 1)))
+        return subarglist
+
     def do_forking(self):
         arg_list = self.arg_list()
         # Check that the path exists before forking otherwise there are race
         # conditions
         if not os.path.exists(self.config.guesser_intermediate_directory):
             os.mkdir(self.config.guesser_intermediate_directory)
-        pool = mp.Pool(min(len(arg_list), mp.cpu_count()),
-                       # Important to free resources
-                       maxtasksperchild = 1)
-        result = pool.map_async(self.fork_starter, arg_list)
+        pool = mp.Pool(min(len(arg_list), mp.cpu_count()))
+        prepared_args = self.map_pool(arg_list)
+        result = pool.map_async(mp_fork_starting_point, prepared_args)
         try:
             pool.close()
             pool.join()
@@ -1600,10 +1671,18 @@ def read_config_args(args):
     config.validate()
     return config, arg_ret
 
+def read_fork_args(argfile):
+    with open(argfile, 'r') as args:
+        return json.load(args)
+
 def main(args):
     if args['version']:
         sys.stdout.write(get_version_string() + '\n')
         sys.exit(0)
+    if args[FORKED_FLAG]:
+        init_logging(args)
+        fork_starting_point(read_fork_args(args['config_args']))
+        return
     if args['config_args']:
         config, args = read_config_args(args)
     else:
@@ -1665,6 +1744,8 @@ def make_parser():
                               'stats. '))
     parser.add_argument('--config-args',
                         help = 'File with both configuration and arguments. ')
+    parser.add_argument('--' + FORKED_FLAG, action='store_true',
+                        help='Internal use only. ')
     return parser
 
 if __name__=='__main__':
