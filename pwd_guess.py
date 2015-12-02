@@ -562,12 +562,14 @@ class Trainer(object):
 
     def train_model(self, serializer):
         prev_accuracy = 0
+        max_accuracy = 0
         for gen in range(self.config.generations):
             self.generation = gen + 1
             logging.info('Generation ' + str(gen + 1))
             accuracy = self.train_model_generation()
             logging.info('Generation accuracy: %s', accuracy)
-            if accuracy > prev_accuracy:
+            if accuracy > max_accuracy:
+                max_accuracy = accuracy
                 serializer.save_model(self.model)
             if ((accuracy - prev_accuracy) <
                 self.config.training_accuracy_threshold):
