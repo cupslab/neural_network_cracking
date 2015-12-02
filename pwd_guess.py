@@ -553,6 +553,7 @@ class TriePreprocessor(object):
         self.config = config
         self.instances = 0
         self.trie = BaseTrie.fromConfig(config)
+        self._total_size = 0
 
     def begin(self, prep):
         self.prep = prep
@@ -611,6 +612,8 @@ class NodeTriePreprocessor(TriePreprocessor):
                 logging.info('Done compressing chunk %s of %s',
                              chunk, len(self.pwd_list))
             chunk += 1
+        self._total_size = math.ceil(
+            self.trie.size() / self.config.training_chunk)
         self.reset()
 
 class SuperTriePreprocessor(NodeTriePreprocessor):
@@ -628,10 +631,8 @@ class DiskPreprocessor(TriePreprocessor):
     def begin(self):
         self.serializer = NodeTrieSerializer.fromConfig(self.config)
         self.reset()
-        self._size = self.serializer.num_records()
-
-    def total_chunks(self):
-        return math.ceil(self._size / self.config.training_chunk)
+        self._total_chunks = math.ceil(
+            self.serializer.num_records() / self.config.training_chunk)
 
     def set_generator(self):
         self.current_generator = self.serializer.deserialize()
