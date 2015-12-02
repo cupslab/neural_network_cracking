@@ -44,7 +44,7 @@ class NaiveStrategy(Strategy):
         guess_accum = 0
         for i, pwd_tuple in enumerate(self.guessing_list):
             pwd, prob = pwd_tuple
-            hit_indices = test_map[pwd]
+            hit_indices = test_map[pwd] if pwd in test_map else []
             offset, prev_offset = 0, 0
             for index in hit_indices:
                 for j in range(prev_offset, index):
@@ -73,7 +73,7 @@ class MontyStrat(NaiveStrategy):
             previous_not_done = []
             for j, p in enumerate(prev_probs):
                 _, prev_pwd, _ = p
-                hit_indices = test_map[prev_pwd]
+                hit_indices = test_map[prev_pwd] if prev_pwd in test_map else []
                 previous_not_done.append([0] * len(hit_indices))
                 prev, accum = 0, 0
                 for l, index in enumerate(hit_indices):
@@ -84,7 +84,7 @@ class MontyStrat(NaiveStrategy):
                     prev = index
             for j, p in enumerate(prev_probs):
                 _, prev_pwd, _ = p
-                hit_indices = test_map[prev_pwd]
+                hit_indices = test_map[prev_pwd] if prev_pwd in test_map else []
                 for l, index in enumerate(hit_indices):
                     answer[index] = first_accum + (
                         depth * (index - previous_not_done[j][l]) + j + 1)
@@ -102,6 +102,7 @@ class MontyStrat(NaiveStrategy):
             pwd, prob = pwd_tuple
             accum_prob -= prob
             real_prob = prob / accum_prob
+            assert len(prev_probs) < 10000, 'Running out of memory!'
             if len(prev_probs) > 0 and (real_prob < prev_probs[-1][0]):
                 flush()
                 prev_probs = []
