@@ -1291,6 +1291,8 @@ class GuessNumberGenerator(GuessSerializer):
         self.collected_total_count = 0
 
     def serialize(self, _, prob):
+        if prob == 0:
+            return
         self.total_guessed += 1
         idx = bisect.bisect_left(self.probs, prob) - 1
         if idx >= 0:
@@ -1552,6 +1554,8 @@ class PasswordPolicyEnforcingSerializer(DelegatingSerializer):
     def serialize(self, pwd, prob):
         if self.policy.pwd_complies(pwd):
             self.serializer.serialize(pwd, prob)
+        else:
+            self.serializer.serialize(pwd, 0)
 
 class Guesser(object):
     def __init__(self, model, config, ostream, prob_cache = None):
@@ -1894,6 +1898,8 @@ class DelAmicoCalculator(GuessSerializer):
 
     def serialize(self, pwd, prob):
         self.total_guessed += 1
+        if prob == 0:
+            return
         idx = bisect.bisect_left(self.probs, prob) - 1
         if idx >= 0:
             self.guess_numbers[idx].append(prob)
@@ -1916,8 +1922,8 @@ class DelAmicoCalculator(GuessSerializer):
                                num_guess)
         for j in range(len(out_guess_numbers) - 1, 0, -1):
             out_variance[j - 1] += out_variance[j]
+        out_stdev = list(map(math.sqrt, out_variance))
         for i in range(len(self.guess_numbers)):
-            out_stdev[i] = math.sqrt(out_variance[i])
             out_error[i] = self.random_walk_confidence_bound_z_value * (
                 out_stdev[i] / math.sqrt(num_guess))
         for i in range(len(self.pwds), 0, -1):

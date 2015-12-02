@@ -2027,6 +2027,8 @@ class PasswordPolicyEnforcingSerializerTest(unittest.TestCase):
         serializer = pwd_guess.PasswordPolicyEnforcingSerializer(
             policy, mock_serializer)
         serializer.serialize('asdfasdf', .2)
+        mock_serializer.serialize.assert_called_once_with('asdfasdf', 0)
+        mock_serializer.serialize.reset_mock()
         serializer.serialize('A111*aajf', .1)
         mock_serializer.serialize.assert_called_once_with('A111*aajf', .1)
 
