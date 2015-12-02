@@ -1914,6 +1914,8 @@ class DelAmicoCalculator(GuessSerializer):
             out_variance[i] = (sum(map(
                 lambda e: (e - out_guess_numbers[i])**2, guess_nums[i])) /
                                num_guess)
+        for j in range(len(out_guess_numbers) - 1, 0, -1):
+            out_variance[j - 1] += out_variance[j]
         for i in range(len(self.guess_numbers)):
             out_stdev[i] = math.sqrt(out_variance[i])
             out_error[i] = self.random_walk_confidence_bound_z_value * (
