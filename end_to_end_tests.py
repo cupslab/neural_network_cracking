@@ -278,7 +278,8 @@ aaab\t30""")
         self.config_file.flush()
         self.input_file.flush()
         pwd_guess.main(vars(pwd_guess.make_parser().parse_args([
-            '--pwd-file', self.input_file.name, '--tsv',
+            '--pwd-file', self.input_file.name,
+            '--pwd-format', 'tsv',
             '--config', self.config_file.name,
             '--enumerate-ofile', self.output_file.name,
             '--arch-file', self.archfile.name,

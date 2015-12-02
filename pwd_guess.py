@@ -530,17 +530,15 @@ class BasePreprocessor(object):
             config.simulated_frequency_optimization):
             if config.node_serializer_type == 'super':
                 logging.info('Super trie preprocessor')
-                preprocessor = SuperTriePreprocessor(config)
+                return SuperTriePreprocessor(config)
             else:
                 logging.info('Node trie preprocessor')
-                preprocessor = NodeTriePreprocessor(config)
-        elif (config.trie_implementation is not None and
+                return NodeTriePreprocessor(config)
+        if (config.trie_implementation is not None and
               config.simulated_frequency_optimization):
             logging.info('Trie preprocessor...')
-            preprocessor = TriePreprocessor(config)
-        else:
-            preprocessor = Preprocessor(config)
-        return preprocessor
+            return TriePreprocessor(config)
+        return Preprocessor(config)
 
 class Preprocessor(BasePreprocessor):
     def __init__(self, config = ModelDefaults()):
