@@ -1654,6 +1654,7 @@ class ParallelRandomWalkGuesserTest(unittest.TestCase):
             self.assertEqual(len(arg_list), 2)
             self.assertEqual(set(itertools.chain.from_iterable(arg_list)),
                              set([('aaaaa', 1), ('bbbbb', 1), ('cccc', 1)]))
+            self.assertEqual(guesser.model, None)
 
     def test_guess_simulated(self):
         with tempfile.NamedTemporaryFile(mode = 'w') as gf, \

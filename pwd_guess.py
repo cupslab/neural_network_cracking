@@ -1746,10 +1746,15 @@ def mp_fork_starting_point_random_walker(args):
     return ParallelRandomWalker.run_cmd_process(args)
 
 class ParallelGuesser(Guesser):
+    needs_model = True
+
     def __init__(self, serializer, config, ostream):
         self.tempOstream = tempfile.NamedTemporaryFile(
             mode = 'w', delete = False)
-        model = serializer.load_model()
+        if self.needs_model:
+            model = serializer.load_model()
+        else:
+            model = None
         super().__init__(model, config, self.tempOstream)
         self.fork_points = []
         self.intermediate_files = []
@@ -1891,6 +1896,8 @@ class ParallelGuesser(Guesser):
         return guesser.generated, builder.ofile_path
 
 class ParallelRandomWalker(ParallelGuesser):
+    needs_model = False
+
     def do_map(self, pool, args):
         return pool.map_async(mp_fork_starting_point_random_walker, args)
 
