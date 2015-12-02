@@ -30,6 +30,9 @@ import os.path
 
 PASSWORD_END = '\n'
 
+NODE_SERIALIZER_ENCODING = 'utf8'
+PASSWORD_FRAGMENT_DELIMITER = '\0'
+
 class BaseTrie(object):
     def finish(self):
         pass
@@ -51,6 +54,8 @@ class BaseTrie(object):
             return TriePwdList(config)
         elif config.trie_implementation == 'node_trie':
             return NodeTrie()
+        elif config.trie_implementation == 'dummy':
+            return BaseTrie()
         logging.warning('Unknown trie type %s. Using trie',
                         config.trie_implementation)
         return TriePwdList(config)
@@ -84,9 +89,6 @@ class NodeTrie(BaseTrie):
             for item in others:
                 yield item
 
-NODE_SERIALIZER_ENCODING = 'utf8'
-PASSWORD_FRAGMENT_DELIMITER = '\0'
-
 class NodeTrieSerializer(object):
     def __init__(self, config):
         self.config = config
@@ -98,6 +100,10 @@ class NodeTrieSerializer(object):
         return os.path.getsize(self.config.trie_fname) / self.chunk_size
 
     def serialize(self, trie):
+        if self.config.trie_fname == ':memory:':
+            logging.info('Trie is in memory, not saving...')
+            return
+        logging.info('Saving trie to %s', self.config.trie_fname)
         with gzip.open(self.config.trie_fname, 'wb') as afile:
             for item in trie.random_iterate():
                 pwd, weight = item
@@ -279,8 +285,8 @@ class ModelDefaults(object):
       for datrie C implementation. 'node_trie' for custom implementation. None
       for no trie optimization. 'node_trie' is recommended.
 
-    trie_fname - File name for disk-backed trie's. Currently only used for DB.
-      Can by ':memory:' for a memory only DB.
+    trie_fname - File name for disk-backed trie's. DB and node_trie can
+      optionally save a trie file.
     """
     char_bag = (string.ascii_lowercase +
                 string.ascii_uppercase +
@@ -938,6 +944,7 @@ def read_passwords(args, config):
 
 def preprocessing(args, config):
     if args['pwd_format'] == 'trie':
+        config.trie_implementation = 'dummy'
         disk_trie = DiskPreprocessor(config)
         disk_trie.begin()
         return disk_trie
@@ -946,9 +953,8 @@ def preprocessing(args, config):
         config.simulated_frequency_optimization):
         preprocessor = NodeTriePreprocessor(config)
         preprocessor.begin(plist)
-        if args['pre_processing_only']:
-            logging.info('Saving preprocessing step...')
-            NodeTrieSerializer(config).serialize(preprocessor.trie)
+        logging.info('Saving preprocessing step...')
+        NodeTrieSerializer(config).serialize(preprocessor.trie)
     elif (config.trie_implementation is not None and
         config.simulated_frequency_optimization):
         preprocessor = TriePreprocessor(config)
