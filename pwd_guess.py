@@ -491,9 +491,8 @@ class TriePreprocessor(object):
     def reset(self):
         self._total_size = math.ceil(
             self.trie.size() / self.config.training_chunk)
-        logging.info(
-            'Compressed %s instances into %s chunks of %s instances each',
-            self.instances, self.total_chunks(), self.trie.size())
+        logging.info('Compressed %s instances into %s instances',
+                     self.instances, self.trie.size())
         self.current_generator = self.trie.random_iterate()
 
     def next_chunk(self):
