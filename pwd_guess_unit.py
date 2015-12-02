@@ -925,9 +925,9 @@ aaa	0.0625
             # The GPU also computes at a rounding error higher than the original
             # computation
             self.assertEqual("""Total count: 8
-abb	0.144	1
-aab	0.096	4
-aaa	0.064	7
+abb	0.144	2
+aab	0.096	5
+aaa	0.064	8
 """, gfile.read())
 
     def test_do_guessing(self):
@@ -949,6 +949,12 @@ def mock_predict_smart_parallel(input_vec, **kwargs):
     answer = []
     for i in range(len(input_vec)):
         answer.append([[0.5, 0.25, 0.25].copy()])
+    return answer
+
+def mock_predict_smart_parallel_skewed(input_vec, **kwargs):
+    answer = []
+    for i in range(len(input_vec)):
+        answer.append([[0.5, 0.1, 0.4].copy()])
     return answer
 
 class ParallelGuesserTest(unittest.TestCase):
@@ -1217,6 +1223,24 @@ class ProbabilityCalculatorTest(unittest.TestCase):
         self.assertEqual(set(p.calc_probabilities([('aaa', 1), ('abb', 1)])),
                          set([('aaa', 0.125), ('abb', 0.125)]))
 
+    def test_calc_prefix(self):
+        mock_guesser = Mock()
+        mock_guesser.config = pwd_guess.ModelDefaults(
+            min_len = 3, max_len = 3, char_bag = 'ab\n',
+            relevel_not_matching_passwords = False)
+        mock_guesser.conditional_probs_many = MagicMock(
+            return_value=[[[0, 0.5, 0.5]],
+                          [[0, 0.4, 0.6]],
+                          [[0, 0.5, 0.5]],
+                          [[.5, .25, .25]],
+                          [[0, 0.5, 0.5]],
+                          [[0, 0.4, 0.6]],
+                          [[0, 0.5, 0.5]],
+                          [[.5, .25, .25]]])
+        p = pwd_guess.ProbabilityCalculator(mock_guesser, prefixes = True)
+        self.assertEqual(set(p.calc_probabilities([('aaa', 1), ('abb', 1)])),
+                         set([('aaa', 0.1), ('abb', 0.15)]))
+
     def test_calc_optimizing(self):
         with tempfile.NamedTemporaryFile() as tf:
             config = pwd_guess.ModelDefaults(
@@ -1268,7 +1292,7 @@ class GuessNumberGeneratorTest(unittest.TestCase):
         gng.finish()
         with open(self.ostream.name, 'r') as guesses:
             self.assertEqual(
-                'Total count: 6\nword\t0.25\t1\ngmail\t0.04\t3\npass\t0.025\t4\n',
+                'Total count: 6\nword\t0.25\t2\ngmail\t0.04\t4\npass\t0.025\t5\n',
                 guesses.read())
 
     def test_guessing_real(self):
@@ -1283,10 +1307,10 @@ class GuessNumberGeneratorTest(unittest.TestCase):
         with open(self.ostream.name, 'r') as guesses:
             self.assertEqual(
                 """Total count: 235
-forever	0.00013370734607	0
-william	2.12144662517e-05	72
-    	1.26799704013e-05	160
-8daddy	1.00234253381e-05	234
+forever	0.00013370734607	1
+william	2.12144662517e-05	73
+    	1.26799704013e-05	161
+8daddy	1.00234253381e-05	235
 """,
                 guesses.read())
 
@@ -1348,6 +1372,82 @@ class PasswordTemplateSerializerTest(unittest.TestCase):
             ('B:', .4 * (1/3) * (.3 / .4)),
             ('b!', .4 * (2/3) * (.1 / .4)),
             ('B!', .4 * (1/3) * (.1 / .4))]))
+
+class RandomWalkGuesserTest(unittest.TestCase):
+    def setUp(self):
+        self.tempf = tempfile.NamedTemporaryFile(delete = False)
+
+    def tearDown(self):
+        self.tempf.close()
+        if os.path.exists(self.tempf.name):
+            os.remove(self.tempf.name)
+
+    def test_create(self):
+        builder = pwd_guess.GuesserBuilder(pwd_guess.ModelDefaults(
+            parallel_guessing = False,
+            guess_serialization_method = 'random_walk'))
+        mock_model = Mock()
+        mock_model.predict = mock_predict_smart_parallel
+        builder.add_model(mock_model).add_file(self.tempf.name)
+        guesser = builder.build()
+        self.assertEqual(pwd_guess.RandomWalkGuesser, type(guesser))
+
+    def test_seed_data(self):
+        config = pwd_guess.ModelDefaults(
+            parallel_guessing = False,
+            char_bag = 'ab\n',
+            random_walk_seed_num = 2,
+            guess_serialization_method = 'random_walk')
+        builder = pwd_guess.GuesserBuilder(config)
+        mock_model = Mock()
+        mock_model.predict = mock_predict_smart_parallel
+        builder.add_model(mock_model).add_file(self.tempf.name)
+        guesser = builder.build()
+        g = list(guesser.seed_data())
+        self.assertEqual(g, [('', 1, 1, 0), ('', 1, 1, 0)])
+
+    def test_next_nodes(self):
+        config = pwd_guess.ModelDefaults(
+            parallel_guessing = False,
+            char_bag = 'ab\n',
+            guess_serialization_method = 'random_walk')
+        builder = pwd_guess.GuesserBuilder(config)
+        mock_model = Mock()
+        mock_model.predict = mock_predict_smart_parallel
+        builder.add_model(mock_model).add_file(self.tempf.name)
+        guesser = builder.build()
+        next = guesser.next_nodes('aa', .5, np.array([.5, .25, .25]))
+        self.assertEqual(list(next),
+                         [('aa\n', .25), ('aaa', .125), ('aab', .125)])
+
+    def test_guess(self):
+        with tempfile.NamedTemporaryFile(mode = 'w') as gf:
+            gf.write('aaa\nbbb\n')
+            gf.flush()
+            pw = pwd_guess.PwdList(gf.name)
+            self.assertEqual(list(pw.as_list()), [('aaa', 1), ('bbb', 1)])
+            config = pwd_guess.ModelDefaults(
+                parallel_guessing = False, char_bag = 'ab\n', min_len = 3,
+                max_len = 3, password_test_fname = gf.name,
+                random_walk_seed_num = 10,
+                relevel_not_matching_passwords = True,
+                guess_serialization_method = 'random_walk')
+            self.assertTrue(pwd_guess.Filterer(config).pwd_is_valid('aaa'))
+            builder = pwd_guess.GuesserBuilder(config)
+            mock_model = Mock()
+            mock_model.predict = mock_predict_smart_parallel_skewed
+            builder.add_model(mock_model).add_file(self.tempf.name)
+            guesser = builder.build()
+            guesser.complete_guessing()
+            with open(self.tempf.name, 'r') as output:
+                reader = list(csv.reader(
+                    output, delimiter = '\t', quotechar = None))
+                self.assertEqual(len(reader), 2)
+                for row in reader:
+                    pwd, prob, gn = row
+                    self.assertTrue(pwd == 'aaa' or pwd == 'bbb')
+                    self.assertEqual(prob, '0.008' if pwd == 'aaa' else '0.512')
+                    self.assertAlmostEqual(float(gn), 8 if pwd == 'aaa' else 1)
 
 if __name__ == '__main__':
     unittest.main()

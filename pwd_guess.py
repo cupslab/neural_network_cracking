@@ -569,6 +569,7 @@ class ModelDefaults(object):
     compute_stats = False
     password_test_fname = None
     chunk_size_guesser = 1000
+    random_walk_seed_num = 1000
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -1141,10 +1142,15 @@ class Filterer(object):
 class GuessSerializer(object):
     def __init__(self, ostream):
         self.ostream = ostream
+        self.total_guessed = 0
 
     def serialize(self, password, prob):
+        self.total_guessed += 1
         self.ostream.write('%s\t%s\n' % (
             password.strip(PASSWORD_END), prob))
+
+    def get_total_guessed(self):
+        return self.total_guessed
 
     def finish(self):
         self.ostream.flush()
@@ -1164,6 +1170,7 @@ class GuessNumberGenerator(GuessSerializer):
             self.guess_numbers[idx] += 1
 
     def finish(self):
+        self.guess_numbers[-1] += 1
         for i in range(len(self.guess_numbers) - 1, 0, -1):
             self.guess_numbers[i - 1] += self.guess_numbers[i]
         logging.info('Guessed %s passwords', self.total_guessed)
@@ -1177,11 +1184,12 @@ class GuessNumberGenerator(GuessSerializer):
         self.ostream.close()
 
 class ProbabilityCalculator(object):
-    def __init__(self, guesser):
+    def __init__(self, guesser, prefixes = False):
         self.guesser = guesser
         self.ctable = CharacterTable.fromConfig(guesser.config)
         self.preproc = Preprocessor(guesser.config)
         self.template_probs = False
+        self.prefixes = prefixes
         if type(self.ctable) == OptimizingCharacterTable:
             self.template_probs = True
             self.pts = PasswordTemplateSerializer(guesser.config)
@@ -1200,12 +1208,12 @@ class ProbabilityCalculator(object):
         prev_prob = 1
         for item in self.probability_stream(pwd_list):
             input_string, next_char, output_prob = item
-            prev_prob *= output_prob
+            if next_char != PASSWORD_END or self.prefixes is False:
+                prev_prob *= output_prob
             if next_char == PASSWORD_END:
                 if self.template_probs:
                     prev_prob *= self.pts.find_real_pwd(
-                        self.ctable.translate(input_string),
-                        input_string)
+                        self.ctable.translate(input_string), input_string)
                 yield (input_string, prev_prob)
                 prev_prob = 1
 
@@ -1284,6 +1292,9 @@ class PasswordTemplateSerializer(object):
     def serialize(self, pwd_template, prob):
         self.recursive_helper(pwd_template, '', prob)
 
+    def get_total_guessed(self):
+        return self.serializer.get_total_guessed()
+
     def finish(self):
         self.serializer.finish()
 
@@ -1299,28 +1310,42 @@ class Guesser(object):
         self.ctable = CharacterTable.fromConfig(self.config)
         self.filterer = Filterer(self.config)
         self.chunk_size_guesser = self.config.chunk_size_guesser
-        self.output_serializer = self.make_serializer(ostream)
+        self.ostream = ostream
         self.chars_list = self.ctable.chars
-        if (type(self.ctable) == OptimizingCharacterTable and
-            config.rare_character_optimization_guessing):
-            logging.info('Using template converting password serializer')
-            self.output_serializer = PasswordTemplateSerializer(
-                config, self.output_serializer)
+        self._calc_prob_cache = None
+        self.output_serializer = self.make_serializer()
 
-    def make_serializer(self, ostream):
+    def do_calculate_probs_from_file(self):
+        logging.info('Reading password calculator test set...')
+        filterer = Filterer(self.config)
+        pwd_lister = PwdList(self.config.password_test_fname)
+        pwd_input = list(pwd_lister.as_list())
+        pwds = list(filterer.filter(pwd_input))
+        filterer.finish(save_stats=False)
+        logging.info('Calculating test set probabilities')
+        return ProbabilityCalculator(self).calc_probabilities(pwds)
+
+    def calculate_probs_from_file(self):
+        if self._calc_prob_cache is None:
+            self._calc_prob_cache = list(self.do_calculate_probs_from_file())
+        return self._calc_prob_cache
+
+    def make_serializer(self):
         if self.config.guess_serialization_method == 'human':
-            return GuessSerializer(ostream)
+            answer = GuessSerializer(self.ostream)
         elif self.config.guess_serialization_method == 'calculator':
-            logging.info('Reading password calculator test set...')
-            filterer = Filterer(self.config)
-            pwds = list(filterer.filter(
-                PwdList(self.config.password_test_fname).as_list()))
-            filterer.finish(save_stats=False)
-            logging.info('Calculating test set probabilities')
-            return GuessNumberGenerator(
-                ostream, ProbabilityCalculator(self).calc_probabilities(pwds))
-        logging.error('Unknown serialization method %s',
-                      config.guess_serialization_method)
+            answer = GuessNumberGenerator(
+                self.ostream, self.calculate_probs_from_file())
+        elif self.config.guess_serialization_method == 'random_walk':
+            answer = RandomWalkSerializer(self.ostream)
+        else:
+            logging.error('Unknown serialization method %s',
+                          self.config.guess_serialization_method)
+        if (type(self.ctable) == OptimizingCharacterTable and
+            self.config.rare_character_optimization_guessing):
+            logging.info('Using template converting password serializer')
+            answer = PasswordTemplateSerializer(self.config, answer)
+        return answer
 
     def relevel_prediction(self, preds, astring):
         if not self.filterer.pwd_is_valid(astring, quick = True):
@@ -1369,13 +1394,16 @@ class Guesser(object):
             elif char != PASSWORD_END:
                 yield chain_pass, chain_prob
 
-    def super_node_recur(self, node_list):
+    def batch_prob(self, node_list):
         prefixes = list(map(lambda x: x[0], node_list))
-        if len(prefixes) == 0:
-            return
         logging.info('Super node buffer size %s, guess number %s',
                      len(prefixes), self.generated)
-        predictions = self.conditional_probs_many(prefixes)
+        return self.conditional_probs_many(prefixes)
+
+    def super_node_recur(self, node_list):
+        if len(node_list) == 0:
+            return
+        predictions = self.batch_prob(node_list)
         node_batch = []
         for i, cur_node in enumerate(node_list):
             astring, prob = cur_node
@@ -1401,6 +1429,78 @@ class Guesser(object):
         self.output_serializer.finish()
         logging.info('Generated %s guesses', self.generated)
         return self.generated
+
+class RandomWalkSerializer(GuessSerializer):
+    def __init__(self, ostream):
+        super().__init__(ostream)
+
+    def serialize(self, pwd, prob):
+        self.total_guessed += 1
+
+class RandomWalkGuesser(Guesser):
+    def super_node_recur(self, node_list):
+        real_node_list = []
+        done_node_list = []
+        for node in node_list:
+            pwd, _, d_accum, cost_fn = node
+            if len(pwd) <= self.max_len:
+                real_node_list.append(node)
+            elif len(pwd) > self.max_len and pwd[-1] == PASSWORD_END:
+                self.cost_sum += cost_fn
+                self.cost_num += 1
+        if len(real_node_list) == 0:
+            return
+        predictions = self.batch_prob(real_node_list)
+        next_nodes = []
+        for i, cur_node in enumerate(real_node_list):
+            astring, prob, d_accum, cost_accum = cur_node
+            poss_next = list(self.next_nodes(astring, prob, predictions[i][0]))
+            next_node = random.choice(poss_next)
+            d_accum_next = len(poss_next) * d_accum
+            cost_next = (
+                cost_accum + d_accum_next * self.cost_of_node(*next_node))
+            if len(poss_next) == 0:
+                self.cost_sum += cost_next
+                self.cost_num += 1
+                continue
+            next_nodes.append(next_node + (d_accum_next, cost_next))
+        if len(next_nodes) != 0:
+            self.super_node_recur(next_nodes)
+
+    def cost_of_node(self, pwd, prob):
+        count_pre_serializer = self.output_serializer.get_total_guessed()
+        if not (len(pwd) > 0 and pwd[-1] == PASSWORD_END):
+            return 0
+        self.output_serializer.serialize(pwd, prob)
+        return (self.output_serializer.get_total_guessed() -
+                count_pre_serializer)
+
+    def next_nodes(self, astring, prob, prediction):
+        if len(astring) > 0 and astring[-1] == PASSWORD_END:
+            return
+        total_preds = prediction * prob
+        for i, char in enumerate(self.chars_list):
+            chain_prob = total_preds[i]
+            if chain_prob < self.lower_probability_threshold:
+                continue
+            chain_pass = astring + char
+            if len(chain_pass) > self.max_len and char != PASSWORD_END:
+                continue
+            yield chain_pass, chain_prob
+
+    def seed_data(self):
+        for _ in range(self.config.random_walk_seed_num):
+            yield '', 1, 1, 0
+
+    def guess(self, start = '', start_prob = 1):
+        for prob_node in self.calculate_probs_from_file():
+            pwd, prob = prob_node
+            self.lower_probability_threshold = prob
+            self.cost_sum = 0
+            self.cost_num = 0
+            self.super_node_recur(list(self.seed_data()))
+            self.ostream.write('%s\t%s\t%s\n' %
+                               (pwd, prob, self.cost_sum / self.cost_num))
 
 class GuesserBuilderError(Exception): pass
 
@@ -1453,6 +1553,9 @@ class GuesserBuilder(object):
             raise GuesserBuilderError('Cannot build without ostream')
         assert self.config is not None
         class_builder = ParallelGuesser if self.parallel else Guesser
+        if self.config.guess_serialization_method == 'random_walk':
+            assert not self.parallel
+            class_builder = RandomWalkGuesser
         return class_builder(model_or_serializer, self.config, self.ostream)
 
 def fork_starting_point(args):
