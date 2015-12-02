@@ -1923,6 +1923,53 @@ class DelAmicoRandomWalkTest(RandomWalkGuesserTest):
             self.assertEqual(list(next), [
                 ('aa\n', .25, .5), ('aaa', .125, .25), ('aab', .125, .25)])
 
+    def test_guess_simulated_policy(self):
+        with tempfile.NamedTemporaryFile(mode = 'w') as gf, \
+             tempfile.NamedTemporaryFile() as intermediatef:
+            gf.write('aAaa\nbbbBa\n')
+            gf.flush()
+            pw = pwd_guess.PwdList(gf.name)
+            self.assertEqual(list(pw.as_list()), [('aAaa', 1), ('bbbBa', 1)])
+            config = pwd_guess.ModelDefaults(
+                parallel_guessing = False, char_bag = 'abAB\n', min_len = 3,
+                max_len = 5, password_test_fname = gf.name,
+                uppercase_character_optimization = True,
+                random_walk_seed_num = 10000,
+                random_walk_upper_bound = 1,
+                rare_character_optimization_guessing = True,
+                intermediate_fname = intermediatef.name,
+                relevel_not_matching_passwords = True,
+                enforced_policy = 'one_uppercase',
+                guess_serialization_method = 'delamico_random_walk')
+            config.set_intermediate_info(
+                'rare_character_bag', [])
+            freqs = {
+                'a' : .4, 'b' : .4, 'A' : .1, 'B' : .1,
+            }
+            config.set_intermediate_info('character_frequencies', freqs)
+            config.set_intermediate_info(
+                'beginning_character_frequencies', freqs)
+            config.set_intermediate_info(
+                'end_character_frequencies', freqs)
+            self.assertTrue(pwd_guess.Filterer(config).pwd_is_valid('aaa'))
+            builder = self.make_builder(config)
+            mock_model = Mock()
+            mock_model.predict = mock_predict_smart_parallel_skewed
+            builder.add_model(mock_model).add_file(self.tempf.name)
+            guesser = builder.build()
+            guesser.complete_guessing()
+            with open(self.tempf.name, 'r') as output:
+                reader = list(csv.reader(
+                    output, delimiter = '\t', quotechar = None))
+                self.assertEqual(len(reader), 2)
+                for row in reader:
+                    pwd, prob, gn, *_ = row
+                    self.assertTrue(pwd == 'aAaa' or pwd == 'bbbBa')
+                    self.assertEqual(
+                        prob, '4.096e-05' if pwd == 'aAaa' else '0.0016777216')
+                    self.assertAlmostEqual(
+                        float(gn), 613 if pwd == 'aAaa' else 100, delta = 20)
+
 class ParallelRandomWalkGuesserTest(unittest.TestCase):
     def setUp(self):
         self.tempf = tempfile.NamedTemporaryFile(delete = False)
@@ -2038,6 +2085,17 @@ class PolicyTests(unittest.TestCase):
         self.assertTrue(policy.pwd_complies('asdf'))
         self.assertTrue(policy.pwd_complies('asdf' * 30))
         self.assertTrue(policy.pwd_complies(''))
+
+    def test_one_uppercase(self):
+        config = Mock()
+        config.enforced_policy = 'one_uppercase'
+        policy = pwd_guess.BasePasswordPolicy.fromConfig(config)
+        self.assertTrue(type(policy), pwd_guess.OneUppercasePolicy)
+        self.assertFalse(policy.pwd_complies('asdf'))
+        self.assertFalse(policy.pwd_complies('asdf' * 30))
+        self.assertFalse(policy.pwd_complies(''))
+        self.assertTrue(policy.pwd_complies('Asdf'))
+        self.assertTrue(policy.pwd_complies('asDD'))
 
     def test_basic_long(self):
         config = Mock()

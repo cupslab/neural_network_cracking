@@ -588,6 +588,9 @@ class ModelSerializer(object):
         logging.info('Done saving model')
 
     def load_model(self):
+        # To be able to load models
+        globals()['Bidirectional'] = Bidirectional
+
         # This is for unittesting
         def mock_predict_smart_parallel(distribution, input_vec, **kwargs):
             answer = []
@@ -1678,13 +1681,23 @@ class ComplexPasswordPolicyLowercase(ComplexPasswordPolicy):
             return False
         return self.passes_blacklist(pwd)
 
+class OneUppercasePolicy(ComplexPasswordPolicy):
+    def pwd_complies(self, pwd):
+        pwd = pwd.strip(PASSWORD_END)
+        if len(pwd) < self.required_length:
+            return False
+        if not self.has_group(pwd, self.uppercase):
+            return False
+        return self.passes_blacklist(pwd)
+
 policy_list = {
     'complex' : ComplexPasswordPolicy(),
     'basic' : BasicPolicy(),
     'basic_long' : PasswordPolicy('.{8}.*'),
     'complex_lowercase' : ComplexPasswordPolicyLowercase(),
     'complex_long' : ComplexPasswordPolicy(16),
-    'complex_long_lowercase' : ComplexPasswordPolicyLowercase(16)
+    'complex_long_lowercase' : ComplexPasswordPolicyLowercase(16),
+    'one_uppercase' : OneUppercasePolicy(3)
 }
 
 class PasswordPolicyEnforcingSerializer(DelegatingSerializer):
