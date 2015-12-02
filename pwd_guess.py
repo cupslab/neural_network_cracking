@@ -1,5 +1,4 @@
-#!/usr/bin/env python3
-
+# -*- coding: utf-8 -*-
 # William Melicher
 from __future__ import print_function
 from keras.models import Sequential, slice_X, model_from_json
@@ -19,7 +18,9 @@ import logging
 import cProfile
 import json
 import random
-import pickle
+import multiprocessing
+import tempfile
+import subprocess
 
 class CharacterTable(object):
     """
@@ -66,6 +67,7 @@ class ModelSerializer(object):
             arch.write(model.to_json())
         logging.info('Saving model weights')
         model.save_weights(self.weightfile, overwrite = True)
+        logging.info('Done saving model')
 
     def load_model(self):
         logging.info('Loading model architecture')
@@ -73,6 +75,7 @@ class ModelSerializer(object):
             model = self.model_creator_from_json(arch.read())
         logging.info('Loading model weights')
         model.load_weights(self.weightfile)
+        logging.info('Done loading model')
         return model
 
 PASSWORD_END = '\n'
@@ -123,6 +126,8 @@ class ModelDefaults(object):
     generation_checkpoint = True
     training_accuracy_threshold = 10**-10
     train_test_ratio = 10
+    parallel_guessing = False
+    fork_length = 2
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -169,6 +174,7 @@ class Trainer(object):
         self.generation = 0
         self.pwd_whole_list = list(pwd_list)
         self.ctable = CharacterTable.fromConfig(self.config)
+        self.model = None
 
     def train_chunk_from_pwds(self, pwds):
         def all_prefixes(pwd):
@@ -289,7 +295,8 @@ class Trainer(object):
 
     def train(self, serializer):
         logging.info('Building model...')
-        self.build_model()
+        if self.model is None:
+            self.build_model()
         logging.info('Done compiling model. Beginning training...')
         self.train_model(serializer)
 
@@ -410,13 +417,99 @@ class Guesser(object):
         self.recur('', 1)
 
     @staticmethod
-    def do_guessing(model, config, ofname):
+    def do_guessing(model, config, ofname, start = '', start_prob = 1):
         ostream = open(ofname, 'w') if ofname != '-' else sys.stdout
-        logging.info('Enumerating guesses...')
+        logging.info('Enumerating guesses starting at %s, %s...',
+                     start, start_prob)
         guesser = Guesser(model, config, ostream)
-        guesser.guess()
+        guesser.recur(start, start_prob)
+        ostream.flush()
         ostream.close()
         logging.info('Generated %s guesses', guesser.generated)
+        return guesser.generated
+
+def fork_starting_point(arguments):
+    model = ModelSerializer(*arguments['serializer']).load_model()
+    return ParallelGuesser.fork_entry_point(model, arguments)
+
+class ParallelGuesser(Guesser):
+    def __init__(self, serializer, config, ostream):
+        self.fork_points = []
+        self.intermediate_files = []
+        self.serializer = serializer
+        self.forking_function = fork_starting_point
+        self.tempOstream = tempfile.NamedTemporaryFile(mode = 'w')
+        self.real_output = ostream
+        self.fork_starter = fork_starting_point
+        model = serializer.load_model()
+        super().__init__(model, config, self.tempOstream)
+        if self.config.fork_length > self.config.min_len:
+            logging.warning(('Fork length is greater than minimum password '
+                             'length. This may cause some passwords that should'
+                             ' be guessed to not show up in output. '))
+
+    def recur(self, astring, prob):
+        if len(astring) == self.config.fork_length:
+            self.fork_points.append((astring, prob))
+        else:
+            super().recur(astring, prob)
+
+    def guess(self):
+        self.recur('', 1)
+        self.do_forking()
+
+    def prepare_argument_dict(self, node):
+        new_file = tempfile.NamedTemporaryFile()
+        self.intermediate_files.append(new_file)
+        return {
+            'config' : self.config.as_dict(),
+            'serializer' : [
+                self.serializer.archfile, self.serializer.weightfile],
+            'node' : node,
+            'ofile' : new_file.name
+        }
+
+    def arg_list(self):
+        return list(map(self.prepare_argument_dict, self.fork_points))
+
+    def collect_answer(self):
+        streams = list(map(lambda n: open(n.name, 'r'),
+                           [self.tempOstream] + self.intermediate_files))
+        for stream in streams:
+            for line in stream:
+                self.real_output.write(line)
+            stream.close()
+        self.real_output.flush()
+
+    def do_forking(self):
+        arg_list = self.arg_list()
+        pool = multiprocessing.Pool(
+            min(len(arg_list), multiprocessing.cpu_count()))
+        result = pool.map_async(self.fork_starter, arg_list)
+        try:
+            pool.close()
+            pool.join()
+            answer = result.get(timeout = 1)
+            self.generated = sum(answer) + self.generated
+            self.collect_answer()
+        except KeyboardInterrupt as e:
+            logging.error('Received keyboard interrupt. Stopping processes...')
+            pool.terminate()
+
+    @staticmethod
+    def fork_entry_point(model, arguments):
+        config = ModelDefaults(**arguments['config'])
+        return Guesser.do_guessing(model, config, arguments['ofile'],
+                                   arguments['node'][0], arguments['node'][1])
+
+    @staticmethod
+    def do_guessing(serializer, config, ofname):
+        ostream = open(ofname, 'w') if ofname != '-' else sys.stdout
+        logging.info('Enumerating guesses...')
+        guesser = ParallelGuesser(serializer, config, ostream)
+        guesser.guess()
+        logging.info('Generated %s guesses', guesser.generated)
+        return guesser.generated
 
 log_level_map = {
     'info' : logging.INFO,
@@ -436,6 +529,10 @@ def init_logging(args, config):
     logging.info('Beginning...')
     logging.info('Arguments %s', json.dumps(args, indent = 4))
     logging.info('Configuration %s', json.dumps(config.as_dict(), indent = 4))
+    def except_hook(exctype, value, tb):
+        logging.critical('Uncaught exception', exc_info = (exctype, value, tb))
+        sys.stderr.write('Uncaught exception!')
+    sys.excepthook = except_hook
 
 def train(args, config):
     if args['tsv']:
@@ -451,18 +548,24 @@ def train(args, config):
         logging.error('Empty training set! Quiting...')
         sys.exit(1)
     trainer = Trainer(plist, config)
-    trainer.train(ModelSerializer(args['arch_file'], args['weight_file']))
-    if args['enumerate_ofile']:
-        Guesser.do_guessing(trainer.model, config, args['enumerate_ofile'])
+    serializer = ModelSerializer(args['arch_file'], args['weight_file'])
+    if args['retrain']:
+        logging.info('Retraining model...')
+        trainer.model = serializer.load_model()
+    trainer.train(serializer)
 
 def guess(args, config):
     logging.info('Loading model...')
     if args['arch_file'] is None or args['weight_file'] is None:
         logging.error('Architecture file or weight file not found. Quiting...')
         sys.exit(1)
-    Guesser.do_guessing(ModelSerializer(
-        args['arch_file'], args['weight_file']).load_model(),
-        config, args['enumerate_ofile'])
+    serializer = ModelSerializer(args['arch_file'], args['weight_file'])
+    if config.parallel_guessing:
+        ParallelGuesser.do_guessing(
+            serializer, config, args['enumerate_ofile'])
+    else:
+        Guesser.do_guessing(
+            serializer.load_model(), config, args['enumerate_ofile'])
 
 def main(args):
     if args['help_config']:
@@ -472,7 +575,7 @@ def main(args):
     init_logging(args, config)
     if args['pwd_file']:
         train(args, config)
-    elif args['enumerate_ofile']:
+    if args['enumerate_ofile']:
         guess(args, config)
     if not args['pwd_file'] and not args['enumerate_ofile']:
         logging.error('Nothing to do! Use --pwd-file or --enumerate-ofile. ')
@@ -500,6 +603,10 @@ def make_parser():
                               ' password. '))
     parser.add_argument('--enumerate-ofile',
                         help = 'Enumerate guesses output file')
+    parser.add_argument('--retrain', action='store_true',
+                        help = ('Instead of training a new model, begin '
+                                'training the model in the pwd-file and '
+                                'arch-file arguments. '))
     parser.add_argument('--config', help = 'Config file in json. ')
     parser.add_argument('--profile',
                         help = 'Profile execution and save to the given file. ')
