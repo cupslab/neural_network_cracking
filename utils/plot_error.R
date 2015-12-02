@@ -28,7 +28,7 @@ colnames(estimates) <- COLNAMES
 p <- ggplot(estimates, aes(guess.number, percent.std.error))
 p <- p + geom_point()
 p <- add_scales(p)
-p <- p + scale_y_continuous(labels = percent, limits = c(0, .3))
+p <- p + scale_y_continuous(labels = percent, limits = c(0, .5))
 p <- p + ylab(PERCENT_ERROR_Y_LABEL)
 ggsave(filename = OFNAME_ESTIMATE, plot = p)
 
@@ -37,6 +37,7 @@ colnames(actual) <- COLNAMES_EXACT
 total <- merge(estimates, actual, by = "pwd")
 
 bothvalues <- total[total$guess.number.y > 0, ]
+bothvalues <- bothvalues[ bothvalues$prob.x == bothvalues$prob.y, ]
 bothvalues$actual.percent.error <- (abs(
     bothvalues$guess.number.y - bothvalues$guess.number.x) /
     bothvalues$guess.number.y)
@@ -53,5 +54,8 @@ p <- p + scale_color_discrete(LEGENED_LABEL)
 p <- p + scale_y_continuous(labels = percent, limits = c(0, .5))
 p <- p + ylab(OBSERVED_ERROR_Y_LABEL)
 ggsave(filename = OFNAME_OBSERVED, plot = p)
+
 print(sum(bothvalues$outside.interval) / nrow(bothvalues))
 print(sum(bothvalues$outside.interval))
+print(bothvalues[ bothvalues$actual.percent.error > .10, ]$pwd)
+print(nrow(bothvalues[ bothvalues$prob.x != bothvalues$prob.y, ]))

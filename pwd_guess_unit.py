@@ -883,7 +883,13 @@ aaa	0.0625
             expected = csv.reader(
                 expected_data, delimiter = '\t', quotechar = None)
             for i, row in enumerate(expected):
-                self.assertEqual(row, found[i])
+                for item in range(len(row)):
+                    value = row[item]
+                    try:
+                        self.assertAlmostEqual(float(row[item]),
+                                               float(found[i][item]))
+                    except ValueError:
+                        self.assertEqual(row[item], found[i][item])
 
     def test_guessing_with_relevel(self):
         config = pwd_guess.ModelDefaults(

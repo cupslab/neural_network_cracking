@@ -1547,6 +1547,15 @@ class Guesser(object):
         logging.info('Generated %s guesses', self.generated)
         return self.generated
 
+    def calculate_probs(self):
+        logging.info('Calculating probabilities only')
+        writer = csv.writer(self.ostream, delimiter = '\t', quotechar = None)
+        for pwd, prob in sorted(
+                self.calculate_probs_from_file(), key = lambda x: x[1]):
+            writer.writerow([pwd, prob])
+        self.ostream.flush()
+        self.ostream.close()
+
 class RandomWalkSerializer(GuessSerializer):
     def __init__(self, ostream):
         super().__init__(ostream)
@@ -2025,9 +2034,13 @@ def guess(args, config):
     if args['arch_file'] is None or args['weight_file'] is None:
         logging.error('Architecture file or weight file not found. Quiting...')
         sys.exit(1)
-    (GuesserBuilder(config).add_serializer(
+    guesser = (GuesserBuilder(config).add_serializer(
         ModelSerializer(args['arch_file'], args['weight_file']))
-     .add_file(args['enumerate_ofile'])).build().complete_guessing()
+               .add_file(args['enumerate_ofile'])).build()
+    if args['calc_probabilities_only']:
+        guesser.calculate_probs()
+    else:
+        guesser.complete_guessing()
 
 def read_config_args(args):
     config_arg_file = open(args['config_args'], 'r')
@@ -2121,6 +2134,8 @@ def make_parser():
     parser.add_argument('--' + FORKED_FLAG,
                         choices = sorted(fork_starting_point_map.keys()),
                         help='Internal use only. ')
+    parser.add_argument('--calc-probability-only', action='store_true',
+                        help='Only output password probabilities')
     return parser
 
 if __name__=='__main__':
