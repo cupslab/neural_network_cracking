@@ -296,10 +296,10 @@ class Trainer(object):
         x_strings, y_strings = self.next_train_chunk()
         x_str_list, y_str_list = list(x_strings), list(y_strings)
         x_vec = np.zeros((len(x_str_list), self.config.max_len,
-                          len(self.config.char_bag)), dtype = np.bool)
+                          len(self.ctable.chars)), dtype = np.bool)
         for i, xstr in enumerate(x_str_list):
             x_vec[i] = self.ctable.encode(xstr, maxlen = self.config.max_len)
-        y_vec = np.zeros((len(y_str_list), 1, len(self.config.char_bag)),
+        y_vec = np.zeros((len(y_str_list), 1, len(self.ctable.chars)),
                          dtype = np.bool)
         for i, ystr in enumerate(y_str_list):
             y_vec[i] = self.ctable.encode(ystr, maxlen = 1)
@@ -308,13 +308,13 @@ class Trainer(object):
     def build_model(self):
         model = Sequential()
         model.add(self.config.model_type_exec()(
-            len(self.config.char_bag), self.config.hidden_size))
+            len(self.ctable.chars), self.config.hidden_size))
         model.add(RepeatVector(1))
         for _ in range(self.config.layers):
             model.add(self.config.model_type_exec()(
                 self.config.hidden_size, self.config.hidden_size,
                 return_sequences = True))
-        model.add(Dense(self.config.hidden_size, len(self.config.char_bag)))
+        model.add(Dense(self.config.hidden_size, len(self.ctable.chars)))
         model.add(Activation('softmax'))
         model.compile(loss='categorical_crossentropy', optimizer = 'adam')
         self.model = model
@@ -484,7 +484,7 @@ class Guesser(object):
         if not self.filterer.pwd_is_valid(astring):
             preds[self.ctable.get_char_index(PASSWORD_END)] = 0
         elif len(astring) == self.config.max_len:
-            for c in self.config.char_bag:
+            for c in self.ctable.chars:
                 preds[self.ctable.get_char_index(c)] = (
                     1 if c == PASSWORD_END else 0)
         sum_per = sum(preds)
@@ -492,7 +492,7 @@ class Guesser(object):
             preds[i] = v / sum_per
 
     def conditional_probs(self, astring):
-        np_inp = np.zeros((1, self.config.max_len, len(self.config.char_bag)),
+        np_inp = np.zeros((1, self.config.max_len, len(self.ctable.chars)),
                           dtype = np.bool)
         np_inp[0] = self.ctable.encode(
             astring + (PASSWORD_END * (self.config.max_len - len(astring))))
@@ -510,7 +510,7 @@ class Guesser(object):
                 self.generated += 1
             return
         prediction = self.conditional_probs(astring)
-        for char in self.config.char_bag:
+        for char in self.ctable.chars:
             chain_pass = astring + char
             chain_prob =  self.cond_prob_from_preds(char, prediction) * prob
             if (char == PASSWORD_END and
