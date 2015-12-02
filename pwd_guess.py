@@ -1158,8 +1158,8 @@ class Guesser(object):
             return GuessNumberGenerator(ostream,
                 ProbabilityCalculator(self).calc_probabilities(
                     PwdList(self.config.password_test_list).as_list()))
-        logging.warning('Unknown serialization method %s',
-                        config.guess_serialization_method)
+        logging.error('Unknown serialization method %s',
+                      config.guess_serialization_method)
 
     def cond_prob_from_preds(self, char, preds):
         return preds[self.ctable.get_char_index(char)]
