@@ -702,7 +702,9 @@ class Filterer(object):
     def rare_characters(self):
         lowest = list(map(
             lambda x: x[0],
-            sorted(self.frequencies.items(), key = lambda x: x[1])))
+            sorted(map(lambda c: (c, self.frequencies[c]),
+                       self.config.char_bag.replace(PASSWORD_END, '')),
+                   key = lambda x: x[1])))
         return lowest[:min(self.config.rare_character_lowest_threshold,
                            len(lowest))]
 
