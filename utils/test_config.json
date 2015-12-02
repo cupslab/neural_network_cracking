@@ -1,0 +1,21 @@
+{
+    "experiments" : [
+        {
+            "name" : "exp1",
+            "config" : {
+                "key2" : "specific_value2",
+                "key1" : "specific_value1"
+            },
+            "command" : "echo {config}; cat {config}"
+        },
+        {
+            "name" : "exp2",
+            "config" : {},
+            "command" : "echo {config}; cat {config}"
+        }
+    ],
+    "base_config" : {
+        "key1" : "value1",
+        "key3" : "value3"
+    }
+}
