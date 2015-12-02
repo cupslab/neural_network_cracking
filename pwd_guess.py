@@ -1335,24 +1335,25 @@ class PasswordTemplateSerializer(object):
             self.cache, template_char, character)
 
     def make_expander_cache(self):
-        self.expander_cache = {}
+        self.expander_cache = [0] * len(self.chars)
         for i, after_image_char in enumerate(self.chars):
             if after_image_char not in self.post_image:
                 self.expander_cache[i] = self.char_indices[after_image_char]
             else:
                 self.expander_cache[i] = self.char_indices[
                     self.post_image[after_image_char]]
+        self.expander_cache = np.array(self.expander_cache)
+        self.post_image_idx = []
+        for i, after_image_char in enumerate(self.chars):
+            if after_image_char in self.post_image:
+                self.post_image_idx.append((
+                    i, after_image_char, self.post_image[after_image_char]))
 
     def expand_conditional_probs(self, probs, context):
-        answer = np.zeros(len(self.chars))
-        for i, after_image_char in enumerate(self.chars):
-            answer[i] = probs[self.expander_cache[i]]
-            if after_image_char in self.post_image:
-                answer[i] *= self.calc(
-                    self.post_image[after_image_char],
-                    after_image_char, context == '')
-                # TODO: relevel for the last character if the post image is
-                # PASSWORD_END
+        answer = probs[self.expander_cache]
+        is_beginning = context == ''
+        for i, after_image_char, post_image in self.post_image_idx:
+            answer[i] *= self.calc(post_image, after_image_char, is_beginning)
         return answer
 
     def find_real_pwd(self, template, pwd):
@@ -1419,6 +1420,7 @@ class Guesser(object):
         self.should_make_guesses_rare_char_optimizer = (
             self._should_make_guesses_rare_char_optimizer())
         self.output_serializer = self.make_serializer()
+        self.pwd_end_idx = self.chars_list.index(PASSWORD_END)
 
     def read_test_passwords(self):
         logging.info('Reading password calculator test set...')
@@ -1493,17 +1495,26 @@ class Guesser(object):
 
     def next_nodes(self, astring, prob, prediction):
         total_preds = prediction * prob
-        for i, char in enumerate(self.chars_list):
-            chain_prob = total_preds[i]
-            if chain_prob < self.lower_probability_threshold:
-                continue
+        if len(astring) + 1 > self.max_len:
+            prob_end = total_preds[self.pwd_end_idx]
+            if prob_end >= self.lower_probability_threshold:
+                self.output_serializer.serialize(astring + PASSWORD_END,
+                                                 prob_end)
+                self.generated += 1
+            return
+        indexes = np.arange(len(total_preds))
+        above_cutoff = total_preds >= self.lower_probability_threshold
+        above_indices = indexes[above_cutoff]
+        probs_above = total_preds[above_cutoff]
+        for i in range(len(probs_above)):
+            index = above_indices[i]
+            char = self.chars_list[index]
+            chain_prob = probs_above[i]
             chain_pass = astring + char
             if char == PASSWORD_END:
                 self.output_serializer.serialize(chain_pass, chain_prob)
                 self.generated += 1
-            elif len(chain_pass) > self.max_len:
-                continue
-            elif char != PASSWORD_END:
+            else:
                 yield chain_pass, chain_prob
 
     def batch_prob(self, prefixes):
@@ -1578,6 +1589,7 @@ class RandomWalkGuesser(Guesser):
             self._chars_list = self.char_bag
         else:
             self._chars_list = self.chars_list
+        self.pwd_end_idx = self._chars_list.index(PASSWORD_END)
 
     def super_node_recur(self, node_list):
         real_node_list = []
@@ -1622,25 +1634,30 @@ class RandomWalkGuesser(Guesser):
             return 0
         return 1
 
-    def predictions(self, astring, prediction):
-        if self.should_make_guesses_rare_char_optimizer:
-            return self.output_serializer.expand_conditional_probs(
-                prediction, astring)
-        return prediction
-
     def next_nodes(self, astring, prob, prediction):
         if len(astring) > 0 and astring[-1] == PASSWORD_END:
             return
-        conditional_predictions = self.predictions(astring, prediction)
+        if self.should_make_guesses_rare_char_optimizer:
+            conditional_predictions = (
+                self.output_serializer.expand_conditional_probs(
+                    prediction, astring))
+        else:
+            conditional_predictions = prediction
         total_preds = conditional_predictions * prob
-        for i, char in enumerate(self._chars_list):
-            chain_prob = total_preds[i]
-            if chain_prob < self.lower_probability_threshold:
-                continue
-            chain_pass = astring + char
-            if len(chain_pass) > self.max_len and char != PASSWORD_END:
-                continue
-            yield chain_pass, chain_prob, conditional_predictions[i]
+        if len(astring) + 1 > self.max_len:
+            if (total_preds[self.pwd_end_idx] >=
+                self.lower_probability_threshold):
+                yield (astring + PASSWORD_END, total_preds[self.pwd_end_idx],
+                       conditional_predictions[self.pwd_end_idx])
+        else:
+            indexes = np.arange(len(total_preds))
+            above_cutoff = total_preds >= self.lower_probability_threshold
+            above_indices = indexes[above_cutoff]
+            probs_above = total_preds[above_cutoff]
+            for i in range(len(probs_above)):
+                index = above_indices[i]
+                yield (astring + self._chars_list[index], probs_above[i],
+                       conditional_predictions[index])
 
     def seed_data(self):
         for _ in range(self.config.random_walk_seed_num):

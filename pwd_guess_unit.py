@@ -1474,7 +1474,7 @@ class PasswordTemplateSerializerTest(unittest.TestCase):
                 'end_character_frequencies', freqs)
             pts = pwd_guess.PasswordTemplateSerializer(config, Mock())
             np.testing.assert_array_equal(
-                pts.expand_conditional_probs([.2, .1, .2, .5], ''), [
+                pts.expand_conditional_probs(np.array([.2, .1, .2, .5]), ''), [
                     0.13333333333333333, 0.3333333333333333,
                     0.06666666666666667, 0.16666666666666666, .05, .05, .2])
 
@@ -1679,6 +1679,7 @@ class ParallelRandomWalkGuesserTest(unittest.TestCase):
                 intermediate_fname = intermediatef.name,
                 guesser_intermediate_directory = self.intermediate_dir,
                 relevel_not_matching_passwords = True,
+                cpu_limit = 2,
                 guess_serialization_method = 'random_walk')
             config.set_intermediate_info(
                 'rare_character_bag', [])
