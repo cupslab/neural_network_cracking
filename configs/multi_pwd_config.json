@@ -18,7 +18,8 @@
             "tsv",
             "tsv"
         ],
-        "pre_processing_only" : true
+        "pre_processing_only" : true,
+        "log_file" : "log.txt"
     },
     "config" : {
         "training_chunk" : 500,
