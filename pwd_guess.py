@@ -47,9 +47,11 @@ class BaseTrie(object):
 
     @staticmethod
     def fromConfig(config):
-        if config.trie_implementation in BaseTrie.config_keys:
+        try:
             return BaseTrie.config_keys[config.trie_implementation](config)
-        logging.error('Unknown trie type %s. ', config.trie_implementation)
+        except KeyError as e:
+            logging.error('Cannot find trie type %s.',
+                          config.trie_implementation)
 
 class NodeTrie(BaseTrie):
     def __init__(self):
@@ -105,10 +107,11 @@ class DiskBackedTrie(BaseTrie):
         self.fork_length = config.fork_length
 
     def finish(self):
-        self.close_branch()
-        self.config.set_intermediate_info('db_trie_keys', self.keys)
-        self.config.set_intermediate_info('db_trie_weights', self.weights)
-        logging.info('Finishing disk backed trie iteration')
+        if self.current_branch_key is not None:
+            self.close_branch()
+            self.config.set_intermediate_info('db_trie_keys', self.keys)
+            self.config.set_intermediate_info('db_trie_weights', self.weights)
+            logging.info('Finishing disk backed trie iteration')
 
     def make_serializer(self):
         return TrieSerializer.getFactory(self.config, True)(
@@ -541,6 +544,8 @@ class ModelDefaults(object):
             assert self.simulated_frequency_optimization
             assert self.trie_implementation is not None
         assert self.fork_length < self.min_len
+        if self.model_truncate_gradient != -1:
+            assert self.model_truncate_gradient < self.max_len
 
     def as_dict(self):
         answer = dict(vars(ModelDefaults).copy())
@@ -550,7 +555,10 @@ class ModelDefaults(object):
             and not type(value) == staticmethod)])
 
     def model_type_exec(self):
-        return model_type_dict[self.model_type]
+        try:
+            return model_type_dict[self.model_type]
+        except KeyError as e:
+            logging.error('Cannot find model type %s', self.model_type)
 
     def set_intermediate_info(self, key, value):
         with SqliteDict(self.intermediate_fname) as info:
@@ -603,17 +611,19 @@ class BasePreprocessor(object):
     @staticmethod
     def fromConfig(config):
         logging.info('Preprocessor type %s...', config.trie_implementation)
-        if config.trie_implementation in BasePreprocessor.config_keys:
+        try:
             return BasePreprocessor.config_keys[
                 config.trie_implementation](config)
-        logging.error('Cannot find trie_implementation %s',
-                      config.trie_implementation)
+        except KeyError as e:
+            logging.error('Cannot find trie_implementation %s',
+                          config.trie_implementation)
 
     @staticmethod
     def byFormat(pwd_format, config):
-        if pwd_format in BasePreprocessor.format_keys:
+        try:
             return BasePreprocessor.format_keys[pwd_format](config)
-        logging.error('Cannot find preprocessor from format %s', pwd_format)
+        except KeyError as e:
+            logging.error('Cannot find preprocessor from format %s', pwd_format)
 
 class Preprocessor(BasePreprocessor):
     def __init__(self, config = ModelDefaults()):
