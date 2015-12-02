@@ -1271,6 +1271,7 @@ class ProbabilityCalculator(object):
         while len(x_strings) != 0:
             y_indices = list(map(self.ctable.get_char_index, y_strings))
             probs = self.guesser.batch_prob(x_strings)
+            assert len(probs) == len(x_strings)
             for i in range(len(y_indices)):
                 yield x_strings[i], y_strings[i], probs[i][0][y_indices[i]]
             x_strings, y_strings, _ = self.preproc.next_chunk()
@@ -1279,7 +1280,6 @@ class ProbabilityCalculator(object):
         prev_prob = 1
         for item in self.probability_stream(pwd_list):
             input_string, next_char, output_prob = item
-            logging.info(input_string, next_char, output_prob)
             if next_char != PASSWORD_END or self.prefixes is False:
                 prev_prob *= output_prob
                 logging.info('Ending password %s', prev_prob)
@@ -1773,15 +1773,10 @@ def mp_fork_starting_point_random_walker(args):
     return ParallelRandomWalker.run_cmd_process(args)
 
 class ParallelGuesser(Guesser):
-    needs_model = True
-
     def __init__(self, serializer, config, ostream):
         self.tempOstream = tempfile.NamedTemporaryFile(
             mode = 'w', delete = False)
-        if self.needs_model:
-            model = serializer.load_model()
-        else:
-            model = None
+        model = serializer.load_model()
         super().__init__(model, config, self.tempOstream)
         self.fork_points = []
         self.intermediate_files = []
@@ -1831,7 +1826,7 @@ class ParallelGuesser(Guesser):
         argfname, logfile, compiledir, output_fname = args
         logging.info('Launching process: %s', args)
         env = os.environ.copy()
-        env['THEANO_FLAGS'] = 'compiledir=%s' % compiledir
+        env['THEANO_FLAGS'] = 'compiledir=%s,floatX=float32,device=gpu' % compiledir
         subp.check_call(cls.subp_command(argfname, logfile), env = env)
         with open(output_fname, 'r') as data:
             return json.load(data)
@@ -1884,7 +1879,6 @@ class ParallelGuesser(Guesser):
         return pool.map_async(mp_fork_starting_point, args)
 
     def do_forking(self):
-        self.model = None
         arg_list = self.arg_list()
         # Check that the path exists before forking otherwise there are race
         # conditions
@@ -1923,8 +1917,6 @@ class ParallelGuesser(Guesser):
         return guesser.generated, builder.ofile_path
 
 class ParallelRandomWalker(ParallelGuesser):
-    needs_model = False
-
     def do_map(self, pool, args):
         return pool.map_async(mp_fork_starting_point_random_walker, args)
 
@@ -1932,19 +1924,18 @@ class ParallelRandomWalker(ParallelGuesser):
         self.do_forking()
 
     def arg_list(self):
-        pwds = self.read_test_passwords()
+        pwds = self.calculate_probs_from_file()
         random.shuffle(pwds)
-        group_count = min(self.pool_count(), len(pwds))
-        group_size = math.ceil(len(pwds) / group_count)
-        return [list(group) for group in grouper(pwds, group_size)]
+        return [list(group) for group in grouper(pwds, math.ceil(
+            len(pwds) / min(self.pool_count(), len(pwds))))]
 
     @staticmethod
     def fork_entry_point(model, config, node, _ = None):
         builder = (GuesserBuilder(config).add_model(model)
                    .add_temp_file().add_parallel_setting(False))
         guesser = builder.build()
-        probs = list(ProbabilityCalculator(guesser).calc_probabilities(node))
-        guesser.random_walk(probs)
+        logging.info('Starting with probabilities: %s', node)
+        guesser.random_walk(node)
         builder.ostream.close()
         return guesser.generated, builder.ofile_path
 

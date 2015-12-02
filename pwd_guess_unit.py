@@ -1639,6 +1639,9 @@ class ParallelRandomWalkGuesserTest(unittest.TestCase):
         self.serializer = Mock()
         self.serializer.archfile = self.archfile.name
         self.serializer.weightfile = self.weightfile.name
+        mock_model = Mock()
+        mock_model.predict = mock_predict_smart_parallel_skewed
+        self.serializer.load_model = MagicMock(return_value = mock_model)
 
     def tearDown(self):
         self.tempf.close()
@@ -1649,21 +1652,41 @@ class ParallelRandomWalkGuesserTest(unittest.TestCase):
         os.remove(self.weightfile.name)
 
     def test_arglist(self):
-        with tempfile.NamedTemporaryFile(mode = 'w') as gf:
-            gf.write('aaaaa\nbbbbb\ncccc\ncccc\n')
+        with tempfile.NamedTemporaryFile(mode = 'w') as gf, \
+             tempfile.NamedTemporaryFile() as intermediatef:
+            gf.write('aaaa\nbbbBa\n')
             gf.flush()
             config = pwd_guess.ModelDefaults(
+                char_bag = 'abAB\n', min_len = 3, max_len = 5,
+                uppercase_character_optimization = True,
+                rare_character_optimization_guessing = True,
+                rare_character_optimization = True,
+                intermediate_fname = intermediatef.name,
                 parallel_guessing = True, password_test_fname = gf.name,
                 guess_serialization_method = 'random_walk', cpu_limit = 2)
             builder = pwd_guess.GuesserBuilder(config)
+            json.dump({
+                'mock_model' : [0.5, 0.1, 0.4]
+            }, self.archfile)
+            self.archfile.flush()
+            config.set_intermediate_info(
+                'rare_character_bag', [])
+            freqs = {
+                'a' : .4, 'b' : .4, 'A' : .1, 'B' : .1,
+            }
+            config.set_intermediate_info('character_frequencies', freqs)
+            config.set_intermediate_info(
+                'beginning_character_frequencies', freqs)
+            config.set_intermediate_info(
+                'end_character_frequencies', freqs)
             builder.add_serializer(self.serializer).add_file(self.tempf.name)
             guesser = builder.build()
             self.assertEqual(type(guesser), pwd_guess.ParallelRandomWalker)
-            arg_list = guesser.arg_list()
+            arg_list = list(guesser.arg_list())
             self.assertEqual(len(arg_list), 2)
             self.assertEqual(set(itertools.chain.from_iterable(arg_list)),
-                             set([('aaaaa', 1), ('bbbbb', 1), ('cccc', 1)]))
-            self.assertEqual(guesser.model, None)
+                             set([('bbbBa', 0.0016777216000000014),
+                                  ('aaaa', 0.00016384000000000011)]))
 
     def test_guess_simulated(self):
         with tempfile.NamedTemporaryFile(mode = 'w') as gf, \
@@ -1700,6 +1723,7 @@ class ParallelRandomWalkGuesserTest(unittest.TestCase):
             builder = pwd_guess.GuesserBuilder(config)
             builder.add_serializer(self.serializer).add_file(self.tempf.name)
             guesser = builder.build()
+            self.assertTrue(guesser.model is not None)
             guesser.complete_guessing()
             with open(self.tempf.name, 'r') as output:
                 reader = list(csv.reader(
@@ -1708,7 +1732,7 @@ class ParallelRandomWalkGuesserTest(unittest.TestCase):
                 for row in reader:
                     pwd, prob, gn, *_ = row
                     self.assertTrue(pwd == 'aaaa' or pwd == 'bbbBa')
-                    self.assertEqual(prob, '0.00016384' if pwd == 'aaaa' else '0.0016777216')
+                    self.assertEqual(prob, '0.0001638400000000001' if pwd == 'aaaa' else '0.0016777216000000014')
                     self.assertAlmostEqual(float(gn), 397 if pwd == 'aaaa' else 137, delta = 20)
 
 if __name__ == '__main__':
