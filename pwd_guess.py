@@ -4,8 +4,11 @@ from __future__ import print_function
 from keras.models import Sequential, slice_X, model_from_json
 from keras.layers.core import Activation, Dense, RepeatVector
 from keras.layers import recurrent
+from keras.optimizers import SGD
 from sklearn.utils import shuffle
 import numpy as np
+
+import datrie
 
 import sys
 import argparse
@@ -23,6 +26,7 @@ import tempfile
 import subprocess as subp
 import io
 import collections
+import sqlite3
 
 PASSWORD_END = '\n'
 
@@ -176,6 +180,16 @@ class ModelDefaults(object):
 
     guess_serialization_method - Default is 'human'. TODO: add a compressed
       method.
+
+    simulated_frequency_optimization - Only for TSV files. If set to true, then
+      multiple instances of the same password are simulated. This improves
+      performance.
+
+    trie_implementation - Trie implementation. DB or trie or None for no
+      commpression. TODO: DB is broken for training generation.
+
+    trie_fname - File name for disk-backed trie's. Currently only used for DB.
+      Can by ':memory:' for a memory only DB.
     """
     char_bag = (string.ascii_lowercase +
                 string.ascii_uppercase +
@@ -202,6 +216,9 @@ class ModelDefaults(object):
     rare_character_lowest_threshold = 20
     rare_character_bag = ''
     guess_serialization_method = 'human'
+    simulated_frequency_optimization = False
+    trie_implementation = None
+    trie_fname = ':memory:'
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -247,54 +264,178 @@ class ModelDefaults(object):
             logging.warning('Unknown model type %s', self.model_type)
             return None
 
-class Trainer(object):
+class TriePwdList(object):
+    def __init__(self, config = ModelDefaults()):
+        self.trie = datrie.BaseTrie(config.char_bag)
+
+    def increment(self, key, value = 1):
+        self.trie[key] = (self.trie[key] if key in self.trie else 0) + value
+
+    def random_iterate(self):
+        return self.trie.items()
+
+    def finish(self):
+        pass
+
+    def size(self):
+        return len(self.trie)
+
+class DBTrie(object):
+    def __init__(self, config):
+        self.conn = sqlite3.connect(config.trie_fname)
+        self.cur = self.conn.cursor()
+        self.cur.execute(
+            'CREATE TABLE IF NOT EXISTS trie (key TEXT, value INTEGER)')
+        self.cur.execute(
+            'CREATE UNIQUE INDEX IF NOT EXISTS keys ON trie (key)')
+        self.conn.commit()
+
+    def increment(self, key, number = 1):
+        self.cur.execute(
+            'UPDATE OR IGNORE trie SET value = value + ? WHERE key = ?',
+            [number, key])
+        self.cur.execute(
+            'INSERT OR IGNORE INTO trie VALUES (?, ?)', [key, number])
+        self.conn.commit()
+
+    def random_iterate(self):
+        return self.cur.execute('SELECT * FROM trie')
+
+    def finish(self):
+        self.conn.commit()
+        self.conn.close()
+
+    def size(self):
+        return self.cur.execute('SELECT COUNT(*) FROM trie').fetchone()[0]
+
+class Preprocessor(object):
     def __init__(self, pwd_list, config = ModelDefaults()):
         self.config = config
+        self.pwd_freq_dict = {}
+        if type(pwd_list) == list:
+            self.pwd_whole_list = pwd_list
+        elif type(pwd_list) == dict:
+            self.pwd_whole_list = list(pwd_list.keys())
+            self.pwd_freq_dict = pwd_list
         self.chunk = 0
-        self.generation = 0
-        self.pwd_whole_list = list(pwd_list)
-        self.ctable = CharacterTable.fromConfig(self.config)
-        self.model = None
+        self.reset()
 
-    def train_chunk_from_pwds(self, pwds):
-        def all_prefixes(pwd):
-            return [pwd[:i] for i in range(len(pwd))] + [pwd]
-        def all_suffixes(pwd):
-            return [pwd[i] for i in range(len(pwd))] + [PASSWORD_END]
-        def pad_to_len(astring):
-            return astring + (
-                PASSWORD_END * (self.config.max_len - len(astring)))
+    def all_prefixes(self, pwd):
+        return [pwd[:i] for i in range(len(pwd))] + [pwd]
+
+    def all_suffixes(self, pwd):
+        return [pwd[i] for i in range(len(pwd))] + [PASSWORD_END]
+
+    def repeat_weight(self, pwd):
+        return [self.password_weight(pwd) for _ in range(len(pwd) + 1)]
+
+    def train_from_pwds(self, pwds):
         return (
-            map(pad_to_len, itertools.chain.from_iterable(
-                map(all_prefixes, pwds))),
-            itertools.chain.from_iterable(map(all_suffixes, pwds)))
+            itertools.chain.from_iterable(map(self.all_prefixes, pwds)),
+            itertools.chain.from_iterable(map(self.all_suffixes, pwds)),
+            itertools.chain.from_iterable(map(self.repeat_weight, pwds)))
 
-    def next_train_chunk(self):
+    def next_chunk(self):
         if self.chunk * self.config.training_chunk >= len(self.pwd_whole_list):
-            return [], []
+            return [], [], []
         pwd_list = self.pwd_whole_list[
             self.chunk * self.config.training_chunk:
             min((self.chunk + 1) * self.config.training_chunk,
                 len(self.pwd_whole_list))]
         self.chunk += 1
-        return self.train_chunk_from_pwds(pwd_list)
+        pwd_input, output, weight = self.train_from_pwds(pwd_list)
+        return (
+            list(pwd_input), list(output), list(weight))
 
-    def sample_training_set(self, x_list, y_list, num = 10):
-        for _ in range(num):
-            idx = random.randrange(0, len(x_list))
-            row_x, row_y = x_list[np.array([idx])], y_list[np.array([idx])]
-            preds = self.model.predict(row_x, verbose = 0)
-            q = self.ctable.decode(row_x[0])
-            correct = self.ctable.decode(row_y[0])
-            guess = preds[0][0]
-            logging.debug('Sampling training set: %s, %s, %s',
-                          q.strip(PASSWORD_END),
-                          correct.strip(PASSWORD_END),
-                          guess)
+    def total_chunks(self):
+        return math.ceil(len(self.pwd_whole_list) / self.config.training_chunk)
+
+    def password_weight(self, pwd):
+        if not self.config.simulated_frequency_optimization:
+            return 1
+        if pwd in self.pwd_freq_dict:
+            return self.pwd_freq_dict[pwd]
+        logging.warning('Cannot find frequency for password %s', pwd)
+        return 1
+
+    def reset(self):
+        self.chunk = 0
+        random.shuffle(self.pwd_whole_list)
+
+    def finish(self):
+        pass
+
+class TriePreprocessor(object):
+    def __init__(self, prep, config = ModelDefaults()):
+        self.prep = prep
+        self.config = config
+        self.instances = 0
+        if self.config.trie_implementation == 'DB':
+            self.trie = DBTrie(config)
+        elif self.config.trie_implementation == 'trie':
+            self.trie = TriePwdList(config)
+        else:
+            logging.warning('Unknown trie type %s. Using trie',
+                            self.config.trie_implementation)
+            self.trie = TriePwdList(config)
+
+    def begin(self):
+        self.compress()
+        logging.info(
+            'Compressed %s instances into %s chunks of %s instances each',
+            self.instances, self.total_chunks(), self.trie.size())
+        self.reset()
+
+    def compress_list(self, x, y, w):
+        for i in range(len(x)):
+            self.trie.increment(x[i] + y[i], w[i])
+            self.instances += 1
+
+    def total_chunks(self):
+        return self._total_size
+
+    def compress(self):
+        x, y, w = self.prep.next_chunk()
+        while len(x) != 0:
+            self.compress_list(x, y, w)
+            x, y, w = self.prep.next_chunk()
+            if self.prep.chunk % self.config.chunk_print_interval == 0:
+                logging.info('Done compressing chunk %s of %s',
+                             prep.chunk, prep.total_chunks())
+        self._total_size = math.ceil(
+            self.trie.size() / self.config.training_chunk)
+
+    def finish(self):
+        self.trie.finish()
+
+    def reset(self):
+        self.current_generator = self.trie.random_iterate()
+
+    def next_chunk(self):
+        x, y, w = [], [], []
+        for item in list(itertools.islice(
+                self.current_generator, self.config.training_chunk)):
+            key, value = item
+            x.append(key[:-1])
+            y.append(key[-1])
+            w.append(value)
+        return (x, y, w)
+
+class Trainer(object):
+    def __init__(self, pwd_list, config = ModelDefaults()):
+        self.config = config
+        self.chunk = 0
+        self.generation = 0
+        self.ctable = CharacterTable.fromConfig(self.config)
+        self.model = None
+        self.pwd_list = pwd_list
+
+    def pad_to_len(self, astring):
+        return astring + (PASSWORD_END * (self.config.max_len - len(astring)))
 
     def next_train_set_as_np(self):
-        x_strings, y_strings = self.next_train_chunk()
-        x_str_list, y_str_list = list(x_strings), list(y_strings)
+        x_strs, y_str_list, weight_list = self.pwd_list.next_chunk()
+        x_str_list = list(map(self.pad_to_len, x_strs))
         x_vec = np.zeros((len(x_str_list), self.config.max_len,
                           len(self.ctable.chars)), dtype = np.bool)
         for i, xstr in enumerate(x_str_list):
@@ -303,7 +444,10 @@ class Trainer(object):
                          dtype = np.bool)
         for i, ystr in enumerate(y_str_list):
             y_vec[i] = self.ctable.encode(ystr, maxlen = 1)
-        return shuffle(x_vec, y_vec)
+        weight_vec = np.zeros((len(weight_list), 1, 1))
+        for i, weight in enumerate(weight_list):
+            weight_vec[i] = weight
+        return shuffle(x_vec, y_vec, weight_vec)
 
     def build_model(self):
         model = Sequential()
@@ -335,41 +479,42 @@ class Trainer(object):
                 break
             prev_accuracy = accuracy
 
-    def test_set(self, x_all, y_all):
+    def test_set(self, x_all, y_all, w_all):
         split_at = len(x_all) - max(
             int(len(x_all) / self.config.train_test_ratio), 1)
         x_train, x_val = (slice_X(x_all, 0, split_at), slice_X(x_all, split_at))
         y_train, y_val = (y_all[:split_at], y_all[split_at:])
-        return x_train, x_val, y_train, y_val
+        w_train, w_val = (w_all[:split_at], w_all[split_at:])
+        return x_train, x_val, y_train, y_val, w_train, w_val
 
-    def training_step(self, x_all, y_all):
-        x_train, x_val, y_train, y_val = self.test_set(x_all, y_all)
+    def training_step(self, x_all, y_all, w_all):
+        x_train, x_val, y_train, y_val, w_train, w_val = self.test_set(
+            x_all, y_all, w_all)
         train_loss, train_accuracy = self.model.train_on_batch(
-            x_train, y_train, accuracy = True)
+            x_train, y_train, accuracy = True, sample_weight = w_train)
         test_loss, test_accuracy = self.model.test_on_batch(
-            x_val, y_val, accuracy = True)
-        if self.chunk % self.config.chunk_print_interval == 0:
-            self.sample_training_set(x_val, y_val)
+            x_val, y_val, accuracy = True, sample_weight = w_val)
         return train_loss, train_accuracy, test_loss, test_accuracy
 
     def train_model_generation(self):
         self.chunk = 0
-        random.shuffle(self.pwd_whole_list)
-        total_chunks = math.ceil(
-            len(self.pwd_whole_list) / self.config.training_chunk)
-        logging.info('Total chunks %s', total_chunks)
+        self.pwd_list.reset()
+        logging.info('Total chunks %s', self.pwd_list.total_chunks())
         accuracy_accum = []
-        x_all, y_all = self.next_train_set_as_np()
+        x_all, y_all, w_all = self.next_train_set_as_np()
+        chunk = 0
         while len(x_all) != 0:
             assert len(x_all) == len(y_all)
-            tr_loss, _, te_loss, te_acc = self.training_step(x_all, y_all)
+            tr_loss, _, te_loss, te_acc = self.training_step(
+                x_all, y_all, w_all)
             accuracy_accum += [(len(x_all), te_acc)]
-            if self.chunk % self.config.chunk_print_interval == 0:
+            if chunk % self.config.chunk_print_interval == 0:
                 logging.info('Chunk %s of %s. Each chunk is size %s',
-                             self.chunk, total_chunks, len(x_all))
+                             chunk, self.pwd_list.total_chunks(), len(x_all))
                 logging.info('Train loss %s. Test loss %s. Test accuracy %s.',
                              tr_loss, te_loss, te_acc)
-            x_all, y_all = self.next_train_set_as_np()
+            x_all, y_all, w_all = self.next_train_set_as_np()
+            chunk += 1
         return sum(map(lambda x: x[0] * x[1], accuracy_accum)) / sum(
             map(lambda x: x[0], accuracy_accum))
 
@@ -405,10 +550,18 @@ class TsvList(PwdList):
     def as_list_iter(self, agen):
         answer = []
         for row in csv.reader(agen, delimiter = '\t', quotechar = None):
-            pwd, freq, _ = row
+            pwd, freq = row[:2]
             for i in range(int(float.fromhex(freq))):
                 answer.append(sys.intern(pwd))
         return answer
+
+class TsvSimulatedList(PwdList):
+    def as_list_iter(self, agen):
+        freqs = {}
+        for row in csv.reader(agen, delimiter = '\t', quotechar = None):
+            pwd, freq = row[:2]
+            freqs[pwd] = int(float.fromhex(freq))
+        return freqs
 
 class Filterer(object):
     def __init__(self, config):
@@ -450,7 +603,13 @@ class Filterer(object):
         logging.info('Rare characters: %s', self.config.rare_character_bag)
 
     def filter(self, alist):
-        return filter(self.pwd_is_valid, alist)
+        if type(alist) == list:
+            return list(filter(self.pwd_is_valid, alist))
+        elif type(alist) == dict:
+            return dict([(akey, alist[akey])
+                         for akey in alist if self.pwd_is_valid(akey)])
+        logging.warning('Type of alist is not dict or list: %s', type(alist))
+        return []
 
 class GuessSerializer(object):
     def __init__(self, ostream):
@@ -648,28 +807,50 @@ def init_logging(args, config):
         sys.stderr.write('Uncaught exception!')
     sys.excepthook = except_hook
 
-def train(args, config):
+def preprocessing(args, config):
     if args['tsv']:
-        input_const = TsvList
+        if config.simulated_frequency_optimization:
+            input_const = TsvSimulatedList
+        else:
+            input_const = TsvList
     else:
+        if config.simulated_frequency_optimization:
+            logging.warning('Cannot enable simulated_frequency_optimization'
+                            ' on list format. Must be in TSV format. ')
         input_const = PwdList
     filt = Filterer(config)
     logging.info('Reading training set...')
-    plist = list(filt.filter(input_const(args['pwd_file']).as_list()))
+    plist = filt.filter(input_const(args['pwd_file']).as_list())
     filt.finish()
     logging.info('Done reading passwords...')
     if len(plist) == 0:
         logging.error('Empty training set! Quiting...')
         sys.exit(1)
+    preprocessor = Preprocessor(plist, config)
+    if (config.trie_implementation is not None and
+        config.simulated_frequency_optimization):
+        preprocessor = TriePreprocessor(preprocessor, config)
+        logging.info('Inserting into trie...')
+        preprocessor.begin()
+    return preprocessor
+
+def train(args, config):
+    preprocessor = preprocessing(args, config)
     if args['pre_processing_only']:
         logging.info('Only performing pre-processing. ')
         sys.exit(0)
-    trainer = Trainer(plist, config)
+    trainer = Trainer(preprocessor, config)
     serializer = ModelSerializer(args['arch_file'], args['weight_file'])
     if args['retrain']:
         logging.info('Retraining model...')
         trainer.model = serializer.load_model()
     trainer.train(serializer)
+    if args['enumerate_ofile']:
+        if config.parallel_guessing:
+            ParallelGuesser.do_guessing(
+                serializer, config, args['enumerate_ofile'])
+        else:
+            Guesser.do_guessing(trainer.model, config, args['enumerate_ofile'])
 
 def guess(args, config):
     logging.info('Loading model...')
@@ -695,7 +876,7 @@ def main(args):
     init_logging(args, config)
     if args['pwd_file']:
         train(args, config)
-    if args['enumerate_ofile']:
+    elif args['enumerate_ofile']:
         guess(args, config)
     if not args['pwd_file'] and not args['enumerate_ofile']:
         logging.error('Nothing to do! Use --pwd-file or --enumerate-ofile. ')
