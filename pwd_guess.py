@@ -2186,6 +2186,10 @@ def read_config_args(args):
     config_arg_file = open(args['config_args'], 'r')
     try:
         config_args = json.load(config_arg_file)
+    except ValueError as e:
+        sys.stderr.write('Config file %s is not valid JSON format. %s\n' % (
+            args['config_args'], str(e)))
+        raise e
     finally:
         config_arg_file.close()
     arg_ret = args.copy()
