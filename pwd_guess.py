@@ -27,6 +27,7 @@ import subprocess as subp
 import io
 import collections
 import sqlite3
+import struct
 
 PASSWORD_END = '\n'
 
@@ -61,6 +62,40 @@ class NodeTrie(object):
 
     def finish(self):
         pass
+
+NODE_SERIALIZER_ENCODING = 'utf8'
+PASSWORD_FRAGMENT_DELIMITER = '\0'
+
+class NodeTrieSerializer(object):
+    num_record = 100
+
+    def __init__(self, config):
+        self.config = config
+        self.previous_carry_over = ''.encode(NODE_SERIALIZER_ENCODING)
+        self.fmt = '<' + str(self.config.max_len) + 'sQ'
+        self.chunk_size = struct.calcsize(self.fmt)
+
+    def serialize(self, trie):
+        with gzip.open(self.config.trie_fname, 'wb') as afile:
+            for item in trie.random_iterate():
+                pwd, weight = item
+                afile.write(struct.pack(
+                    self.fmt, pwd.encode(NODE_SERIALIZER_ENCODING), weight))
+
+    def load_one_record(self, somebytes):
+        pwd, weight =  struct.unpack_from(self.fmt, somebytes)
+        return (pwd.decode(NODE_SERIALIZER_ENCODING)
+                .strip(PASSWORD_FRAGMENT_DELIMITER),
+                weight)
+
+    def deserialize(self):
+        with gzip.open(self.config.trie_fname, 'rb') as afile:
+            while True:
+                chunk = afile.read(self.chunk_size)
+                if chunk:
+                    yield self.load_one_record(chunk)
+                else:
+                    break
 
 class CharacterTable(object):
     """
@@ -875,6 +910,8 @@ def preprocessing(args, config):
         config.simulated_frequency_optimization):
         preprocessor = NodeTriePreprocessor(config)
         preprocessor.begin(plist)
+        if args['pre_processing_only']:
+            NodeTrieSerializer(config).serialize(preprocessor.trie)
     elif (config.trie_implementation is not None and
         config.simulated_frequency_optimization):
         preprocessor = TriePreprocessor(config)
