@@ -2,7 +2,7 @@
 # William Melicher
 from __future__ import print_function
 from keras.models import Sequential, slice_X, model_from_json
-from keras.layers.core import Activation, Dense, RepeatVector
+from keras.layers.core import Activation, Dense, RepeatVector, TimeDistributedDense
 from keras.layers import recurrent
 from keras.optimizers import SGD
 from sklearn.utils import shuffle
@@ -772,13 +772,14 @@ class Trainer(object):
     def build_model(self):
         model = Sequential()
         model.add(self.config.model_type_exec()(
-            len(self.ctable.chars), self.config.hidden_size))
+            self.config.hidden_size,
+            input_shape = (self.config.max_len, len(self.ctable.chars))))
         model.add(RepeatVector(1))
         for _ in range(self.config.layers):
             model.add(self.config.model_type_exec()(
-                self.config.hidden_size, self.config.hidden_size,
-                return_sequences = True))
-        model.add(Dense(self.config.hidden_size, len(self.ctable.chars)))
+                self.config.hidden_size, return_sequences = True))
+        model.add(TimeDistributedDense(
+            len(self.ctable.chars)))
         model.add(Activation('softmax'))
         model.compile(loss='categorical_crossentropy', optimizer = 'adam')
         self.model = model
@@ -1173,7 +1174,7 @@ def get_version_string():
 def init_logging(args):
     def except_hook(exctype, value, tb):
         logging.critical('Uncaught exception', exc_info = (exctype, value, tb))
-        sys.stderr.write('Uncaught exception! See log for details.\n')
+        sys.stderr.write('Uncaught exception!\n %s\n' % (value))
     sys.excepthook = except_hook
     sys.setcheckinterval = 1000
     log_format = '%(asctime)-15s %(levelname)s: %(message)s'
