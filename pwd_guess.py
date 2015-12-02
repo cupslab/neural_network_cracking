@@ -1,5 +1,6 @@
+# William Melicher
 from __future__ import print_function
-from keras.models import Sequential, slice_X
+from keras.models import Sequential, slice_X, model_from_json
 from keras.layers.core import Activation, Dense, RepeatVector
 from keras.layers import recurrent
 from sklearn.utils import shuffle
@@ -17,9 +18,12 @@ import cProfile
 import json
 
 class colors:
-    ok = '\033[92m'
-    fail = '\033[91m'
-    close = '\033[0m'
+    # ok = '\033[92m'
+    # fail = '\033[91m'
+    # close = '\033[0m'
+    ok = ''
+    fail = ''
+    close = ''
 
 class CharacterTable(object):
     """
@@ -46,10 +50,15 @@ class CharacterTable(object):
             X = X.argmax(axis=-1)
         return ''.join(self.indices_char[x] for x in X)
 
+    @staticmethod
+    def fromConfig(config):
+        return CharacterTable(config.char_bag, config.max_len)
+
 class ModelSerializer(object):
     def __init__(self, archfile, weightfile):
         self.archfile = archfile
         self.weightfile = weightfile
+        self.model_creator_from_json = model_from_json
 
     def save_model(self, model):
         with open(self.archfile, 'w') as arch:
@@ -58,7 +67,7 @@ class ModelSerializer(object):
 
     def load_model(self):
         with open(self.archfile, 'r') as arch:
-            model = model_from_json(arch.read())
+            model = self.model_creator_from_json(arch.read())
         model.load_weights(self.weightfile)
         return model
 
@@ -87,6 +96,7 @@ class ModelDefaults(object):
     visualize_errors = True
     model_type = recurrent.JZS1
     chunk_print_interval = 1000
+    lower_probability_threshold = 10**-5
 
     def __init__(self, adict = {}, **kwargs):
         self.adict = adict
@@ -101,6 +111,8 @@ class ModelDefaults(object):
 
     @staticmethod
     def fromFile(afile):
+        if afile is None:
+            return ModelDefaults()
         with open(afile, 'r') as f:
             return ModelDefaults(json.load(f))
 
@@ -109,7 +121,7 @@ class Trainer(object):
         self.config = config
         self.pwd_whole_list = list(pwd_list)
         self.chunk = 0
-        self.ctable = self.make_char_table()
+        self.ctable = CharacterTable.fromConfig(self.config)
 
     def train_chunk_from_pwds(self, pwds):
         def all_prefixes(pwd):
@@ -132,9 +144,6 @@ class Trainer(object):
                 len(self.pwd_whole_list))]
         self.chunk += 1
         return self.train_chunk_from_pwds(pwd_list)
-
-    def make_char_table(self):
-        return CharacterTable(self.config.char_bag, self.config.max_len)
 
     def next_train_set_as_np(self):
         x_strings, y_strings = self.next_train_chunk()
@@ -176,20 +185,6 @@ class Trainer(object):
             logging.info('Generation ' + str(gen))
             self.train_model_generation(model)
 
-    def sample_model(self, model, verify_x, verify_y):
-        ind = np.random.randint(0, len(verify_x))
-        rowX, rowY = verify_x[np.array([ind])], verify_y[np.array([ind])]
-        preds = model.predict_classes(rowX, verbose = 0)
-        q = self.ctable.decode(rowX[0])
-        correct = self.ctable.decode(rowY[0])
-        guess = self.ctable.decode(preds[0], calc_argmax = False)
-        print('Q', q.strip('\n'))
-        print('T', correct)
-        print((colors.ok + ' ok ' + colors.close
-               if correct == guess else colors.fail +
-               ' no ' + colors.close), guess)
-        print('---')
-
     def train_model_generation(self, model):
         self.chunk = 0
         x_all, y_all = self.next_train_set_as_np()
@@ -204,13 +199,12 @@ class Trainer(object):
                 logging.info('Chunk %s of %s', self.chunk, total_chunks)
                 logging.info('Loss: %s', loss)
                 logging.info('Accuracy: %s', accuracy)
-                if self.config.visualize_errors:
-                    for _ in range(self.config.visualize_num):
-                        self.sample_model(model, x_all, y_all)
             x_all, y_all = self.next_train_set_as_np()
 
     def train(self):
+        logging.info('Building model...')
         model = self.build_model()
+        logging.info('Done compiling model. Beginning training...')
         self.train_model(model)
         return model
 
@@ -267,7 +261,43 @@ class Filterer(object):
     def filter(self, alist):
         return filter(self.pwd_is_valid, alist)
 
-def main(args):
+class Guesser(object):
+    def __init__(self, model, config, ostream):
+        self.model = model
+        self.config = config
+        self.ctable = CharacterTable.fromConfig(self.config)
+        self.ostream = ostream
+
+    def cond_prob_from_preds(self, char, preds):
+        return preds[0][0][self.ctable.char_indices[char]]
+
+    def output_guess(self, password, prob):
+        self.ostream.write('%s\t%s\n' % (password.strip('\n'), prob))
+
+    def recur(self, astring, prob):
+        if prob < self.config.lower_probability_threshold:
+            return
+        if len(astring) > self.config.max_len:
+            return
+        np_inp = np.zeros((1, self.config.max_len, len(self.config.char_bag)),
+                          dtype = np.bool)
+        np_inp[0] = self.ctable.encode(
+            astring + ('\n' * (self.config.max_len - len(astring))))
+        prediction = self.model.predict(np_inp, verbose = 0)
+        for char in self.config.char_bag:
+            conditional_prob = self.cond_prob_from_preds(char, prediction)
+            chain_prob = conditional_prob * prob
+            chain_pass = char + astring
+            if char == '\n':
+                # end of password signal
+                self.output_guess(chain_pass, chain_prob)
+            else:
+                self.recur(chain_pass, chain_prob)
+
+    def guess(self):
+        self.recur('', 1)
+
+def init_logging(args):
     log_format = '%(asctime)-15s %(levelname)s: %(message)s'
     if args['log_file']:
         logging.basicConfig(filename = args['log_file'],
@@ -276,16 +306,14 @@ def main(args):
         logging.basicConfig(level = logging.INFO, format = log_format)
     logging.info('Beginning...')
     logging.info('Arguments %s', json.dumps(args, indent = 4))
+
+def main(args):
+    init_logging(args)
     if args['tsv']:
         input_const = TsvList
-        logging.info('Input passwords in tsv format')
     else:
         input_const = PwdList
-        logging.info('Input passwords in list format')
-    if args['config'] is None:
-        config = ModelDefaults()
-    else:
-        config = ModelDefaults.fromFile(args['config'])
+    config = ModelDefaults.fromFile(args['config'])
     ilist = input_const(args['ifile']).as_list()
     filt = Filterer(config)
     if args['test_input']:
@@ -293,8 +321,15 @@ def main(args):
         filt.filter_test(ilist)
     else:
         logging.info('Starting training...')
-        ModelSerializer(args['arch_ofile'], args['weight_ofile']).save_model(
-            Trainer(filt.filter(ilist), config).train())
+        plist = list(filt.filter(ilist))
+        logging.info('Done reading passwords...')
+        if len(plist) == 0:
+            logging.error('Empty training set! Quiting...')
+            sys.exit(1)
+        model = Trainer(plist, config).train()
+        if args['arch_file'] is not None and args['weight_file'] is not None:
+            ModelSerializer(
+                args['arch_file'], args['weight_file']).save_model(model)
     logging.info('Filtered %s of %s passwords', filt.filtered_out, filt.total)
 
 if __name__=='__main__':
@@ -303,9 +338,9 @@ if __name__=='__main__':
     parser.add_argument('ifile',
                         help=('Input file name. Will be interpreted as a '
                               'gziped file if this argument ends in `.gz\'. '))
-    parser.add_argument('--arch-ofile', default = 'model.json',
+    parser.add_argument('--arch-file',
                         help = 'Output file for the model architecture. ')
-    parser.add_argument('--weight-ofile', default = 'model.h5',
+    parser.add_argument('--weight-file',
                         help = 'Output file for the weights of the model. ')
     parser.add_argument('--tsv', action='store_true',
                         help=('Input file is in TSV format. The first column'

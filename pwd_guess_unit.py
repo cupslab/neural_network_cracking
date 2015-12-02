@@ -4,8 +4,10 @@ import tempfile
 import shutil
 import os.path
 import gzip
+import io
 
 import pwd_guess
+import enumerate_guesses
 
 class TrainerTest(unittest.TestCase):
     def test_training_set(self):
@@ -145,19 +147,39 @@ class FiltererTest(unittest.TestCase):
         f = pwd_guess.Filterer(pwd_guess.ModelDefaults())
         self.assertEqual(['pass'], list(f.filter(['asdf£jfj', 'pass'])))
 
-# TODO: test for model training too short
+    def test_filter_small(self):
+        f = pwd_guess.Filterer(pwd_guess.ModelDefaults(
+            min_len = 3, max_len = 3))
+        self.assertEqual(['aaa'], list(f.filter(['aaa'])))
 
 class ModelSerializerTest(unittest.TestCase):
     def test_model_serializer(self):
         mock = Mock()
-        write_value = '{1234}'
+        write_value = '{}'
         mock.to_json = MagicMock(return_value = write_value)
         mock.save_weights = MagicMock()
+        mock.load_weights = MagicMock()
         with tempfile.NamedTemporaryFile() as fp:
             with tempfile.NamedTemporaryFile() as tp:
                 serializer = pwd_guess.ModelSerializer(fp.name, tp.name)
                 serializer.save_model(mock)
                 self.assertEqual(write_value, fp.read().decode('utf8'))
+                serializer = pwd_guess.ModelSerializer(fp.name, tp.name)
+                serializer.model_creator_from_json = MagicMock(
+                    return_value = mock)
+                serializer.load_model()
+
+class GuesserTest(unittest.TestCase):
+    def test_guesser(self):
+        mock_model = Mock()
+        mock_model.predict_classes = MagicMock(return_value = 0.5)
+        config = pwd_guess.ModelDefaults(
+            min_len = 3, max_len = 3, char_bag = 'a\n',
+            lower_probability_threshold = 10**-1)
+        ostream = io.StringIO()
+        guesser = pwd_guess.Guesser(mock_model, config, ostream)
+        guesser.guess()
+        print(ostream.getvalue())
 
 if __name__ == '__main__':
     unittest.main()
