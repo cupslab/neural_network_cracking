@@ -820,23 +820,27 @@ class PwdList(object):
         ifile = self.open_file()
         try:
             answer = self.as_list_iter(ifile)
+            if all(map(lambda x: '\t' in x, answer[:10])):
+                logging.warning('Many passwords seem to contain a tab! '
+                                'Did you mis-enter the password format?')
         finally:
             ifile.close()
         return answer
 
     @staticmethod
-    def getFactory(file_format, config):
-        if file_format == 'tsv':
+    def getFactory(file_formats, config):
+        assert type(file_formats) == list
+        if len(file_formats) > 1:
+            return lambda flist: ConcatenatingList(config, flist, file_formats)
+        assert len(file_formats) > 0
+        if file_formats[0] == 'tsv':
             if config.simulated_frequency_optimization:
-                return TsvSimulatedList
+                return lambda flist: TsvSimulatedList(flist[0])
             else:
-                return TsvList
-        elif file_format == 'list':
-            if config.simulated_frequency_optimization:
-                logging.error('Cannot enable simulated_frequency_optimization'
-                              ' on list format. Must be in TSV format. ')
-            return PwdList
-        logging.error('Cannot find factory for format of %s', file_format)
+                return lambda flist: TsvList(flist[0])
+        elif file_formats[0] == 'list':
+            return lambda flist: PwdList(flist[0])
+        logging.error('Cannot find factory for format of %s', file_formats)
 
 class TsvList(PwdList):
     def as_list_iter(self, agen):
@@ -851,6 +855,24 @@ class TsvSimulatedList(PwdList):
     def as_list_iter(self, agen):
         return [(row[0], int(float.fromhex(row[1]))) for row in
                 csv.reader(agen, delimiter = '\t', quotechar = None)]
+
+class ConcatenatingList(object):
+    def __init__(self, config, file_list, file_formats):
+        assert len(file_list) == len(file_formats)
+        self.config = config
+        self.file_tuples = zip(file_list, file_formats)
+
+    def get_iterable(self, file_tuple):
+        file_name, file_format = file_tuple
+        input_factory = PwdList.getFactory([file_format], self.config)
+        return input_factory([file_name])
+
+    def as_list(self):
+        answer = []
+        for atuple in self.file_tuples:
+            iterable = self.get_iterable(atuple)
+            answer.append(iterable.as_list())
+        return itertools.chain.from_iterable(answer)
 
 class Filterer(object):
     def __init__(self, config):
@@ -1083,7 +1105,6 @@ def init_logging(args):
         logging.critical('Uncaught exception', exc_info = (exctype, value, tb))
         sys.stderr.write('Uncaught exception! See log for details.\n')
     sys.excepthook = except_hook
-    config = ModelDefaults.fromFile(args['config'])
     log_format = '%(asctime)-15s %(levelname)s: %(message)s'
     log_level = log_level_map[args['log_level']]
     if args['log_file']:
@@ -1093,9 +1114,7 @@ def init_logging(args):
         logging.basicConfig(level = log_level, format = log_format)
     logging.info('Beginning...')
     logging.info('Arguments: %s', json.dumps(args, indent = 4))
-    logging.info('Configuration: %s', json.dumps(config.as_dict(), indent = 4))
     logging.info('Version: %s', get_version_string())
-    return config
 
 def read_passwords(pwd_file, pwd_format, config):
     input_factory = PwdList.getFactory(pwd_format, config)
@@ -1107,10 +1126,11 @@ def read_passwords(pwd_file, pwd_format, config):
     return plist
 
 def preprocessing(args, config):
-    if args['pwd_format'] in BasePreprocessor.format_keys:
+    if args['pwd_format'][0] in BasePreprocessor.format_keys:
+        assert len(args['pwd_format']) == 1
         logging.info('Formatting preprocessor')
-        disk_trie = BasePreprocessor.byFormat(args['pwd_format'], config)
-        disk_trie.begin(args['pwd_file'])
+        disk_trie = BasePreprocessor.byFormat(args['pwd_format'][0], config)
+        disk_trie.begin(args['pwd_file'][0])
         return disk_trie
     preprocessor = BasePreprocessor.fromConfig(config)
     preprocessor.begin(
@@ -1145,17 +1165,29 @@ def guess(args, config):
         sys.exit(1)
     serializer = ModelSerializer(args['arch_file'], args['weight_file'])
     if config.parallel_guessing:
-        ParallelGuesser.do_guessing(
-            serializer, config, args['enumerate_ofile'])
+        ParallelGuesser.do_guessing(serializer, config, args['enumerate_ofile'])
     else:
         Guesser.do_guessing(
             serializer.load_model(), config, args['enumerate_ofile'])
+
+def read_config_args(config_arg_fname):
+    config_arg_file = open(config_arg_fname, 'r')
+    try:
+        config_args = json.load(config_arg_file)
+        return (config_args['config'], config_args['args'])
+    finally:
+        config_arg_file.close()
 
 def main(args):
     if args['version']:
         sys.stdout.write(get_version_string() + '\n')
         sys.exit(0)
-    config = init_logging(args)
+    if args['config_args']:
+        args, config = read_config_args(args['config_args'])
+    else:
+        config = ModelDefaults.fromFile(args['config'])
+    init_logging(args)
+    logging.info('Configuration: %s', json.dumps(config.as_dict(), indent = 4))
     if args['pwd_file']:
         train(args, config)
     elif args['enumerate_ofile']:
@@ -1174,12 +1206,12 @@ def make_parser():
         --enumerate-ofile will guess passwords based on an existing model.
         Version """ +
         get_version_string()))
-    parser.add_argument('--pwd-file', help=('Input file name. '))
+    parser.add_argument('--pwd-file', help=('Input file name. '), nargs = '+')
     parser.add_argument('--arch-file',
                         help = 'Output file for the model architecture. ')
     parser.add_argument('--weight-file',
                         help = 'Output file for the weights of the model. ')
-    parser.add_argument('--pwd-format', default = 'list',
+    parser.add_argument('--pwd-format', default = 'list', nargs = '+',
                         choices = ['trie', 'tsv', 'list', 'im_trie'],
                         help = ('Format of pwd-file input. "list" format is one'
                                 'password per line. "tsv" format is tab '
@@ -1203,6 +1235,8 @@ def make_parser():
                         help = 'Print version number and exit')
     parser.add_argument('--pre-processing-only', action='store_true',
                         help = 'Only perform the preprocessing step. ')
+    parser.add_argument('--config-args',
+                        help = 'File with both configuration and arguments. ')
     return parser
 
 if __name__=='__main__':

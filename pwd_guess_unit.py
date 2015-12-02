@@ -582,17 +582,37 @@ class PwdListTest(unittest.TestCase):
 
     def test_factory(self):
         self.assertEqual(
-            pwd_guess.PwdList.getFactory('tsv', pwd_guess.ModelDefaults(
-                simulated_frequency_optimization = True)),
+            type(pwd_guess.PwdList.getFactory(['tsv'], pwd_guess.ModelDefaults(
+                simulated_frequency_optimization = True))(['stuff'])),
             pwd_guess.TsvSimulatedList)
         self.assertEqual(
-            pwd_guess.PwdList.getFactory('tsv', pwd_guess.ModelDefaults(
-                simulated_frequency_optimization = False)),
+            type(pwd_guess.PwdList.getFactory(['tsv'], pwd_guess.ModelDefaults(
+                simulated_frequency_optimization = False))(['stuff'])),
             pwd_guess.TsvList)
         self.assertEqual(
-            pwd_guess.PwdList.getFactory('list', pwd_guess.ModelDefaults(
-                simulated_frequency_optimization = False)),
+            type(pwd_guess.PwdList.getFactory(['list'], pwd_guess.ModelDefaults(
+                simulated_frequency_optimization = False))(['stuff'])),
             pwd_guess.PwdList)
+        self.assertEqual(
+            type(pwd_guess.PwdList.getFactory(
+                ['list', 'list'], pwd_guess.ModelDefaults(
+                    simulated_frequency_optimization = False))([
+                        'stuff', 'stuff'])),
+            pwd_guess.ConcatenatingList)
+
+    def test_concat(self):
+        fact = pwd_guess.PwdList.getFactory(
+            ['tsv', 'list'], pwd_guess.ModelDefaults(
+                simulated_frequency_optimization = False))
+        concat_list = fact([os.path.join(self.tempdir, 'test.tsv'),
+                            os.path.join(self.tempdir, 'test.txt')])
+        self.assertEqual(type(concat_list), pwd_guess.ConcatenatingList)
+        self.fcontent = 'pass \t1\tR\nword\t1\tR\n'
+        self.make_file('test.tsv', open)
+        self.fcontent = 'pass\nword\n'
+        self.make_file('test.txt', open)
+        self.assertEqual(list(concat_list.as_list()), [
+            ('pass ', 1), ('word', 1), ('pass', 1), ('word', 1)])
 
 class FiltererTest(unittest.TestCase):
     def test_pwd_is_valid(self):
@@ -854,7 +874,7 @@ aaab\t3""")
         self.input_file.flush()
         preprocessor = pwd_guess.BasePreprocessor.fromConfig(real_config)
         preprocessor.begin(pwd_guess.read_passwords(
-            self.input_file.name, 'tsv', real_config))
+            [self.input_file.name], ['tsv'], real_config))
         return preprocessor.stats()
 
     def test_normal(self):
@@ -902,6 +922,7 @@ aaab\t3""")
 
     def test_trie_fuzzy_disk_intermediate(self):
         self.assertFalse(os.path.exists('trie_storage'))
+        self.assertFalse(os.path.exists('trie_intermediate'))
         try:
             self.assertEqual(self.do_preprocessing({
                 'simulated_frequency_optimization' : True,
