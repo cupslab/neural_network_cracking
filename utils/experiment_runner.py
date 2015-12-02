@@ -73,5 +73,5 @@ def main(args):
 if __name__=='__main__':
     parser = argparse.ArgumentParser(description='')
     parser.add_argument('experiment_config')
-    parser.add_argument('--experiments', nargs = '+')
+    parser.add_argument('--experiments', nargs = '+', default = [])
     main(vars(parser.parse_args()))
