@@ -63,6 +63,8 @@ class ModelSerializer(object):
         model.load_weights(self.weightfile)
         return model
 
+PASSWORD_END = '\n'
+
 class ModelDefaults(object):
     """
     Configuration information for guessing and training. Can be read from a file
@@ -84,12 +86,16 @@ class ModelDefaults(object):
     chunk_print_interval - Interval over which to print info to the log
     lower_probability_threshold - This controls how many passwords to output
                                   during generation. Lower means more passwords.
+    relevel_not_matching_passwords - If true, then passwords that do not match
+                                     the filter policy will have their
+                                     probability equal to zero.
     """
     char_bag = (string.ascii_lowercase +
                 string.ascii_uppercase +
                 string.digits +
-                '~!@#$%^&*(),.<>/?\'"{}[]\|-_=+;:\n `')
-    model_type = recurrent.JZS1
+                '~!@#$%^&*(),.<>/?\'"{}[]\|-_=+;: `' +
+                PASSWORD_END)
+    model_type = "JZS1"
     hidden_size = 128
     layers = 1
     max_len = 40
@@ -98,6 +104,7 @@ class ModelDefaults(object):
     generations = 20
     chunk_print_interval = 1000
     lower_probability_threshold = 10**-5
+    relevel_not_matching_passwords = True
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -123,6 +130,13 @@ class ModelDefaults(object):
         return dict([(key, str(value)) for key, value in answer.items()
                      if key[0] != '_' and not hasattr(value, '__call__')])
 
+    def model_type_exec(self):
+        if self.model_type == 'JZS1':
+            return recurrent.JZS1
+        else:
+            logging.warning('Unknown model type %s', self.model_type)
+            return None
+
 class Trainer(object):
     def __init__(self, pwd_list, config = ModelDefaults()):
         self.config = config
@@ -134,9 +148,10 @@ class Trainer(object):
         def all_prefixes(pwd):
             return [pwd[:i] for i in range(len(pwd))] + [pwd]
         def all_suffixes(pwd):
-            return [pwd[i] for i in range(len(pwd))] + ['\n']
+            return [pwd[i] for i in range(len(pwd))] + [PASSWORD_END]
         def pad_to_len(astring):
-            return astring + ('\n' * (self.config.max_len - len(astring)))
+            return astring + (
+                PASSWORD_END * (self.config.max_len - len(astring)))
         return (
             map(pad_to_len, itertools.chain.from_iterable(
                 map(all_prefixes, pwds))),
@@ -168,11 +183,11 @@ class Trainer(object):
 
     def build_model(self):
         model = Sequential()
-        model.add(self.config.model_type(
+        model.add(self.config.model_type_exec()(
             len(self.config.char_bag), self.config.hidden_size))
         model.add(RepeatVector(1))
         for _ in range(self.config.layers):
-            model.add(self.config.model_type(
+            model.add(self.config.model_type_exec()(
                 self.config.hidden_size, self.config.hidden_size,
                 return_sequences = True))
         model.add(Dense(self.config.hidden_size, len(self.config.char_bag)))
@@ -217,7 +232,7 @@ class PwdList(object):
         return open(self.ifile_name, 'r')
 
     def as_list_iter(self, agen):
-        return list([row.strip('\n') for row in agen])
+        return list([row.strip(PASSWORD_END) for row in agen])
 
     def as_list(self):
         answer = []
@@ -242,9 +257,10 @@ class Filterer(object):
         self.total = 0
 
     def signal_error(self, pwd):
-        sys.stderr.write('Error, not a valid password. %s\n' % pwd)
+        logging.warning('Not a valid password. %s\n' % pwd)
 
     def pwd_is_valid(self, pwd):
+        pwd = pwd.strip(PASSWORD_END)
         answer = (all(map(lambda c: c in self.char_bag, pwd)) and
                   len(pwd) <= self.max_len and len(pwd) >= self.min_len)
         if not answer:
@@ -264,39 +280,67 @@ class Guesser(object):
     def __init__(self, model, config, ostream):
         self.model = model
         self.config = config
-        self.ctable = CharacterTable.fromConfig(self.config)
         self.ostream = ostream
         self.generated = 0
+        self.ctable = CharacterTable.fromConfig(self.config)
+        self.filterer = Filterer(self.config)
 
     def cond_prob_from_preds(self, char, preds):
-        return preds[0][0][self.ctable.char_indices[char]]
+        return preds[self.ctable.char_indices[char]]
+
+    def relevel_prediction(self, preds, astring):
+        if not self.filterer.pwd_is_valid(astring):
+            preds[self.ctable.char_indices[PASSWORD_END]] = 0
+        elif len(astring) == self.config.max_len:
+            for c in self.config.char_bag:
+                preds[self.ctable.char_indices[c]] = (
+                    1 if c == PASSWORD_END else 0)
+        sum_per = sum(preds)
+        for i, v in enumerate(preds):
+            preds[i] = v / sum_per
 
     def output_guess(self, password, prob):
-        self.ostream.write('%s\t%s\n' % (password.strip('\n'), prob))
+        self.ostream.write('%s\t%s\n' % (password.strip(PASSWORD_END), prob))
         self.generated += 1
+
+    def conditional_probs(self, astring):
+        np_inp = np.zeros((1, self.config.max_len, len(self.config.char_bag)),
+                          dtype = np.bool)
+        np_inp[0] = self.ctable.encode(
+            astring + (PASSWORD_END * (self.config.max_len - len(astring))))
+        answer = self.model.predict(np_inp, verbose = 0)[0][0].copy()
+        if self.config.relevel_not_matching_passwords:
+            self.relevel_prediction(answer, astring.strip(PASSWORD_END))
+        return answer
 
     def recur(self, astring, prob):
         if prob < self.config.lower_probability_threshold:
             return
         if len(astring) > self.config.max_len:
+            if len(astring.strip(PASSWORD_END)) == self.config.max_len:
+                self.output_guess(astring, prob)
             return
-        np_inp = np.zeros((1, self.config.max_len, len(self.config.char_bag)),
-                          dtype = np.bool)
-        np_inp[0] = self.ctable.encode(
-            astring + ('\n' * (self.config.max_len - len(astring))))
-        prediction = self.model.predict(np_inp, verbose = 0)
+        prediction = self.conditional_probs(astring)
         for char in self.config.char_bag:
-            conditional_prob = self.cond_prob_from_preds(char, prediction)
-            chain_prob = conditional_prob * prob
             chain_pass = char + astring
-            if char == '\n':
-                # end of password signal
+            chain_prob =  self.cond_prob_from_preds(char, prediction) * prob
+            if (char == PASSWORD_END and
+                chain_prob >= self.config.lower_probability_threshold):
                 self.output_guess(chain_pass, chain_prob)
-            else:
+            elif char != PASSWORD_END:
                 self.recur(chain_pass, chain_prob)
 
     def guess(self):
         self.recur('', 1)
+
+    @staticmethod
+    def do_guessing(model, config, ofname):
+        ostream = open(ofname, 'w')
+        logging.info('Enumerating guesses...')
+        guesser = Guesser(model, config, ostream)
+        guesser.guess()
+        ostream.close()
+        logging.info('Generated %s guesses', guesser.generated)
 
 def init_logging(args, config):
     log_format = '%(asctime)-15s %(levelname)s: %(message)s'
@@ -332,6 +376,8 @@ def train(args, config):
             logging.info('Saving model')
             ModelSerializer(
                 args['arch_file'], args['weight_file']).save_model(model)
+        if args['enumerate_ofile']:
+            Guesser.do_guessing(model, config, args['enumerate_ofile'])
     logging.info('Filtered %s of %s passwords', filt.filtered_out, filt.total)
 
 def guess(args, config):
@@ -339,14 +385,8 @@ def guess(args, config):
     if args['arch_file'] is None or args['weight_file'] is None:
         logging.error('Architecture file or weight file not found. Quiting...')
         sys.exit(1)
-    model = ModelSerializer(
-        args['arch_file'], args['weight_file']).load_model()
-    ostream = open(args['enumerate_ofile'], 'w')
-    logging.info('Enumerating guesses...')
-    guesser = Guesser(model, config, ostream)
-    guesser.guess()
-    ostream.close()
-    logging.info('Generated %s guesses', guesser.generated)
+    model = ModelSerializer(args['arch_file'], args['weight_file']).load_model()
+    do_guessing(model, config, args['enumerate_ofile'])
 
 def main(args):
     if args['help_config']:
@@ -356,7 +396,7 @@ def main(args):
     init_logging(args, config)
     if args['pwd_file']:
         train(args, config)
-    if args['enumerate_ofile']:
+    elif args['enumerate_ofile']:
         guess(args, config)
     if not args['pwd_file'] and not args['enumerate_ofile']:
         logging.error('Nothing to do! Use --pwd-file or --enumerate-ofile. ')

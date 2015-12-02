@@ -28,35 +28,12 @@ class TrainerTest(unittest.TestCase):
         t = pwd_guess.Trainer(['pass'])
         t.next_train_set_as_np()
 
-    def test_verification_set(self):
-        t = pwd_guess.Trainer(['pass', 'word'],
-                              pwd_guess.ModelDefaults(training_chunk = 1,
-                                                      train_test_split = 0.2))
-        x_all, y_all = t.next_train_set_as_np()
-        s = t.verification_set(x_all, y_all)
-        t_x, v_x, t_y, v_y = s
-        self.assertEqual(4, len(t_x))
-        self.assertEqual(1, len(v_x))
-        self.assertEqual(4, len(t_y))
-        self.assertEqual(1, len(v_y))
-        x_all, y_all = t.next_train_set_as_np()
-        s = t.verification_set(x_all, y_all)
-        t_x, v_x, t_y, v_y = s
-        self.assertEqual(4, len(t_x))
-        self.assertEqual(1, len(v_x))
-        self.assertEqual(4, len(t_y))
-        self.assertEqual(1, len(v_y))
-
     def test_build_model(self):
         t = pwd_guess.Trainer(['pass'])
         self.assertNotEqual(None, t.build_model())
 
     def test_train_set_np_two(self):
         t = pwd_guess.Trainer(['pass', 'word'])
-        t.next_train_set_as_np()
-
-    def test_train_set_np_digits(self):
-        t = pwd_guess.Trainer(['pass', '1235', '<>;p[003]', '$$$$$$ '])
         t.next_train_set_as_np()
 
     def test_train_set_np_digits(self):
@@ -89,6 +66,10 @@ class ModelDefaultsTest(unittest.TestCase):
     def test_serialize_dict(self):
         m = pwd_guess.ModelDefaults()
         self.assertTrue(json.dumps(m.as_dict()) is not None)
+
+    def test_model_type(self):
+        m = pwd_guess.ModelDefaults()
+        self.assertTrue(hasattr(m.model_type_exec(), '__call__'))
 
 class PwdListTest(unittest.TestCase):
     def setUp(self):
@@ -181,21 +162,85 @@ class ModelSerializerTest(unittest.TestCase):
                 serializer.load_model()
 
 class GuesserTest(unittest.TestCase):
-    def test_guesser(self):
+    def mock_model(self, config, distribution):
         mock_model = Mock()
-        mockable_return = [[[0.5, 0.5]]]
+        mockable_return = [[distribution]]
         mock_model.predict = MagicMock(return_value = mockable_return)
+        return mock_model
+
+    def make(self, config, distribution):
+        ostream = io.StringIO()
+        guesser = pwd_guess.Guesser(self.mock_model(config, distribution),
+                                    config, ostream)
+        return guesser, ostream
+
+    def test_guesser(self):
         config = pwd_guess.ModelDefaults(
             min_len = 3, max_len = 3, char_bag = 'a\n',
-            lower_probability_threshold = 10**-1)
-        ostream = io.StringIO()
-        guesser = pwd_guess.Guesser(mock_model, config, ostream)
+            lower_probability_threshold = 10**-2,
+            relevel_not_matching_passwords = False)
+        guesser, ostream = self.make(config, [0.5, 0.5])
         guesser.guess()
         self.assertEqual("""aaa	0.0625
 aa	0.125
 a	0.25
 	0.5
 """, ostream.getvalue())
+
+    def test_guessing_with_relevel(self):
+        config = pwd_guess.ModelDefaults(
+            min_len = 3, max_len = 3, char_bag = 'a\n',
+            lower_probability_threshold = 10**-1)
+        guesser, ostream = self.make(config, [0.5, 0.5])
+        guesser.guess()
+        self.assertEqual("""aaa	1.0
+""", ostream.getvalue())
+
+    def test_predict(self):
+        config = pwd_guess.ModelDefaults(
+            min_len = 3, max_len = 3, char_bag = 'a\n',
+            lower_probability_threshold = 10**-1,
+            relevel_not_matching_passwords = False)
+        guesser, ostream = self.make(config, [0.5, 0.5])
+        self.assertEqual([0.5, 0.5], guesser.conditional_probs(''))
+        self.assertEqual([0.5, 0.5], guesser.conditional_probs('a'))
+        self.assertEqual([0.5, 0.5], guesser.conditional_probs('aa'))
+        self.assertEqual([0.5, 0.5], guesser.conditional_probs('aaa'))
+
+    def test_relevel(self):
+        config = pwd_guess.ModelDefaults(
+            min_len = 3, max_len = 3, char_bag = 'a\n',
+            lower_probability_threshold = 10**-1)
+        guesser, ostream = self.make(config, [0.5, 0.5])
+        self.assertEqual([0.0, 1.0], guesser.conditional_probs(''))
+        self.assertEqual([0.0, 1.0], guesser.conditional_probs('a'))
+        self.assertEqual([0.0, 1.0], guesser.conditional_probs('aa'))
+        self.assertEqual([1.0, 0.0], guesser.conditional_probs('aaa'))
+
+    def test_relevel_tri_alpha(self):
+        config = pwd_guess.ModelDefaults(
+            min_len = 3, max_len = 3, char_bag = 'ab\n',
+            lower_probability_threshold = 10**-1)
+        guesser, ostream = self.make(config, [0.5, 0.2, 0.3])
+        self.assertEqual([0.0, .4, .6], guesser.conditional_probs(''))
+        self.assertEqual([0.0, .4, .6], guesser.conditional_probs('a'))
+        self.assertEqual([0.0, .4, .6], guesser.conditional_probs('aa'))
+        self.assertEqual([0.0, .4, .6], guesser.conditional_probs('ab'))
+        self.assertEqual([1.0, 0.0, 0.0], guesser.conditional_probs('aaa'))
+
+    def test_do_guessing(self):
+        config = pwd_guess.ModelDefaults(
+            min_len = 3, max_len = 3, char_bag = 'a\n',
+            lower_probability_threshold = 10**-2,
+            relevel_not_matching_passwords = False)
+        model = self.mock_model(config, [0.5, 0.5])
+        with tempfile.NamedTemporaryFile() as fp:
+            pwd_guess.Guesser.do_guessing(model, config, fp.name)
+            self.assertEqual("""aaa	0.0625
+aa	0.125
+a	0.25
+	0.5
+""", fp.read().decode('utf8'))
 
 if __name__ == '__main__':
     unittest.main()
