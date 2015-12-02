@@ -74,6 +74,8 @@ class ModelDefaultsTest(unittest.TestCase):
     def test_get_set(self):
         m = pwd_guess.ModelDefaults(hidden_size = 8)
         self.assertEqual(8, m.hidden_size)
+        m = pwd_guess.ModelDefaults()
+        self.assertEqual(pwd_guess.ModelDefaults.hidden_size, m.hidden_size)
 
     def test_get_set_dict(self):
         m = pwd_guess.ModelDefaults({'hidden_size' : 8})
@@ -172,7 +174,8 @@ class ModelSerializerTest(unittest.TestCase):
 class GuesserTest(unittest.TestCase):
     def test_guesser(self):
         mock_model = Mock()
-        mock_model.predict_classes = MagicMock(return_value = 0.5)
+        mockable_return = [[0.5, 0.5]]
+        mock_model.predict = MagicMock(return_value = mockable_return)
         config = pwd_guess.ModelDefaults(
             min_len = 3, max_len = 3, char_bag = 'a\n',
             lower_probability_threshold = 10**-1)

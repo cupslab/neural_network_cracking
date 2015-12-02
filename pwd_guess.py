@@ -77,29 +77,42 @@ default_char_bag = (string.ascii_lowercase +
                     '~!@#$%^&*(),.<>/?\'"{}[]\|-_=+;:\n `')
 
 class ModelDefaults(object):
+    """Configuration information for guessing and training. Can be read from a
+    file in json format.
+
+    Attributes:
+    char_bag - alphabet of characters over which to guess
+    model_type - type of model. Read keras documentation for more types.
+    hidden_size - size of each layer. More means better accuracy
+    layers - number of hidden layers. More means better accuracy.
+    train_test_split - fraction of data to keep for training and testing
+    max_len - maximum length of any password in training data. This can be
+              larger than all passwords in the data and the network may output
+              guesses that are this many characters long.
+    min_len - minimum length of any password that will be guessed
+    training_chunk - Smaller training chunk means less memory consumed. This is
+                     especially important because often, the blocking thing is
+                     using memory on the GPU which is small.
+    generations - More generations means it takes longer but is more accurate
+    chunk_print_interval - Interval over which to print info to the log
+    lower_probability_threshold - This controls how many passwords to output
+                                  during generation. Lower means more passwords.
+    """
     char_bag = default_char_bag
+    model_type = recurrent.JZS1
     hidden_size = 128
     layers = 1
+    # TODO: implement verification does not happen yet
     train_test_split = 0.1
     max_len = 40
     min_len = 4
-
-    # Smaller training chunk means less memory consumed. This is especially
-    # important because often, the blocking thing is using memory on the GPU
-    # which is small.
     training_chunk = 128
-
-    # More generations means it takes longer but is more accurate
     generations = 20
-
-    visualize_num = 1
-    visualize_errors = True
-    model_type = recurrent.JZS1
     chunk_print_interval = 1000
     lower_probability_threshold = 10**-5
 
-    def __init__(self, adict = {}, **kwargs):
-        self.adict = adict
+    def __init__(self, adict = None, **kwargs):
+        self.adict = adict if adict is not None else dict()
         for k in kwargs:
             self.adict[k] = kwargs[k]
 
@@ -267,12 +280,14 @@ class Guesser(object):
         self.config = config
         self.ctable = CharacterTable.fromConfig(self.config)
         self.ostream = ostream
+        self.generated = 0
 
     def cond_prob_from_preds(self, char, preds):
         return preds[0][0][self.ctable.char_indices[char]]
 
     def output_guess(self, password, prob):
         self.ostream.write('%s\t%s\n' % (password.strip('\n'), prob))
+        self.generated += 1
 
     def recur(self, astring, prob):
         if prob < self.config.lower_probability_threshold:
@@ -307,14 +322,12 @@ def init_logging(args):
     logging.info('Beginning...')
     logging.info('Arguments %s', json.dumps(args, indent = 4))
 
-def main(args):
-    init_logging(args)
+def train(args, config):
     if args['tsv']:
         input_const = TsvList
     else:
         input_const = PwdList
-    config = ModelDefaults.fromFile(args['config'])
-    ilist = input_const(args['ifile']).as_list()
+    ilist = input_const(args['pwd_file']).as_list()
     filt = Filterer(config)
     if args['test_input']:
         logging.info('filtering only...')
@@ -332,10 +345,45 @@ def main(args):
                 args['arch_file'], args['weight_file']).save_model(model)
     logging.info('Filtered %s of %s passwords', filt.filtered_out, filt.total)
 
+def guess(args, config):
+    logging.info('Loading model...')
+    if args['arch_file'] is None or args['weight_file'] is None:
+        logging.error('Architecture file or weight file not found. Quiting...')
+        sys.exit(1)
+    model = ModelSerializer(
+        args['arch_file'], args['weight_file']).load_model()
+    ostream = open(args['enumerate_ofile'], 'w')
+    logging.info('Enumerating guesses...')
+    guesser = Guesser(model, config, ostream)
+    try:
+        guesser.guess()
+    finally:
+        ostream.close()
+    logging.info('Done! Generated %s guesses', guesser.generated)
+
+def main(args):
+    if args['help_config']:
+        sys.stdout.write(ModelDefaults.__doc__ + '\n')
+        sys.exit(0)
+    init_logging(args)
+    config = ModelDefaults.fromFile(args['config'])
+    if args['pwd_file']:
+        train(args, config)
+    elif args['enumerate_ofile']:
+        guess(args, config)
+    else:
+        logging.error('Nothing to do! Use --pwd-file or --enumerate-ofile. ')
+        sys.exit(1)
+
 if __name__=='__main__':
     parser = argparse.ArgumentParser(
-        description='Train a neural network on passwords. ')
-    parser.add_argument('ifile',
+        description=('Neural Network with passwords. This program uses a '
+                     'neural network to guess passwords. This happens in two'
+                     ' phases, training and enumeration. Either --pwd-file or'
+                     ' --enumerate-ofile are required. --pwd-file will give a'
+                     ' password file as training data. --enumerate-ofile will'
+                     ' guess passwords based on an existing model. '))
+    parser.add_argument('--pwd-file',
                         help=('Input file name. Will be interpreted as a '
                               'gziped file if this argument ends in `.gz\'. '))
     parser.add_argument('--arch-file',
@@ -343,13 +391,18 @@ if __name__=='__main__':
     parser.add_argument('--weight-file',
                         help = 'Output file for the weights of the model. ')
     parser.add_argument('--tsv', action='store_true',
-                        help=('Input file is in TSV format. The first column'
-                              ' of the TSV should be the password. '))
+                        help=('Input file from --pwd-file is in TSV format. '
+                              'The first column of the TSV should be the'
+                              ' password. '))
     parser.add_argument('--test-input', action='store_true', help=(
-        'Test if the input is valid and print to stderr errors. Will not train'
-        ' the neural network. Ignores the --ofile argument. '))
+        'Test if the password input is valid and print to stderr errors. Will'
+        ' not train the neural network. '))
+    parser.add_argument('--enumerate-ofile',
+                        help='Enumerate guesses output file')
     parser.add_argument('--config', help='Config file in json. ')
     parser.add_argument('--profile', help='Profile the training phase. ')
+    parser.add_argument('--help-config', action='store_true',
+                        help='Print help for config files and exit')
     parser.add_argument('--log-file')
     args = vars(parser.parse_args())
     main_bundle = lambda: main(args)
