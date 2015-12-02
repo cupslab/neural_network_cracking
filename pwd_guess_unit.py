@@ -898,10 +898,16 @@ aa	0.125
 aaa	0.0625
 """, fp.read().decode('utf8'))
 
+def mock_predict_smart_parallel(input_vec, **kwargs):
+    answer = []
+    for i in range(len(input_vec)):
+        answer.append([[0.5, 0.25, 0.25].copy()])
+    return answer
+
 def mock_fork_starter(args):
     config_dict, serializer_args, node = args
     mock_model = Mock()
-    mock_model.predict = MagicMock(return_value = [[[0.5, 0.25, 0.25]]])
+    mock_model.predict = mock_predict_smart_parallel
     return pwd_guess.ParallelGuesser.fork_entry_point(
         mock_model, pwd_guess.ModelDefaults(**config_dict), node)
 
@@ -909,8 +915,7 @@ class ParallelGuesserTest(unittest.TestCase):
     mock_model = Mock()
 
     def setUp(self):
-        self.mock_model.predict = MagicMock(return_value = [[[
-            0.5, 0.25, 0.25]]])
+        self.mock_model.predict = mock_predict_smart_parallel
         self.config = pwd_guess.ModelDefaults(
             min_len = 3, max_len = 3, char_bag = 'ab\n',
             fork_length = 2)

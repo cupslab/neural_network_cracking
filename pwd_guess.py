@@ -30,7 +30,6 @@ import mmap
 import bisect
 
 PASSWORD_END = '\n'
-PASSWORD_FRAGMENT_DELIMITER = '\0'
 
 FNAME_PREFIX_PREPROCESSOR = 'disk_cache.'
 FNAME_PREFIX_TRIE = 'trie_nodes.'
@@ -1193,6 +1192,11 @@ class Guesser(object):
     def conditional_probs(self, astring):
         return self.conditional_probs_many([astring])[0][0].copy()
 
+    def _conditional_probs(self, astring, cache):
+        answer = cache[astring]
+        del cache[astring]
+        return answer[0]
+
     def conditional_probs_many(self, astring_list):
         answer = self.model.predict(self.ctable.encode_many(astring_list),
                                     verbose = 0)
@@ -1200,7 +1204,7 @@ class Guesser(object):
             self.relevel_prediction_many(answer, astring_list)
         return answer
 
-    def recur(self, astring = '', prob = 1):
+    def next_nodes(self, astring, prob, cache):
         if prob < self.lower_probability_threshold:
             return
         if len(astring) > self.max_len:
@@ -1208,16 +1212,33 @@ class Guesser(object):
                 self.output_serializer.serialize(astring, prob)
                 self.generated += 1
             return
-        prediction = self.conditional_probs(astring)
+        prediction = self._conditional_probs(astring, cache)
         for char in self.ctable.chars:
             chain_pass = astring + char
             chain_prob =  self.cond_prob_from_preds(char, prediction) * prob
             if (char == PASSWORD_END and
-                chain_prob >= self.config.lower_probability_threshold):
+                chain_prob >= self.lower_probability_threshold):
                 self.output_serializer.serialize(chain_pass, chain_prob)
                 self.generated += 1
             elif char != PASSWORD_END:
-                self.recur(chain_pass, chain_prob)
+                yield chain_pass, chain_prob
+
+    def super_node_recur(self, node_list):
+        prefixes = list(filter(lambda x: len(x) <= self.max_len,
+                               map(lambda x: x[0], node_list)))
+        if len(prefixes) == 0:
+            return
+        predictions = self.conditional_probs_many(prefixes)
+        cached_prefixes = dict(zip(prefixes, predictions))
+        for cur_node in node_list:
+            astring, prob = cur_node
+            node_batch = []
+            for next_node in self.next_nodes(astring, prob, cached_prefixes):
+                node_batch.append(next_node)
+            self.super_node_recur(node_batch)
+
+    def recur(self, astring = '', prob = 1):
+        self.super_node_recur([(astring, prob)])
 
     def guess(self, astring = '', prob = 1):
         self.recur(astring, prob)
@@ -1301,11 +1322,14 @@ class ParallelGuesser(Guesser):
         self.real_output = ostream
         self.fork_starter = fork_starting_point
 
-    def recur(self, astring, prob):
-        if len(astring) == self.config.fork_length:
-            self.fork_points.append((astring, prob))
-        else:
-            super().recur(astring, prob)
+    def super_node_recur(self, node_list):
+        continue_nodes = []
+        for node in node_list:
+            if len(node[0]) == self.config.fork_length:
+                self.fork_points.append(node)
+            else:
+                continue_nodes.append(node)
+        super().super_node_recur(continue_nodes)
 
     def guess(self, astring = '', prob = 1):
         self.recur(astring, prob)
