@@ -424,6 +424,29 @@ class TriePreprocessorTest(unittest.TestCase):
             set(zip(expected_chunks, expected_out, expected_weight)),
             set(zip(prefix, suffix, weight)))
 
+    def test_train_trie_rare_character(self):
+        self.assertFalse(os.path.exists('test.sqlite'))
+        config = pwd_guess.ModelDefaults(
+            simulated_frequency_optimization = True,
+            uppercase_character_optimization = True,
+            trie_implementation = 'trie',
+            chunk_print_interval = 1,
+            intermediate_fname = 'test.sqlite')
+        try:
+            config.set_intermediate_info('rare_character_bag', '!@#$')
+            p = pwd_guess.TriePreprocessor(config)
+            p.begin([('pass', 2), ('pasw', 3)])
+            p.reset()
+            prefix, suffix, weight = p.next_chunk()
+            expected_chunks = ['', 'p', 'pa', 'pas', 'pasw', 'pas', 'pass']
+            expected_out = ['p', 'a', 's', 'w', '\n', 's', '\n']
+            expected_weight = [5, 5, 5, 3, 3, 2, 2]
+            self.assertEqual(
+                set(zip(expected_chunks, expected_out, expected_weight)),
+                set(zip(prefix, suffix, weight)))
+        finally:
+            os.remove('test.sqlite')
+
 class SuperTrieTrainerTest(unittest.TestCase):
     def test_y_data(self):
         a = pwd_guess.FuzzyTrieTrainer([], pwd_guess.ModelDefaults(
@@ -968,9 +991,10 @@ abbbb\t4
 abab\t1
 aaab\t3""")
         self.input_file.flush()
-        preprocessor = pwd_guess.BasePreprocessor.fromConfig(real_config)
-        preprocessor.begin(pwd_guess.read_passwords(
+        plist = list(pwd_guess.read_passwords(
             [self.input_file.name], ['tsv'], real_config))
+        preprocessor = pwd_guess.BasePreprocessor.fromConfig(real_config)
+        preprocessor.begin(plist)
         return preprocessor.stats()
 
     def test_normal(self):

@@ -627,6 +627,7 @@ class BasePreprocessor(object):
         except KeyError as e:
             logging.error('Cannot find trie_implementation %s',
                           config.trie_implementation)
+            raise
 
     @staticmethod
     def byFormat(pwd_format, config):
@@ -693,11 +694,10 @@ class TriePreprocessor(BasePreprocessor):
         self.ordered_randomly = False
 
     def preprocess(self, pwd_list):
-        return map(self.ctable.translate, pwd_list)
+        return map(lambda x: (self.ctable.translate(x[0]), x[1]), pwd_list)
 
     def begin(self, pwd_list):
-        out_pwd_list = self.preprocess(pwd_list)
-        for item in out_pwd_list:
+        for item in self.preprocess(pwd_list):
             pwd, weight = item
             self.instances += len(pwd) + 1
             self.trie.increment(pwd + PASSWORD_END, weight)
@@ -1320,9 +1320,9 @@ def preprocessing(args, config):
         disk_trie = BasePreprocessor.byFormat(args['pwd_format'][0], config)
         disk_trie.begin(args['pwd_file'][0])
         return disk_trie
+    plist = read_passwords(args['pwd_file'], args['pwd_format'], config)
     preprocessor = BasePreprocessor.fromConfig(config)
-    preprocessor.begin(
-        read_passwords(args['pwd_file'], args['pwd_format'], config))
+    preprocessor.begin(plist)
     if args['pre_processing_only']:
         logging.info('Only performing pre-processing. ')
         preprocessor.stats()
