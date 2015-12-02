@@ -20,7 +20,8 @@ import json
 import random
 import multiprocessing
 import tempfile
-import subprocess
+import subprocess as subp
+import io
 
 PASSWORD_END = '\n'
 RARE_CHARACTER_SYMBOL = '`'
@@ -578,6 +579,12 @@ log_level_map = {
     'error' : logging.ERROR
 }
 
+def get_version_string():
+    p = subp.Popen(['git', 'describe'],
+                   stdin=subp.PIPE, stdout=subp.PIPE, stderr=subp.PIPE)
+    output, err = p.communicate()
+    return output.decode('utf-8')
+
 def init_logging(args, config):
     log_format = '%(asctime)-15s %(levelname)s: %(message)s'
     log_level = log_level_map[args['log_level']]
@@ -589,6 +596,7 @@ def init_logging(args, config):
     logging.info('Beginning...')
     logging.info('Arguments %s', json.dumps(args, indent = 4))
     logging.info('Configuration %s', json.dumps(config.as_dict(), indent = 4))
+    logging.info('Version: %s')
     def except_hook(exctype, value, tb):
         logging.critical('Uncaught exception', exc_info = (exctype, value, tb))
         sys.stderr.write('Uncaught exception!')
@@ -631,6 +639,9 @@ def main(args):
     if args['help_config']:
         sys.stdout.write(ModelDefaults.__doc__ + '\n')
         sys.exit(0)
+    if args['version']:
+        sys.stdout.write(get_version_string())
+        sys.exit(0)
     config = ModelDefaults.fromFile(args['config'])
     init_logging(args, config)
     if args['pwd_file']:
@@ -649,7 +660,8 @@ def make_parser():
                      ' phases, training and enumeration. Either --pwd-file or'
                      ' --enumerate-ofile are required. --pwd-file will give a'
                      ' password file as training data. --enumerate-ofile will'
-                     ' guess passwords based on an existing model. '))
+                     ' guess passwords based on an existing model. Version ' +
+                     get_version_string()))
     parser.add_argument('--pwd-file',
                         help=('Input file name. Will be interpreted as a '
                               'gziped file if this argument ends in `.gz\'. '))
@@ -675,6 +687,8 @@ def make_parser():
     parser.add_argument('--log-file')
     parser.add_argument('--log-level', default = 'info',
                         choices = ['debug', 'info', 'warning', 'error'])
+    parser.add_argument('--version', action = 'store_true',
+                        help = 'Print version number and exit')
     return parser
 
 if __name__=='__main__':
