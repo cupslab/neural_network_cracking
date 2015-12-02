@@ -217,6 +217,8 @@ class MemoryTrieSerializer(TrieSerializer):
 class BinaryTrieSerializer(TrieSerializer):
     _fmt = '<QQ'
     _fmt_size = struct.calcsize('<QQ')
+    str_len_fmt = '<B'
+    str_len_fmt_size = struct.calcsize('B')
 
     def __init__(self, fname, config):
         super().__init__(fname)
@@ -230,7 +232,7 @@ class BinaryTrieSerializer(TrieSerializer):
         toc_start = -1
         with self.open_file('wb') as afile:
             afile.write(struct.pack(self._fmt, 0, 0))
-            for item in trie.iterate(self.serializer_type()):
+            for item in trie.iterate(self.serializer_type):
                 pwd, weight = item
                 self.write_record(afile, pwd, weight)
                 records += 1
@@ -286,76 +288,75 @@ class BinaryTrieSerializer(TrieSerializer):
                 for item in self.read_from_pos(afile, start, end):
                     yield item
 
+    def read_string(self, afile):
+        byte_string = afile.read(self.str_len_fmt_size)
+        if len(byte_string) == 0:
+            return None
+        strlen, = struct.unpack(self.str_len_fmt, byte_string)
+        return afile.read(strlen).decode(self.encoding)
+
+    def write_string(self, afile, astring):
+        string_bytes = astring.encode(self.encoding)
+        afile.write(struct.pack(self.str_len_fmt, len(string_bytes)))
+        afile.write(string_bytes)
+
     def write_record(self, ostream, pwd, val):
-        raise NotImplementedError()
+        self.write_string(ostream, pwd)
+        self.write_value(ostream, val)
 
     def read_record(self, afile):
-        raise NotImplementedError()
+        astr = self.read_string(afile)
+        if astr is None:
+            return None
+        return (astr, self.read_value(afile))
 
-    def serializer_type(self):
+    def write_value(self, afile, value):
+        raise NotImplementedError
+
+    def read_value(self, afile):
         raise NotImplementedError()
 
 class NodeTrieSerializer(BinaryTrieSerializer):
+    serializer_type = 'reg'
     def __init__(self, *args):
         super().__init__(*args)
-        self.fmt = '<' + str(self.max_len) + 'sQ'
+        self.fmt = '<Q'
         self.chunk_size = struct.calcsize(self.fmt)
 
-    def write_record(self, ostream, pwd, weight):
-        ostream.write(struct.pack(self.fmt, pwd.encode(self.encoding), weight))
+    def write_value(self, ostream, weight):
+        ostream.write(struct.pack(self.fmt, weight))
 
-    def read_record(self, afile):
-        somebytes = afile.read(self.chunk_size)
-        if len(somebytes) == 0:
-            return None
-        pwd, weight =  struct.unpack_from(self.fmt, somebytes)
-        return (pwd.decode(self.encoding)
-                .strip(PASSWORD_FRAGMENT_DELIMITER),
-                weight)
-
-    def serializer_type(self):
-        return 'reg'
+    def read_value(self, afile):
+        return struct.unpack_from(self.fmt, afile.read(self.chunk_size))[0]
 
 class TrieFuzzySerializer(BinaryTrieSerializer):
+    serializer_type = 'fuzzy'
+
     def __init__(self, *args):
         super().__init__(*args)
-        self.in_fmt = '<' + str(self.max_len) + 'sH'
+        self.in_fmt = '<H'
         self.out_fmt = '<1sQ'
         self.in_fmt_bytes = struct.calcsize(self.in_fmt)
         self.out_fmt_bytes = struct.calcsize(self.out_fmt)
 
-    def serializer_type(self):
-        return 'fuzzy'
-
-    def write_record(self, ostream, input_str, output_list):
-        ostream.write(struct.pack(
-            self.in_fmt, input_str.encode(self.encoding), len(output_list)))
+    def write_value(self, ostream, output_list):
+        ostream.write(struct.pack(self.in_fmt, len(output_list)))
         for item in output_list:
             char, weight = item
             ostream.write(struct.pack(
                 self.out_fmt, char.encode(self.encoding), weight))
 
-    def read_record(self, istream):
-        input_rec = istream.read(self.in_fmt_bytes)
-        if len(input_rec) == 0:
-            return None
-        pwd_bytes, num_rec = struct.unpack_from(self.in_fmt, input_rec)
+    def read_value(self, istream):
+        num_rec, = struct.unpack_from(
+            self.in_fmt, istream.read(self.in_fmt_bytes))
         record = []
         for _ in range(num_rec):
             out_char, out_weight = struct.unpack_from(
                 self.out_fmt, istream.read(self.out_fmt_bytes))
-            record.append(
-                (out_char.decode(self.encoding), out_weight))
-        return (pwd_bytes.decode(self.encoding)
-                .strip(PASSWORD_FRAGMENT_DELIMITER), record)
+            record.append((out_char.decode(self.encoding), out_weight))
+        return record
 
 class CharacterTable(object):
-    """
-    Given a set of characters:
-    + Encode them to a one hot integer representation
-    + Decode the one hot integer representation to their character output
-    + Decode a vector of probabilties to their character output
-    """
     def __init__(self, chars, maxlen):
         self.chars = sorted(set(chars))
         self.char_indices = dict((c, i) for i, c in enumerate(self.chars))
