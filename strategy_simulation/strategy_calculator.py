@@ -18,14 +18,14 @@ class Strategy(object):
 
     def output(self, ofile, sort = True):
         answer = self.calculate_hash_nums()
-        if not sort:
-            return answer
-        answer = sorted(answer)
-        try:
-            last_one = (len(answer) - 1) - answer[::-1].index(self.NOT_CRACKED)
-            answer = answer[last_one + 1:] + answer[:last_one + 1]
-        except ValueError:
-            pass
+        if sort:
+            answer = sorted(answer)
+            try:
+                last_one = (len(answer) - 1) - answer[::-1].index(
+                    self.NOT_CRACKED)
+                answer = answer[last_one + 1:] + answer[:last_one + 1]
+            except ValueError:
+                pass
         for value in answer:
             ofile.write(str(value) + '\n')
 
