@@ -1107,7 +1107,7 @@ class ConcatenatingList(object):
                     set(self.frequencies.keys()))
         except AssertionError as e:
             logging.critical(
-                'Error, given files do not match config weight files, %s, %s',
+                'Given files do not match config weight files, %s, %s',
                 set(self.config.pwd_list_weights.keys()),
                 set(self.frequencies.keys()))
             raise e
@@ -1510,6 +1510,7 @@ class ComplexPasswordPolicy(BasePasswordPolicy):
                 not in self.blacklist)
 
     def pwd_complies(self, pwd):
+        pwd = pwd.strip(PASSWORD_END)
         if len(pwd) < 8:
             return False
         if not self.has_group(pwd, self.digits):
@@ -1733,6 +1734,9 @@ class RandomWalkGuesser(Guesser):
         else:
             self._chars_list = self.chars_list
         self.pwd_end_idx = self._chars_list.index(PASSWORD_END)
+        self.enforced_policy = self.config.enforced_policy != 'basic'
+        if self.enforced_policy:
+            self.policy = BasePasswordPolicy.fromConfig(self.config)
 
     def super_node_recur(self, node_list):
         real_node_list = []
@@ -1774,9 +1778,13 @@ class RandomWalkGuesser(Guesser):
         assert False, "Shouldn't go here"
 
     def cost_of_node(self, pwd, prob):
-        # TODO: integrate the throwing out guesses
         if len(pwd) == 0 or pwd[-1] != PASSWORD_END:
             return 0
+        if self.enforced_policy:
+            if self.policy.pwd_complies(pwd):
+                return 1
+            else:
+                return 0
         return 1
 
     def seed_data(self):
@@ -2134,11 +2142,14 @@ def read_passwords(pwd_file, pwd_format, config):
     return filt.filter(input_factory(pwd_file).as_list())
 
 def preprocessing(args, config):
-    if args['pwd_format'][0] in BasePreprocessor.format_keys:
-        assert len(args['pwd_format']) == 1
+    pwd_format_first = args['pwd_format'][0]
+    if pwd_format_first in BasePreprocessor.format_keys:
         logging.info('Formatting preprocessor')
-        disk_trie = BasePreprocessor.byFormat(args['pwd_format'][0], config)
-        disk_trie.begin(args['pwd_file'][0])
+        disk_trie = BasePreprocessor.byFormat(pwd_format_first, config)
+        pwd_file = args['pwd_file'][0]
+        assert len(args['pwd_format']) == 1
+        assert os.path.exists(pwd_file)
+        disk_trie.begin(pwd_file)
         return disk_trie
     # read_passwords must be called before creating the preprocessor because it
     # initializes statistics needed for some preprocessors

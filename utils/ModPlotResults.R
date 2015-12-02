@@ -527,6 +527,7 @@ PlotGuessingCurves <- function(lookup.results,
                                     levels = unique(as.character(cond.order)))
 
   # Make the graph!
+  print(head(guessing.data))
   baseplot <- ggplot(guessing.data,
                      aes_string(x = "guess.number",
                                 y = "proportion",
