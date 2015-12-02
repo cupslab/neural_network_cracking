@@ -44,7 +44,7 @@
                     "trie_implementation" : "disk",
                     "trie_fname" : "trie_fname",
                     "intermediate_fname" : "intermediate_data.sqlite",
-                    "model_type" : "JZS2",
+                    "model_type" : "JZS2"
                 }
             },
             "command" : "python3 /home/wmeliche/nn/src/pwd_guess.py --config-args {config} --profile profilebin"
@@ -68,7 +68,7 @@
                     "trie_implementation" : "disk",
                     "trie_fname" : "trie_fname",
                     "intermediate_fname" : "intermediate_data.sqlite",
-                    "model_type" : "JZS2",
+                    "model_type" : "JZS2"
                 }
             },
             "command" : "python3 /home/wmeliche/nn/src/pwd_guess.py --config-args {config} --profile profilebin"
@@ -92,7 +92,7 @@
                     "trie_implementation" : "disk",
                     "trie_fname" : "trie_fname",
                     "intermediate_fname" : "intermediate_data.sqlite",
-                    "model_type" : "JZS3",
+                    "model_type" : "JZS3"
                 }
             },
             "command" : "python3 /home/wmeliche/nn/src/pwd_guess.py --config-args {config} --profile profilebin"
