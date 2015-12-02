@@ -581,6 +581,7 @@ class ModelDefaults(object):
     random_walk_seed_iterations = 1
     max_gpu_prediction_size = 25000
     gpu_fork_bias = 2
+    cpu_limit = 8
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -1358,7 +1359,7 @@ class PasswordTemplateSerializer(object):
         self.serializer.finish()
 
 class Guesser(object):
-    def __init__(self, model, config, ostream):
+    def __init__(self, model, config, ostream, prob_cache = None):
         self.model = model
         self.config = config
         self.max_len = config.max_len
@@ -1373,7 +1374,7 @@ class Guesser(object):
         self.chunk_size_guesser = self.config.chunk_size_guesser
         self.ostream = ostream
         self.chars_list = self.ctable.chars
-        self._calc_prob_cache = None
+        self._calc_prob_cache = prob_cache
         self.should_make_guesses_rare_char_optimizer = (
             self._should_make_guesses_rare_char_optimizer())
         self.output_serializer = self.make_serializer()
@@ -1665,8 +1666,12 @@ class GuesserBuilder(object):
         if self.config.guess_serialization_method == 'random_walk':
             assert not self.parallel
             class_builder = RandomWalkGuesser
-        answer = class_builder(model_or_serializer, self.config, self.ostream)
-        answer._calc_prob_cache = self.seed_probs
+        if self.seed_probs is not None:
+            answer = class_builder(
+                model_or_serializer, self.config, self.ostream, self.seed_probs)
+        else:
+            answer = class_builder(
+                model_or_serializer, self.config, self.ostream)
         return answer
 
 def fork_starting_point(args):
@@ -1794,7 +1799,7 @@ class ParallelGuesser(Guesser):
         # conditions
         if not os.path.exists(self.config.guesser_intermediate_directory):
             os.mkdir(self.config.guesser_intermediate_directory)
-        pool_count = min(len(arg_list), mp.cpu_count())
+        pool_count = min(len(arg_list), mp.cpu_count(), self.config.cpu_limit)
         pool = mp.Pool(pool_count)
         per_pool = math.ceil(len(arg_list) / pool_count)
         result = pool.map_async(mp_fork_starting_point, self.map_pool(
