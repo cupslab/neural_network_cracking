@@ -687,6 +687,10 @@ class ModelDefaults(object):
     context_length = None
     train_backwards = False
     bidirectional_rnn = False
+    dense_layers = 0
+    dense_hidden_size = 128
+    secondary_training = False
+    secondary_train_sets = None
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -1013,6 +1017,8 @@ class Trainer(object):
             self.ctable = ScheduledSamplingCharacterTable(self.config)
         else:
             self.ctable = CharacterTable.fromConfig(self.config)
+        self.feature_layers = []
+        self.classification_layers = []
 
     def next_train_set_as_np(self):
         x_strs, y_str_list, weight_list = self.pwd_list.next_chunk()
@@ -1036,27 +1042,34 @@ class Trainer(object):
     def build_model(self):
         model = Sequential()
         model_type = self.config.model_type_exec()
-        model.add(model_type(
+        self.feature_layers.append(model_type(
             self.config.hidden_size,
             input_shape=(self.config.context_length, len(self.ctable.chars)),
             truncate_gradient=self.config.model_truncate_gradient,
             go_backwards=self.config.train_backwards))
-        model.add(RepeatVector(1))
+        self.feature_layers.append(RepeatVector(1))
         for _ in range(self.config.layers):
             if self.config.dropouts:
-                model.add(Dropout(self.config.dropout_ratio))
+                self.feature_layers.append(Dropout(self.config.dropout_ratio))
             actual_layer = lambda: model_type(
                 self.config.hidden_size, return_sequences=True,
                 truncate_gradient=self.config.model_truncate_gradient,
                 go_backwards=self.config.train_backwards)
             if self.config.bidirectional_rnn:
-                model.add(Bidirectional(
+                self.feature_layers.append(Bidirectional(
                     actual_layer(), actual_layer(), return_sequences=True,
                     truncate_gradient=self.config.model_truncate_gradient))
             else:
-                model.add(actual_layer())
-        model.add(TimeDistributedDense(len(self.ctable.chars)))
-        model.add(Activation('softmax'))
+                self.feature_layers.append(actual_layer())
+        for _ in range(self.config.dense_layers):
+            self.classification_layers.append(
+                TimeDistributedDense(self.config.dense_hidden_size))
+        self.classification_layers.append(
+            TimeDistributedDense(len(self.ctable.chars)))
+        self.classification_layers.append(
+            Activation('softmax'))
+        for layer in self.feature_layers + self.classification_layers:
+            model.add(layer)
         model.compile(loss='categorical_crossentropy',
                       optimizer=self.config.model_optimizer)
         self.model = model
@@ -1127,6 +1140,17 @@ class Trainer(object):
             self.build_model()
         logging.info('Done compiling model. Beginning training...')
         self.train_model(serializer)
+
+    def freeze_feature_layers(self):
+        for layer in self.feature_layers:
+            layer.trainable = False
+
+    def retrain_classification(self, preprocessor, serializer):
+        assert self.model is not None
+        assert len(self.feature_layers) != 0
+        self.freeze_feature_layers()
+        self.pwd_list = preprocessor
+        self.train(serializer)
 
     @staticmethod
     def getFactory(config):
@@ -2457,6 +2481,12 @@ def train(args, config):
         logging.info('Retraining model...')
         trainer.model = serializer.load_model()
     trainer.train(serializer)
+    if config.secondary_training:
+        fake_args = config.secondary_train_sets
+        fake_args['stats_only'] = False
+        fake_args['pre_processing_only'] = False
+        trainer.retrain_classification(preprocessing(fake_args, config),
+                                       serializer)
     if args['enumerate_ofile']:
         (GuesserBuilder(config).add_serializer(serializer)
          .add_model(trainer.model)

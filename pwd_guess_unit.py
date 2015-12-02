@@ -2113,7 +2113,7 @@ class PolicyTests(unittest.TestCase):
         self.assertFalse(policy.pwd_complies('asdfasd'))
         self.assertFalse(policy.pwd_complies(''))
         self.assertTrue(policy.pwd_complies('asdf' * 30))
-        self.assertTrue(policy.pwd_complies('asdfasdf'))
+        self.assertFalse(policy.pwd_complies('asdfasdf'))
         self.assertTrue(policy.pwd_complies('asdfasdfasdfasdf'))
 
     def test_complex(self):
