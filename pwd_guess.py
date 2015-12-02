@@ -672,7 +672,8 @@ def make_parser():
     parser.add_argument('--tsv', action='store_true',
                         help=('Input file from --pwd-file is in TSV format. '
                               'The first column of the TSV should be the'
-                              ' password. '))
+                              ' password. Second column is the frequency count '
+                              'of the password'))
     parser.add_argument('--enumerate-ofile',
                         help = 'Enumerate guesses output file')
     parser.add_argument('--retrain', action='store_true',
