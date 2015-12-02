@@ -710,6 +710,13 @@ class FiltererTest(unittest.TestCase):
         self.assertEqual([('pass', 1)],
                          list(f.filter([('asdf£jfj', 1), ('pass', 1)])))
 
+    def test_filter_twice(self):
+        f = pwd_guess.Filterer(pwd_guess.ModelDefaults())
+        values = [('a', 1), ('a' * 44, 1), ('pass', 1), ('asdf£', 1)]
+        self.assertEqual(list(f.filter(values)), [('pass', 1)])
+        f.finish()
+        self.assertEqual(list(f.filter(values)), [('pass', 1)])
+
     def test_filter_small(self):
         f = pwd_guess.Filterer(pwd_guess.ModelDefaults(
             min_len = 3, max_len = 3))

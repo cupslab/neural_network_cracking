@@ -570,6 +570,7 @@ class ModelDefaults(object):
             assert self.simulated_frequency_optimization
             assert self.trie_implementation is not None
         assert self.fork_length < self.min_len
+        assert self.max_len <= 255
 
     def as_dict(self):
         answer = dict(vars(ModelDefaults).copy())
@@ -1070,7 +1071,6 @@ class Filterer(object):
             'rare_character_bag', self.rare_characters())
         logging.info('Rare characters: %s', self.rare_characters())
         logging.info('Longest pwd is : %s characters long', self.longest_pwd)
-        self.max_len = self.longest_pwd
 
     def filter(self, alist):
         return filter(lambda x: self.pwd_is_valid(x[0]), alist)
