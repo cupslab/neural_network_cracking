@@ -17,14 +17,6 @@ import logging
 import cProfile
 import json
 
-class colors:
-    # ok = '\033[92m'
-    # fail = '\033[91m'
-    # close = '\033[0m'
-    ok = ''
-    fail = ''
-    close = ''
-
 class CharacterTable(object):
     """
     Given a set of characters:
@@ -369,9 +361,9 @@ def main(args):
     config = ModelDefaults.fromFile(args['config'])
     if args['pwd_file']:
         train(args, config)
-    elif args['enumerate_ofile']:
+    if args['enumerate_ofile']:
         guess(args, config)
-    else:
+    if not args['pwd_file'] and not args['enumerate_ofile']:
         logging.error('Nothing to do! Use --pwd-file or --enumerate-ofile. ')
         sys.exit(1)
 
