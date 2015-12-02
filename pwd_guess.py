@@ -1501,11 +1501,12 @@ class Guesser(object):
                 self.output_serializer.serialize(astring + PASSWORD_END,
                                                  prob_end)
                 self.generated += 1
-            return
+            return []
         indexes = np.arange(len(total_preds))
         above_cutoff = total_preds >= self.lower_probability_threshold
         above_indices = indexes[above_cutoff]
         probs_above = total_preds[above_cutoff]
+        answer = []
         for i in range(len(probs_above)):
             index = above_indices[i]
             char = self.chars_list[index]
@@ -1515,7 +1516,8 @@ class Guesser(object):
                 self.output_serializer.serialize(chain_pass, chain_prob)
                 self.generated += 1
             else:
-                yield chain_pass, chain_prob
+                answer.append((chain_pass, chain_prob))
+        return answer
 
     def batch_prob(self, prefixes):
         logging.info(
@@ -1636,7 +1638,7 @@ class RandomWalkGuesser(Guesser):
 
     def next_nodes(self, astring, prob, prediction):
         if len(astring) > 0 and astring[-1] == PASSWORD_END:
-            return
+            return []
         if self.should_make_guesses_rare_char_optimizer:
             conditional_predictions = (
                 self.output_serializer.expand_conditional_probs(
@@ -1647,17 +1649,20 @@ class RandomWalkGuesser(Guesser):
         if len(astring) + 1 > self.max_len:
             if (total_preds[self.pwd_end_idx] >=
                 self.lower_probability_threshold):
-                yield (astring + PASSWORD_END, total_preds[self.pwd_end_idx],
-                       conditional_predictions[self.pwd_end_idx])
+                return [(astring + PASSWORD_END,
+                         total_preds[self.pwd_end_idx],
+                         conditional_predictions[self.pwd_end_idx])]
         else:
             indexes = np.arange(len(total_preds))
             above_cutoff = total_preds >= self.lower_probability_threshold
             above_indices = indexes[above_cutoff]
             probs_above = total_preds[above_cutoff]
+            answer = [0] * len(probs_above)
             for i in range(len(probs_above)):
                 index = above_indices[i]
-                yield (astring + self._chars_list[index], probs_above[i],
-                       conditional_predictions[index])
+                answer[i] = (astring + self._chars_list[index], probs_above[i],
+                             conditional_predictions[index])
+            return answer
 
     def seed_data(self):
         for _ in range(self.config.random_walk_seed_num):
