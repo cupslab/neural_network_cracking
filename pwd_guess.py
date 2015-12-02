@@ -45,6 +45,13 @@ FNAME_PREFIX_PROCESS_OUT = 'out.child_process.'
 
 FORKED_FLAG = 'forked'
 
+# From: https://docs.python.org/3.4/library/itertools.html
+def grouper(iterable, n, fillvalue=None):
+    "Collect data into fixed-length chunks or blocks"
+    # grouper('ABCDEFG', 3, 'x') --> ABC DEF Gxx"
+    args = [iter(iterable)] * n
+    return itertools.zip_longest(*args, fillvalue=fillvalue)
+
 class BaseTrie(object):
     def increment(self, aword, weight = 1):
         raise NotImplementedError()
@@ -570,6 +577,7 @@ class ModelDefaults(object):
     password_test_fname = None
     chunk_size_guesser = 1000
     random_walk_seed_num = 1000
+    random_walk_seed_iterations = 1
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -1502,10 +1510,14 @@ class RandomWalkGuesser(Guesser):
             self.lower_probability_threshold = prob
             self.cost_sum = 0
             self.cost_num = 0
-            self.super_node_recur(list(self.seed_data()))
+            for _ in range(self.config.random_walk_seed_iterations):
+                self.super_node_recur(list(self.seed_data()))
             if self.cost_num != 0:
                 cost = self.cost_sum / self.cost_num
             else:
+                logging.error(("Number of passwords guessed is 0 for all "
+                               "branches! I don't know what this means"
+                               "but its probably a bug. "))
                 cost = 1
             self.ostream.write('%s\t%s\t%s\n' % (pwd, prob, cost))
 
@@ -1566,12 +1578,18 @@ class GuesserBuilder(object):
         return class_builder(model_or_serializer, self.config, self.ostream)
 
 def fork_starting_point(args):
-    config_dict, serializer_args, node, ofname = args
-    generated, ofile_path = ParallelGuesser.fork_entry_point(
-        ModelSerializer(*serializer_args).load_model(),
-        ModelDefaults(**config_dict), node)
+    config_dict, serializer_args, nodes, ofname = args
+    model = ModelSerializer(*serializer_args).load_model()
+    generated_list = []
+    ofile_path_list = []
+    config = ModelDefaults(**config_dict)
+    for node in nodes:
+        generated, ofile_path = ParallelGuesser.fork_entry_point(
+            model, config, node)
+        generated_list.append(generated)
+        ofile_path_list.append(ofile_path)
     with open(ofname, 'w') as outdata:
-        json.dump([generated, ofile_path], outdata)
+        json.dump(list(zip(generated_list, ofile_path_list)), outdata)
 
 def mp_fork_starting_point(args):
     return ParallelGuesser.run_cmd_process(args)
@@ -1642,7 +1660,7 @@ class ParallelGuesser(Guesser):
         with open(output_fname, 'r') as data:
             return json.load(data)
 
-    def map_pool(self, arglist):
+    def map_pool(self, arglist, pool_size = 1):
         prefix_sb_conf = os.path.join(
             self.config.guesser_intermediate_directory,
             FNAME_PREFIX_SUBPROCESS_CONFIG)
@@ -1657,14 +1675,14 @@ class ParallelGuesser(Guesser):
             argfname = prefix_sb_conf + pnum
             ofile = prefix_output + pnum
             with open(argfname, 'w') as config_fname:
-                json.dump(args + (ofile,), config_fname)
+                json.dump({'args' : args, 'ofile' : ofile}, config_fname)
             return (argfname, prefix_pl_conf + pnum, tempfile.mkdtemp(
                 prefix = FNAME_PREFIX_THEANO_COMPILE + pnum,
                 dir = self.config.guesser_intermediate_directory),
                     ofile)
         subarglist = []
-        for i, arg in enumerate(arglist):
-            subarglist.append(prepare(arg, str(i + 1)))
+        for i, arg_chunk in enumerate(grouper(arglist, pool_size)):
+            subarglist.append(prepare(list(arg_chunk), str(i + 1)))
         return subarglist
 
     def do_forking(self):
@@ -1674,8 +1692,7 @@ class ParallelGuesser(Guesser):
         if not os.path.exists(self.config.guesser_intermediate_directory):
             os.mkdir(self.config.guesser_intermediate_directory)
         pool = mp.Pool(min(len(arg_list), mp.cpu_count()))
-        prepared_args = self.map_pool(arg_list)
-        result = pool.map_async(mp_fork_starting_point, prepared_args)
+        result = pool.map_async(mp_fork_starting_point, self.map_pool(arg_list))
         try:
             pool.close()
             pool.join()
