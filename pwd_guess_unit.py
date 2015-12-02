@@ -1080,6 +1080,47 @@ aaab\t3""")
             os.remove('trie_storage')
             os.remove('intermediate_data.sqlite')
 
+class GuessNumberGeneratorTest(unittest.TestCase):
+    def setUp(self):
+        self.ostream = tempfile.NamedTemporaryFile(mode = 'w', delete = False)
+
+    def tearDown(self):
+        os.remove(self.ostream.name)
+
+    def test_guessing(self):
+        probs = [('pass', .025), ('word', .25), ('gmail', .04)]
+        gng = pwd_guess.GuessNumberGenerator(self.ostream, probs)
+        gng.serialize('asdf', .3)
+        gng.serialize('word', .25)
+        gng.serialize('gmail', .04)
+        gng.serialize('pass', .025)
+        gng.serialize('jjjj', .2)
+        gng.serialize('jjjjj', .00001)
+        gng.finish()
+        with open(self.ostream.name, 'r') as guesses:
+            self.assertEqual(
+                'Total count: 6\nword\t0.25\t1\ngmail\t0.04\t3\npass\t0.025\t4\n',
+                guesses.read())
+
+    def test_guessing_real(self):
+        probs = [('    ', 1.26799704013e-05), ('william', 2.12144662517e-05),
+                 ('forever', 0.00013370734607), ('8daddy', 1.00234253381e-05)]
+        gng = pwd_guess.GuessNumberGenerator(self.ostream, probs)
+        with open('test_data/guesses.test.data.txt', 'r') as test_data:
+            for row in csv.reader(
+                    test_data, delimiter = '\t', quotechar = None):
+                gng.serialize(row[0], float(row[1]))
+        gng.finish()
+        with open(self.ostream.name, 'r') as guesses:
+            self.assertEqual(
+                """Total count: 235
+forever	0.00013370734607	0
+william	2.12144662517e-05	72
+    	1.26799704013e-05	160
+8daddy	1.00234253381e-05	234
+""",
+                guesses.read())
+
 if __name__ == '__main__':
     logging.basicConfig(level = logging.CRITICAL)
     unittest.main()

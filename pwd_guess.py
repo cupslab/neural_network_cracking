@@ -27,6 +27,7 @@ import collections
 import struct
 import os.path
 import mmap
+import bisect
 
 PASSWORD_END = '\n'
 PASSWORD_FRAGMENT_DELIMITER = '\0'
@@ -1094,6 +1095,32 @@ class GuessSerializer(object):
         logging.warning('Unknown serialization method %s',
                         config.guess_serialization_method)
         return None
+
+class GuessNumberGenerator(GuessSerializer):
+    def __init__(self, ostream, pwd_list):
+        super().__init__(ostream)
+        self.pwds, self.probs = zip(*sorted(pwd_list, key = lambda x: x[1]))
+        self.guess_numbers = [0] * len(self.pwds)
+        self.total_guessed = 0
+
+    def serialize(self, _, prob):
+        self.total_guessed += 1
+        idx = bisect.bisect_left(self.probs, prob) - 1
+        if idx >= 0:
+            self.guess_numbers[idx] += 1
+
+    def finish(self):
+        for i in range(len(self.guess_numbers) - 1, 0, -1):
+            self.guess_numbers[i - 1] += self.guess_numbers[i]
+        logging.info('Guessed %s passwords', self.total_guessed)
+        self.ostream.write('Total count: %s\n' % self.total_guessed)
+        writer = csv.writer(self.ostream, delimiter = '\t', quotechar = None)
+        for i in range(len(self.pwds), 0, -1):
+            idx = i - 1
+            writer.writerow([
+                self.pwds[idx], self.probs[idx], self.guess_numbers[idx]])
+        self.ostream.flush()
+        self.ostream.close()
 
 class Guesser(object):
     def __init__(self, model, config, ostream):
