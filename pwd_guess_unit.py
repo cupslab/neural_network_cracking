@@ -1059,7 +1059,8 @@ class ParallelGuesserTest(unittest.TestCase):
     def test_map_pool(self):
         pg = pwd_guess.ParallelGuesser(
             self.serializer, self.config, self.mock_output)
-        pg.map_pool([(self.config.as_dict(), ['na', 'na'], ['aa', 0.125])])
+        pg.map_pool([(
+            self.config.as_dict(), ['na', 'na'], ['aa', 0.125])], 1, 2)
 
 class GuesserBuilderTest(unittest.TestCase):
     def setUp(self):

@@ -1737,7 +1737,8 @@ class ParallelGuesser(Guesser):
         with open(output_fname, 'r') as data:
             return json.load(data)
 
-    def map_pool(self, arglist, pool_size = 1):
+    def map_pool(self, arglist, pool_size, pool_count):
+        logging.info('Mapping %s in each of %s pools', pool_size, pool_count)
         prefix_sb_conf = os.path.join(
             self.config.guesser_intermediate_directory,
             FNAME_PREFIX_SUBPROCESS_CONFIG)
@@ -1756,7 +1757,7 @@ class ParallelGuesser(Guesser):
             ofile = prefix_output + pnum
             config_mod = self.config.as_dict()
             config_mod['max_gpu_prediction_size'] = math.floor(
-                self.config.max_gpu_prediction_size / pool_size)
+                self.config.max_gpu_prediction_size / pool_count)
             with open(argfname, 'w') as config_fname:
                 json.dump({
                     'nodes' : args,
@@ -1772,6 +1773,7 @@ class ParallelGuesser(Guesser):
         return subarglist
 
     def do_forking(self):
+        self.model = None
         arg_list = self.arg_list()
         # Check that the path exists before forking otherwise there are race
         # conditions
@@ -1780,8 +1782,8 @@ class ParallelGuesser(Guesser):
         pool_count = min(len(arg_list), mp.cpu_count())
         pool = mp.Pool(pool_count)
         per_pool = math.ceil(len(arg_list) / pool_count)
-        result = pool.map_async(
-            mp_fork_starting_point, self.map_pool(arg_list, per_pool))
+        result = pool.map_async(mp_fork_starting_point, self.map_pool(
+            arg_list, per_pool, pool_count))
         try:
             pool.close()
             pool.join()
