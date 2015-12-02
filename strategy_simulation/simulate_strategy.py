@@ -4,6 +4,7 @@ import random
 import collections
 import csv
 import os
+import heapq
 
 class Strategy(object):
     def __init__(self, num_guessing_set):
@@ -25,6 +26,10 @@ class TreeStrat(Strategy):
         self.guessed_idxes = set()
         self.pwd_guessing_state = [0] * self.num_guessing_set
         self.pwd_guessing_prob_total = [1] * self.num_guessing_set
+        self.queue = []
+        for i in range(self.num_guessing_set):
+            pwd, prob = self.pwd_priors[0]
+            heapq.heappush(self.queue, (1 - prob, prob, pwd, i))
 
     def next_prob_at(self, idx):
         pwd_idx = self.pwd_guessing_state[idx]
@@ -36,22 +41,12 @@ class TreeStrat(Strategy):
             return -1, ''
 
     def next_action(self):
-        best_prob = 0
-        best_pwd = ''
-        best_idx = -1
-        for i in range(self.num_guessing_set):
-            if i in self.guessed_idxes:
-                continue
-            prob, pwd = self.next_prob_at(i)
-            if best_prob < prob:
-                best_prob = prob
-                best_pwd = pwd
-                best_idx = i
-        if best_idx == -1:
+        if len(self.queue) == 0:
             return False
-        self.cur_idx = best_idx
-        self.cur_pwd = best_pwd
-        self.cur_prob = best_prob
+        probinv, prob, pwd, idx = heapq.heappop(self.queue)
+        self.cur_prob = prob
+        self.cur_pwd = pwd
+        self.cur_idx = idx
         return self.cur_pwd, self.cur_idx
 
     def store_result(self, outcome):
@@ -60,6 +55,31 @@ class TreeStrat(Strategy):
         else:
             self.pwd_guessing_prob_total[self.cur_idx] -= self.cur_prob
             self.pwd_guessing_state[self.cur_idx] += 1
+            prob, pwd = self.next_prob_at(self.cur_idx)
+            if prob != -1:
+                heapq.heappush(self.queue, (1 - prob, prob, pwd, self.cur_idx))
+
+class BayesStrat(TreeStrat):
+    def make_state(self, pwd_prior_iter):
+        super().make_state(pwd_prior_iter)
+        self.observed = 0
+        self.posteriors = [0] * len(self.pwd_priors)
+        self.original_priors = self.pwd_priors[:]
+        self.original_weight = 100
+
+    def successful_update_priors(self):
+        pwd_idx = self.pwd_guessing_state[self.cur_idx]
+        self.observed += 1
+        self.posteriors[pwd_idx] += 1
+        self.pwd_priors[pwd_idx] = (
+            self.cur_pwd, ((self.original_priors[pwd_idx][1] *
+                            self.original_weight + self.posteriors[pwd_idx]) /
+                           (self.original_weight + self.observed)))
+
+    def store_result(self, outcome):
+        super().store_result(outcome)
+        if outcome:
+            self.successful_update_priors()
 
 class NaiveStrat(Strategy):
     def make_state(self, pwd_prior_iter):
@@ -119,7 +139,7 @@ class Tabulator(object):
         if outcome:
             self.runs[self.run_num].append(self.cracked_num)
 
-    def output(self, ofile):
+    def output(self, ofile, summary_ofile):
         writer = csv.writer(ofile, delimiter = '\t', quotechar = None,
                             lineterminator = os.linesep)
         average_accum = 0
@@ -128,20 +148,29 @@ class Tabulator(object):
             for ahash_num in hashes:
                 average_accum += 1
                 writer.writerow([run_idx + 1, ahash_num])
-        sys.stdout.write(str(average_accum / len(self.runs)) + '\n')
+        summary_ofile.write(str(average_accum / (len(self.runs) - 1)) +
+                            os.linesep)
 
 class Simulator(object):
-    def __init__(self, strategy_factory, test_pwds, pwd_priors, tabulator):
+    def __init__(self, strategy_factory, test_pwds, pwd_priors, tabulator,
+                 guess_logger = None):
         self.strategy = strategy_factory(len(test_pwds))
         self.strategy.make_state(pwd_priors)
         self.test_pwds = test_pwds
         self.tabulator = tabulator
+        self.prev_pwd = None
+        self.guess_number = 0
+        self.guess_logger = guess_logger
 
     def run_step(self):
         action = self.strategy.next_action()
         if not action:
             return True
+        self.guess_number += 1
         pwd, idx = action
+        if pwd != self.prev_pwd and self.guess_logger is not None:
+            self.guess_logger.write('%s\t%s\n' % (pwd, self.guess_number))
+        self.prev_pwd = pwd
         outcome = (self.test_pwds[idx] == pwd)
         self.tabulator.record(outcome)
         self.strategy.store_result(outcome)
@@ -170,14 +199,15 @@ def main(args):
     test_pwds = read_test_pwds(args.test_file)
     tabulator = Tabulator()
     probs = list(read_prob_file(args.prob_file))
+    guess_logger = sys.stdout if args.guess_logger else None
     for _ in range(args.num_runs):
         random.shuffle(test_pwds)
         sim = Simulator(strategy_map[args.strategy], test_pwds,
-                        probs, tabulator)
+                        probs, tabulator, guess_logger)
         sim.run(args.num)
         tabulator.reset()
     with open(args.ofile, 'w') as ostream:
-        tabulator.output(ostream)
+        tabulator.output(ostream, args.summary_ofile)
 
 if __name__=='__main__':
     parser = argparse.ArgumentParser(description='')
@@ -185,6 +215,9 @@ if __name__=='__main__':
     parser.add_argument('prob_file', help='Input file with probabilities. ')
     parser.add_argument('strategy', choices = sorted(strategy_map.keys()))
     parser.add_argument('ofile', help='Output file')
+    parser.add_argument('--summary-ofile', type=argparse.FileType('w'),
+                        default=sys.stdout)
     parser.add_argument('--num', type=int, default=10)
     parser.add_argument('--num-runs', type=int, default=10)
+    parser.add_argument('--guess-logger', action='store_true')
     main(parser.parse_args())

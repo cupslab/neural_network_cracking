@@ -605,6 +605,7 @@ class ModelDefaults(object):
     pwd_list_weights = {}
     dropouts = False
     dropout_ratio = .25
+    fuzzy_training_smoothing = False
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -1029,7 +1030,10 @@ class Trainer(object):
     def getFactory(config):
         if config.trie_serializer_type == 'fuzzy':
             logging.info('Fuzzy trie trainer')
-            return FuzzyTrieTrainer
+            if config.fuzzy_training_smoothing:
+                return FuzzyTrieTrainerSmoothing
+            else:
+                return FuzzyTrieTrainer
         else:
             logging.info('Regular trainer')
             return Trainer
@@ -1043,6 +1047,23 @@ class FuzzyTrieTrainer(Trainer):
                 outchar, weight = record
                 weight_sum += weight
                 y_vec[i, 0, self.ctable.get_char_index(outchar)] = weight
+            y_vec[i] /= weight_sum
+        return y_vec
+
+class FuzzyTrieTrainerSmoothing(FuzzyTrieTrainer):
+    def prepare_y_data(self, y_str_list):
+        y_vec = np.zeros((len(y_str_list), 1, len(self.ctable.chars)))
+        for i, records in enumerate(y_str_list):
+            weight_sum = 0
+            outchars, weights = zip(*records)
+            min_weight = min(min(weights), 1)
+            y_vec[i].fill(min_weight)
+            for j in range(len(weights)):
+                outchar, weight = outchars[j], weights[j]
+                weight_sum += weight
+                weight += min_weight
+                y_vec[i, 0, self.ctable.get_char_index(outchar)] = weight
+            weight_sum += len(self.ctable.chars) * min_weight
             y_vec[i] /= weight_sum
         return y_vec
 

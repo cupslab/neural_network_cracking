@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import MagicMock, Mock
 import io
 import os
+import csv
 
 import simulate_strategy as sim
 
@@ -59,6 +60,63 @@ class TestTreeStrat(unittest.TestCase):
             strat.store_result(False)
         self.assertFalse(strat.next_action())
 
+    def test_real_end(self):
+        strat = sim.TreeStrat(2)
+        strat.make_state([('654321', 0.00247049666073),
+                          ('987654321', 0.000802497539062)])
+        self.assertEqual(strat.next_action(), ('654321', 0))
+        strat.store_result(False)
+        self.assertEqual(strat.next_action(), ('654321', 1))
+        strat.store_result(False)
+
+    def test_real_start(self):
+        strat = sim.TreeStrat(2)
+        strat.make_state([('654321', 0.00247049666073),
+                          ('987654321', 0.000802497539062)])
+        self.assertEqual(strat.next_action(), ('654321', 0))
+        strat.store_result(False)
+        self.assertEqual(strat.next_action(), ('654321', 1))
+        strat.store_result(False)
+
+    def test_real_data(self):
+        strat = sim.TreeStrat(2)
+        with open('test_data/sorted.guess_file.tsv', 'r') as sg:
+            guesses = [(row[0], float(row[1])) for row in csv.reader(
+                sg, delimiter = '\t', quotechar = None)]
+        strat.make_state(guesses)
+        for i in range(273):
+            pwd, idx = strat.next_action()
+            self.assertEqual(guesses[int(i/2)][0], pwd)
+            self.assertEqual(i % 2, idx)
+            strat.store_result(False)
+        self.assertAlmostEqual(strat.next_prob_at(0)[0], 3.44507E-05)
+        pwd, idx = strat.next_action()
+        self.assertEqual(pwd, 'angelito')
+        self.assertEqual(idx, 0)
+
+class TestBayesStrat(unittest.TestCase):
+    def test_tree(self):
+        strat = sim.BayesStrat(2)
+        strat.make_state([('a', .2), ('b', .19)])
+        self.assertAlmostEqual(strat.next_prob_at(0)[0], 0.2)
+        self.assertAlmostEqual(strat.next_prob_at(1)[0], 0.2)
+        self.assertEqual(strat.next_action(), ('a', 0))
+        strat.store_result(False)
+        self.assertAlmostEqual(strat.next_prob_at(0)[0], 0.19/0.8)
+        self.assertAlmostEqual(strat.next_prob_at(1)[0], 0.2)
+        self.assertEqual(strat.next_action(), ('b', 0))
+
+    def test_positive(self):
+        strat = sim.BayesStrat(2)
+        strat.make_state([('a', .2), ('b', .1)])
+        strat.original_weight = 5
+        self.assertAlmostEqual(strat.next_prob_at(0)[0], 0.2)
+        self.assertAlmostEqual(strat.next_prob_at(1)[0], 0.2)
+        self.assertEqual(strat.next_action(), ('a', 0))
+        strat.store_result(True)
+        self.assertAlmostEqual(strat.next_prob_at(1)[0], (1/3))
+        self.assertEqual(strat.next_action(), ('a', 1))
+
 class TestSimulator(unittest.TestCase):
     def test_run_one(self):
         answer = Mock()
@@ -115,10 +173,13 @@ class TestTabulator(unittest.TestCase):
         tabulator.record(False)
         tabulator.record(False)
         tabulator.record(True)
+        tabulator.reset()
         ostream = io.StringIO()
-        tabulator.output(ostream)
+        summary_ofile = io.StringIO()
+        tabulator.output(ostream, summary_ofile)
         self.assertEqual(os.linesep.join(['1\t3', '1\t6']) + os.linesep,
                          ostream.getvalue())
+        self.assertEqual('2.0\n', summary_ofile.getvalue())
 
     def test_record_many(self):
         tabulator = sim.Tabulator()
@@ -133,6 +194,8 @@ class TestTabulator(unittest.TestCase):
         tabulator.record(True)
         tabulator.record(False)
         ostream = io.StringIO()
-        tabulator.output(ostream)
+        summary_ofile = io.StringIO()
+        tabulator.output(ostream, summary_ofile)
         self.assertEqual(os.linesep.join(['1\t3', '1\t6', '2\t2']) + os.linesep,
                          ostream.getvalue())
+        self.assertEqual('3.0\n', summary_ofile.getvalue())

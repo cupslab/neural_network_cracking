@@ -486,6 +486,28 @@ class SuperTrieTrainerTest(unittest.TestCase):
         expected[0, 0, 3] = 2 / 8
         np.testing.assert_array_equal(answer, expected)
 
+class FuzzyTrieSmoothing(unittest.TestCase):
+    def test_y_data(self):
+        a = pwd_guess.FuzzyTrieTrainerSmoothing([], pwd_guess.ModelDefaults(
+            max_len = 5, char_bag = 'abc\n'))
+        answer = a.prepare_y_data([[('a', 1), ('b', 5)]])
+        expected = np.zeros((1, 1, 4))
+        expected[0, 0, 0] = 1 / 10
+        expected[0, 0, 1] = 2 / 10
+        expected[0, 0, 2] = 6 / 10
+        expected[0, 0, 3] = 1 / 10
+        np.testing.assert_array_equal(answer, expected)
+
+    def test_y_data_multiple(self):
+        a = pwd_guess.FuzzyTrieTrainerSmoothing([], pwd_guess.ModelDefaults(
+            max_len = 5, char_bag = 'abc\n'))
+        answer = a.prepare_y_data([[('a', 1), ('b', 5)],
+                                   [('a', 2), ('b', 2), ('c', 3)]])
+        expected = np.zeros((2, 1, 4))
+        expected[0, 0] = [1/10, 2/10, 6/10, 1/10]
+        expected[1, 0] = [1/11, 3/11, 3/11, 4/11]
+        np.testing.assert_array_equal(answer, expected)
+
 class TrainerTest(unittest.TestCase):
     def test_accuracy(self):
         config = pwd_guess.ModelDefaults(max_len = 5)
