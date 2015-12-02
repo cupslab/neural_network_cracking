@@ -829,10 +829,14 @@ aaa	0.0625
             lower_probability_threshold = 10**-1,
             relevel_not_matching_passwords = False)
         guesser, ostream = self.make(config, [0.5, 0.5])
-        self.assertEqual([0.5, 0.5], guesser.conditional_probs(''))
-        self.assertEqual([0.5, 0.5], guesser.conditional_probs('a'))
-        self.assertEqual([0.5, 0.5], guesser.conditional_probs('aa'))
-        self.assertEqual([0.5, 0.5], guesser.conditional_probs('aaa'))
+        np.testing.assert_array_equal(
+            [0.5, 0.5], guesser.conditional_probs(''))
+        np.testing.assert_array_equal(
+            [0.5, 0.5], guesser.conditional_probs('a'))
+        np.testing.assert_array_equal(
+            [0.5, 0.5], guesser.conditional_probs('aa'))
+        np.testing.assert_array_equal(
+            [0.5, 0.5], guesser.conditional_probs('aaa'))
 
     def test_relevel(self):
         config = pwd_guess.ModelDefaults(
@@ -939,7 +943,6 @@ def mock_fork_starter(args):
     return pwd_guess.ParallelGuesser.fork_entry_point(
         mock_model, pwd_guess.ModelDefaults(**config_dict), node)
 
-@unittest.skip('Parallel guessing is broken!')
 class ParallelGuesserTest(unittest.TestCase):
     mock_model = Mock()
 

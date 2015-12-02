@@ -1,3 +1,4 @@
+# -*- mode: Python -*-
 # pwd_guess_ctypes.pyx
 
 import numpy as np

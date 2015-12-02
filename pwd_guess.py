@@ -1201,17 +1201,12 @@ class Guesser(object):
     def conditional_probs(self, astring):
         return self.conditional_probs_many([astring])[0][0].copy()
 
-    def _conditional_probs(self, astring, cache):
-        answer = cache[astring]
-        del cache[astring]
-        return answer[0]
-
     def conditional_probs_many(self, astring_list):
-        answer = self.model.predict(self.ctable.encode_many(astring_list),
-                                    verbose = 0,
-                                    batch_size = self.chunk_size_guesser)
+        answer = np.array(
+            self.model.predict(self.ctable.encode_many(astring_list),
+                               verbose = 0,
+                               batch_size = self.chunk_size_guesser))
         if self.relevel_not_matching_passwords:
-            answer = np.array(answer)
             self.relevel_prediction_many(answer, astring_list)
         return answer
 
@@ -1221,7 +1216,7 @@ class Guesser(object):
             return
         logging.info('Super node buffer size %s, guess number %s',
                      len(prefixes), self.generated)
-        predictions = np.array(self.conditional_probs_many(prefixes))
+        predictions = self.conditional_probs_many(prefixes)
         node_batch = []
         for i, cur_node in enumerate(node_list):
             astring, prob = cur_node
