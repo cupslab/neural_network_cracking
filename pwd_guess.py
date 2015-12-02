@@ -16,6 +16,8 @@ import csv
 import logging
 import cProfile
 import json
+import random
+import pickle
 
 class CharacterTable(object):
     """
@@ -46,20 +48,30 @@ class CharacterTable(object):
     def fromConfig(config):
         return CharacterTable(config.char_bag, config.max_len)
 
+sys.setrecursionlimit(10000)
+
 class ModelSerializer(object):
-    def __init__(self, archfile, weightfile):
+    def __init__(self, archfile = None, weightfile = None):
         self.archfile = archfile
         self.weightfile = weightfile
         self.model_creator_from_json = model_from_json
 
     def save_model(self, model):
+        if self.archfile is None or self.weightfile is None:
+            logging.warning(
+                'Cannot save model because file arguments were not provided')
+            return
+        logging.info('Saving model architecture')
         with open(self.archfile, 'w') as arch:
             arch.write(model.to_json())
+        logging.info('Saving model weights')
         model.save_weights(self.weightfile, overwrite = True)
 
     def load_model(self):
+        logging.info('Loading model architecture')
         with open(self.archfile, 'r') as arch:
             model = self.model_creator_from_json(arch.read())
+        logging.info('Loading model weights')
         model.load_weights(self.weightfile)
         return model
 
@@ -110,6 +122,7 @@ class ModelDefaults(object):
     relevel_not_matching_passwords = True
     generation_checkpoint = True
     training_accuracy_threshold = 10**-10
+    train_test_ratio = 10
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -132,12 +145,15 @@ class ModelDefaults(object):
     def as_dict(self):
         answer = dict(vars(ModelDefaults).copy())
         answer.update(self.adict)
-        return dict([(key, str(value)) for key, value in answer.items()
-                     if key[0] != '_' and not hasattr(value, '__call__')])
+        return dict([(key, value) for key, value in answer.items() if (
+            key[0] != '_' and not hasattr(value, '__call__')
+            and not type(value) == staticmethod)])
 
     def model_type_exec(self):
         if self.model_type == 'JZS1':
             return recurrent.JZS1
+        if self.model_type == 'GRU':
+            return recurrent.GRU
         else:
             logging.warning('Unknown model type %s', self.model_type)
             return None
@@ -173,19 +189,31 @@ class Trainer(object):
         self.chunk += 1
         return self.train_chunk_from_pwds(pwd_list)
 
+    def sample_training_set(self, x_list, y_list, num = 10):
+        for _ in range(num):
+            idx = random.randrange(0, len(x_list))
+            row_x, row_y = x_list[np.array([idx])], y_list[np.array([idx])]
+            preds = self.model.predict(row_x, verbose = 0)
+            q = self.ctable.decode(row_x[0])
+            correct = self.ctable.decode(row_y[0])
+            guess = preds[0][0]
+            logging.debug('Sampling training set: %s, %s, %s',
+                          q.strip(PASSWORD_END),
+                          correct.strip(PASSWORD_END),
+                          guess)
+
     def next_train_set_as_np(self):
         x_strings, y_strings = self.next_train_chunk()
         x_str_list, y_str_list = list(x_strings), list(y_strings)
-        x_vec = np.zeros(
-            (len(x_str_list), self.config.max_len, len(self.config.char_bag)),
-            dtype = np.bool)
+        x_vec = np.zeros((len(x_str_list), self.config.max_len,
+                          len(self.config.char_bag)), dtype = np.bool)
         for i, xstr in enumerate(x_str_list):
             x_vec[i] = self.ctable.encode(xstr, maxlen = self.config.max_len)
         y_vec = np.zeros((len(y_str_list), 1, len(self.config.char_bag)),
                          dtype = np.bool)
         for i, ystr in enumerate(y_str_list):
             y_vec[i] = self.ctable.encode(ystr, maxlen = 1)
-        return (x_vec, y_vec)
+        return shuffle(x_vec, y_vec)
 
     def build_model(self):
         model = Sequential()
@@ -199,50 +227,67 @@ class Trainer(object):
         model.add(Dense(self.config.hidden_size, len(self.config.char_bag)))
         model.add(Activation('softmax'))
         model.compile(loss='categorical_crossentropy', optimizer = 'adam')
-        return model
+        self.model = model
 
-    def train_model(self, model, serializer):
+    def train_model(self, serializer):
         prev_accuracy = 0
         for gen in range(self.config.generations):
             self.generation = gen + 1
             logging.info('Generation ' + str(gen + 1))
-            accuracy = self.train_model_generation(model)
-            if serializer is not None:
-                logging.info('Saving model...')
-                serializer.save_model(model)
-            if (accuracy - prev_accuracy <
+            accuracy = self.train_model_generation()
+            logging.info('Generation accuracy: %s', accuracy)
+            if accuracy > prev_accuracy:
+                serializer.save_model(self.model)
+            if ((accuracy - prev_accuracy) <
                 self.config.training_accuracy_threshold):
-                logging.info('Accuracy of %s is less than threshold.',
+                logging.info('Accuracy diff of %s is less than threshold.',
                              accuracy - prev_accuracy)
                 break
             prev_accuracy = accuracy
 
-    def train_model_generation(self, model):
+    def test_set(self, x_all, y_all):
+        split_at = len(x_all) - max(
+            int(len(x_all) / self.config.train_test_ratio), 1)
+        x_train, x_val = (slice_X(x_all, 0, split_at), slice_X(x_all, split_at))
+        y_train, y_val = (y_all[:split_at], y_all[split_at:])
+        return x_train, x_val, y_train, y_val
+
+    def training_step(self, x_all, y_all):
+        x_train, x_val, y_train, y_val = self.test_set(x_all, y_all)
+        train_loss, train_accuracy = self.model.train_on_batch(
+            x_train, y_train, accuracy = True)
+        test_loss, test_accuracy = self.model.test_on_batch(
+            x_val, y_val, accuracy = True)
+        if self.chunk % self.config.chunk_print_interval == 0:
+            self.sample_training_set(x_val, y_val)
+        return train_loss, train_accuracy, test_loss, test_accuracy
+
+    def train_model_generation(self):
         self.chunk = 0
-        x_all, y_all = self.next_train_set_as_np()
+        random.shuffle(self.pwd_whole_list)
         total_chunks = math.ceil(
             len(self.pwd_whole_list) / self.config.training_chunk)
         logging.info('Total chunks %s', total_chunks)
         accuracy_accum = []
-        num = 0
+        x_all, y_all = self.next_train_set_as_np()
         while len(x_all) != 0:
             assert len(x_all) == len(y_all)
-            loss, accuracy = model.train_on_batch(x_all, y_all, accuracy = True)
-            accuracy_accum += [(len(x_all), accuracy)]
+            tr_loss, _, te_loss, te_acc = self.training_step(x_all, y_all)
+            accuracy_accum += [(len(x_all), te_acc)]
             if self.chunk % self.config.chunk_print_interval == 0:
                 logging.info('Chunk %s of %s. Each chunk is size %s',
                              self.chunk, total_chunks, len(x_all))
-                logging.info('Loss: %s. Accuracy: %s.', loss, accuracy)
+                logging.info('Train loss %s. Test loss %s. Test accuracy %s.',
+                             tr_loss, te_loss, te_acc)
             x_all, y_all = self.next_train_set_as_np()
         return sum(map(lambda x: x[0] * x[1], accuracy_accum)) / sum(
             map(lambda x: x[0], accuracy_accum))
 
-    def train(self, serializer = None):
+    def train(self, serializer):
         logging.info('Building model...')
-        model = self.build_model()
+        self.build_model()
         logging.info('Done compiling model. Beginning training...')
-        self.train_model(model, serializer)
-        return model
+        self.train_model(serializer)
 
 class PwdList(object):
     def __init__(self, ifile_name):
@@ -267,8 +312,12 @@ class PwdList(object):
 
 class TsvList(PwdList):
     def as_list_iter(self, agen):
-        return [row[0] for row in csv.reader(
-            agen, delimiter = '\t', quotechar = None)]
+        answer = []
+        for row in csv.reader(agen, delimiter = '\t', quotechar = None):
+            pwd, freq, _ = row
+            for i in range(int(float.fromhex(freq))):
+                answer.append(sys.intern(pwd))
+        return answer
 
 class Filterer(object):
     def __init__(self, config):
@@ -322,7 +371,8 @@ class Guesser(object):
             preds[i] = v / sum_per
 
     def output_guess(self, password, prob):
-        self.ostream.write('%s\t%s\n' % (password.strip(PASSWORD_END), prob))
+        self.ostream.write('%s\t%s\n' % (
+            password.strip(PASSWORD_END), prob))
         self.generated += 1
 
     def conditional_probs(self, astring):
@@ -344,7 +394,7 @@ class Guesser(object):
             return
         prediction = self.conditional_probs(astring)
         for char in self.config.char_bag:
-            chain_pass = char + astring
+            chain_pass = astring + char
             chain_prob =  self.cond_prob_from_preds(char, prediction) * prob
             if (char == PASSWORD_END and
                 chain_prob >= self.config.lower_probability_threshold):
@@ -357,16 +407,23 @@ class Guesser(object):
 
     @staticmethod
     def do_guessing(model, config, ofname):
-        ostream = open(ofname, 'w')
+        ostream = open(ofname, 'w') if ofname != '-' else sys.stdout
         logging.info('Enumerating guesses...')
         guesser = Guesser(model, config, ostream)
         guesser.guess()
         ostream.close()
         logging.info('Generated %s guesses', guesser.generated)
 
+log_level_map = {
+    'info' : logging.INFO,
+    'warning'  : logging.WARNING,
+    'debug' : logging.DEBUG,
+    'error' : logging.ERROR
+}
+
 def init_logging(args, config):
     log_format = '%(asctime)-15s %(levelname)s: %(message)s'
-    log_level = logging.WARNING if args['quiet'] else logging.INFO
+    log_level = log_level_map[args['log_level']]
     if args['log_file']:
         logging.basicConfig(filename = args['log_file'],
                             level = log_level, format = log_format)
@@ -377,6 +434,7 @@ def init_logging(args, config):
     logging.info('Configuration %s', json.dumps(config.as_dict(), indent = 4))
 
 def train(args, config):
+    global trained_model
     if args['tsv']:
         input_const = TsvList
     else:
@@ -394,10 +452,10 @@ def train(args, config):
             logging.error('Empty training set! Quiting...')
             sys.exit(1)
         logging.info('Saving model')
-        serializer = ModelSerializer(args['arch_file'], args['weight_file'])
-        model = Trainer(plist, config).train(serializer)
+        trainer = Trainer(plist, config)
+        trainer.train(ModelSerializer(args['arch_file'], args['weight_file']))
         if args['enumerate_ofile']:
-            Guesser.do_guessing(model, config, args['enumerate_ofile'])
+            Guesser.do_guessing(trainer.model, config, args['enumerate_ofile'])
     logging.info('Filtered %s of %s passwords', filt.filtered_out, filt.total)
 
 def guess(args, config):
@@ -405,8 +463,9 @@ def guess(args, config):
     if args['arch_file'] is None or args['weight_file'] is None:
         logging.error('Architecture file or weight file not found. Quiting...')
         sys.exit(1)
-    model = ModelSerializer(args['arch_file'], args['weight_file']).load_model()
-    do_guessing(model, config, args['enumerate_ofile'])
+    Guesser.do_guessing(ModelSerializer(
+        args['arch_file'], args['weight_file']).load_model(),
+        config, args['enumerate_ofile'])
 
 def main(args):
     if args['help_config']:
@@ -453,8 +512,8 @@ if __name__=='__main__':
     parser.add_argument('--help-config', action = 'store_true',
                         help = 'Print help for config files and exit')
     parser.add_argument('--log-file')
-    parser.add_argument('-q', '--quiet', action = 'store_true',
-                        help = 'Silence logging. ')
+    parser.add_argument('--log-level', default = 'info',
+                        choices = ['debug', 'info', 'warning', 'error'])
     args = vars(parser.parse_args())
     main_bundle = lambda: main(args)
     if args['profile'] is not None:

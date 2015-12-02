@@ -17,9 +17,14 @@ probs = list(map(lambda x: x[0] / sums, skewed_dict))
 def skewed():
     return skewed_dict[np.random.choice(len(skewed_dict), 1, p = probs)[0]][1]
 
+def subtract():
+    a, b = random.randint(0, 10), random.randint(0, 10)
+    return str(a) + str(b) + str(abs(a - b))
+
 distributions = {
     'constant' : lambda: 'aaa',
-    'skewed' : skewed
+    'skewed' : skewed,
+    'subtract' : subtract
 }
 
 def main(args):

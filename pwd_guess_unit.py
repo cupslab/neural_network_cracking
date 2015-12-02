@@ -6,6 +6,9 @@ import os.path
 import gzip
 import io
 import json
+import numpy as np
+import contextlib
+import csv
 
 import pwd_guess
 
@@ -23,14 +26,18 @@ class TrainerTest(unittest.TestCase):
         t = pwd_guess.Trainer(['pass'], pwd_guess.ModelDefaults(max_len = 5))
         mock_model = Mock()
         mock_model.train_on_batch = MagicMock(return_value = (0.5, 0.5))
-        self.assertEqual(0.5, t.train_model_generation(mock_model))
+        mock_model.test_on_batch = MagicMock(return_value = (0.5, 0.5))
+        t.model = mock_model
+        self.assertEqual(0.5, t.train_model_generation())
 
     def test_train_model(self):
         t = pwd_guess.Trainer(['pass'], pwd_guess.ModelDefaults(
             max_len = 5, generations = 20))
         mock_model = Mock()
         mock_model.train_on_batch = MagicMock(return_value = (0.5, 0.5))
-        t.train_model(mock_model, None)
+        mock_model.test_on_batch = MagicMock(return_value = (0.5, 0.5))
+        t.model = mock_model
+        t.train_model(ModelSerializer())
         self.assertEqual(t.generation, 2)
 
     def test_training_set_small(self):
@@ -54,7 +61,8 @@ class TrainerTest(unittest.TestCase):
 
     def test_build_model(self):
         t = pwd_guess.Trainer(['pass'])
-        self.assertNotEqual(None, t.build_model())
+        t.build_model()
+        self.assertNotEqual(None, t.model)
 
     def test_train_set_np_two(self):
         t = pwd_guess.Trainer(['pass', 'word'])
@@ -64,8 +72,31 @@ class TrainerTest(unittest.TestCase):
         t = pwd_guess.Trainer(['pass', '1235', '<>;p[003]', '$$$$$$ '],
                               pwd_guess.ModelDefaults(
                                   training_chunk = 1, visualize_errors = False))
-        m = t.train()
+        m = t.train(pwd_guess.ModelSerializer())
         self.assertEqual(4, t.chunk)
+
+    def test_test_set(self):
+        t = pwd_guess.Trainer([], pwd_guess.ModelDefaults(
+            train_test_ratio = 10))
+        a = np.zeros((10, 1, 1), dtype = np.bool)
+        b = np.zeros((10, 1, 1), dtype = np.bool)
+        x_t, x_v, y_t, y_v = t.test_set(a, b)
+        self.assertEqual(9, len(x_t))
+        self.assertEqual(1, len(x_v))
+        self.assertEqual(9, len(y_t))
+        self.assertEqual(1, len(y_v))
+
+    def test_test_set_small(self):
+        t = pwd_guess.Trainer([], pwd_guess.ModelDefaults(
+            train_test_ratio = 10))
+        a = np.zeros((5, 1, 1), dtype = np.bool)
+        b = np.zeros((5, 1, 1), dtype = np.bool)
+        x_t, x_v, y_t, y_v = t.test_set(a, b)
+        self.assertEqual(4, len(x_t))
+        self.assertEqual(1, len(x_v))
+        self.assertEqual(4, len(y_t))
+        self.assertEqual(1, len(y_v))
+
 
 class ModelDefaultsTest(unittest.TestCase):
     def test_get_default(self):
@@ -133,6 +164,12 @@ class PwdListTest(unittest.TestCase):
         self.make_file('test.tsv', open)
         pwd = pwd_guess.TsvList(self.fname)
         self.assertEqual(['pass ', 'word'], pwd.as_list())
+
+    def test_tsv_multiplier(self):
+        self.fcontent = 'pass \t2\tR\nword\t1\tR\n'
+        self.make_file('test.tsv', open)
+        pwd = pwd_guess.TsvList(self.fname)
+        self.assertEqual(['pass ', 'pass ', 'word'], pwd.as_list())
 
     def test_tsv_quote_char(self):
         self.fcontent = 'pass"\t1\tR\nword\t1\tR\n'
@@ -265,6 +302,76 @@ aa	0.125
 a	0.25
 	0.5
 """, fp.read().decode('utf8'))
+
+class EndToEndTest(unittest.TestCase):
+
+    skewed_dict = ['abab', 'abbbb', 'aaaa', 'aaab']
+
+    probs = [0.1, 0.4, 0.2, 0.3]
+
+    def skewed(self):
+        return self.skewed_dict[
+            np.random.choice(len(skewed_dict), 1, p = self.probs)[0]]
+
+    distributions = {
+        'constant' : lambda: 'aaa',
+        'skewed' : skewed,
+    }
+
+    def make_dist(self, ofile, line_count, distribution):
+        for _ in range(line_count):
+            ofile.write('%s\n' % self.distributions[distribution]())
+        ofile.close()
+
+    def test_skewed(self):
+        with tempfile.NamedTemporaryFile() as output_file, tempfile.NamedTemporaryFile() as input_file, tempfile.NamedTemporaryFile() as config_file:
+            json.dump({
+                "chunk_print_interval" : 100,
+                "training_chunk" : 64,
+                "layers" : 3,
+                "hidden_size" : 256,
+                "generations" : 20,
+                "min_len" : 3,
+                "max_len" : 5,
+                "char_bag" : "ab\n"
+            }, config_file)
+            config_file.flush()
+            make_dist(input_file, 10000, 'skewed')
+            input_file.flush()
+            pwd_guess.main({
+                'pwd_file' : input_file.name,
+                'config' : config_file.name,
+                'enumerate_ofile' : output_file.name
+            })
+            pwd_freq = [(row[0], float(row[1])) for row in
+                        csv.reader(output_file, delimiter = '\t')]
+            sort_freq = sorted(pwd_freq, key = lambda x: x[1], reverse = True)
+            self.assertEqual(['abbbb', 'aaab', 'aaaa', 'abab'], sort_freq[:4])
+
+    def test_constant(self):
+        with tempfile.NamedTemporaryFile() as output_file, tempfile.NamedTemporaryFile() as input_file, tempfile.NamedTemporaryFile() as config_file:
+            json.dump({
+                "chunk_print_interval" : 100,
+                "training_chunk" : 64,
+                "layers" : 3,
+                "hidden_size" : 256,
+                "generations" : 20,
+                "min_len" : 3,
+                "max_len" : 5,
+                "char_bag" : "ab\n"
+            }, config_file)
+            config_file.flush()
+            make_dist(input_file, 10000, 'constant')
+            input_file.flush()
+            pwd_guess.main({
+                'pwd_file' : input_file.name,
+                'config' : config_file.name,
+                'enumerate_ofile' : output_file.name
+            })
+            pwd_freq = [(row[0], float(row[1])) for row in
+                        csv.reader(output_file, delimiter = '\t')]
+            sort_freq = sorted(pwd_freq, key = lambda x: x[1], reverse = True)
+            self.assertEqual(['aaa'], sort_freq[:])
 
 if __name__ == '__main__':
     unittest.main()
