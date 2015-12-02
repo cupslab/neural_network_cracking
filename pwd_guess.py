@@ -1788,6 +1788,7 @@ class ParallelGuesser(Guesser):
                     ]}, config_fname)
             return (argfname, prefix_pl_conf + pnum, prefix_tdir + pnum, ofile)
         subarglist = []
+        random.shuffle(arglist)
         for i, arg_chunk in enumerate(grouper(arglist, pool_size)):
             subarglist.append(prepare(list(arg_chunk), str(i + 1)))
         return subarglist
