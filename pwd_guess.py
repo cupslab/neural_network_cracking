@@ -1602,12 +1602,12 @@ class Guesser(object):
         else:
             logging.error('Unknown serialization method %s',
                           self.config.guess_serialization_method)
-        if self.should_make_guesses_rare_char_optimizer:
-            logging.info('Using template converting password serializer')
-            answer = PasswordTemplateSerializer(self.config, answer)
         if self.config.enforced_policy != 'basic':
             answer = PasswordPolicyEnforcingSerializer(
                 BasePasswordPolicy.fromConfig(self.config), answer)
+        if self.should_make_guesses_rare_char_optimizer:
+            logging.info('Using template converting password serializer')
+            answer = PasswordTemplateSerializer(self.config, answer)
         return answer
 
     def relevel_prediction(self, preds, astring):
