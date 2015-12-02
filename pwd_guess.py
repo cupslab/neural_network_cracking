@@ -55,9 +55,7 @@ class BaseTrie(object):
             return NodeTrie()
         elif config.trie_implementation == 'dummy':
             return BaseTrie()
-        logging.warning('Unknown trie type %s. Using trie',
-                        config.trie_implementation)
-        return TriePwdList(config)
+        logging.error('Unknown trie type %s. ')
 
 class NodeTrie(BaseTrie):
     def __init__(self):
@@ -98,22 +96,44 @@ class NodeTrie(BaseTrie):
             for item in self.nodes[key].sampled_training(value + key):
                 yield item
 
-class NodeTrieSerializer(object):
+class TrieSerializer(object):
     def __init__(self, config):
         self.config = config
-        self.fmt = '<' + str(self.config.max_len) + 'sQ'
-        self.chunk_size = struct.calcsize(self.fmt)
         self.encoding = self.config.node_serializer_encoding
-
-    def num_records(self):
-        logging.warning('NodeTrie number of records is inaccurate!')
-        return os.path.getsize(self.config.trie_fname) / self.chunk_size
 
     def serialize(self, trie):
         if self.config.trie_fname == ':memory:':
             logging.info('Trie is in memory, not saving...')
             return
         logging.info('Saving trie to %s', self.config.trie_fname)
+        self.do_serialize(trie)
+
+    def num_records(self):
+        logging.warning('Unable to get number of records')
+        return 1
+
+    def do_serialize(self, trie):
+        raise NotImplementedError()
+
+    def deserialize(self):
+        raise NotImplementedError()
+
+    @staticmethod
+    def fromConfig(config):
+        if config.node_serializer_type == 'super':
+            return TrieSuperSerializer(config)
+        elif config.node_serializer_type == 'reg':
+            return NodeTrieSerializer(config)
+        logging.error('No trie serializer of type %s',
+                      config.node_serializer_type)
+
+class NodeTrieSerializer(TrieSerializer):
+    def __init__(self, config):
+        super().__init__(config)
+        self.fmt = '<' + str(self.config.max_len) + 'sQ'
+        self.chunk_size = struct.calcsize(self.fmt)
+
+    def do_serialize(self, trie):
         with gzip.open(self.config.trie_fname, 'wb') as afile:
             for item in trie.random_iterate():
                 pwd, weight = item
@@ -136,25 +156,13 @@ class NodeTrieSerializer(object):
                 else:
                     break
 
-    @staticmethod
-    def fromConfig(config):
-        if config.node_serializer_type == 'super':
-            return TrieSuperSerializer(config)
-        elif config.node_serializer_type == 'reg':
-            return NodeTrieSerializer(config)
-
-class TrieSuperSerializer(object):
+class TrieSuperSerializer(TrieSerializer):
     def __init__(self, config):
-        self.config = config
+        super().__init__(config)
         self.in_fmt = '<' + str(self.config.max_len) + 'sH'
         self.out_fmt = '<1sQ'
         self.in_fmt_bytes = struct.calcsize(self.in_fmt)
         self.out_fmt_bytes = struct.calcsize(self.out_fmt)
-        self.encoding = self.config.node_serializer_encoding
-
-    def num_records(self):
-        logging.warning('Unable to get number of records')
-        return 1
 
     def write_record(self, ostream, input_str, output_list):
         ostream.write(struct.pack(
@@ -180,9 +188,6 @@ class TrieSuperSerializer(object):
                 .strip(PASSWORD_FRAGMENT_DELIMITER), record)
 
     def serialize(self, trie):
-        if self.config.trie_fname == ':memory:':
-            logging.info('Trie is in memory, not saving...')
-            return
         with gzip.open(self.config.trie_fname, 'wb') as afile:
             for item in trie.sampled_training():
                 pwd, records = item
@@ -361,6 +366,14 @@ class ModelDefaults(object):
 
     trie_fname - File name for disk-backed trie's. DB and node_trie can
       save a trie file.
+
+    save_always - Boolean. Default true. If false, then only the networks which
+      perform best on verification data will be saved to disk.
+
+    node_serializer_encoding - default is 'utf8'.
+
+    node_serializer_type - 'reg' or 'super'. Only valid with 'node_trie' set for
+      trie_implemenation.
     """
     char_bag = (string.ascii_lowercase +
                 string.ascii_uppercase +
@@ -391,6 +404,7 @@ class ModelDefaults(object):
     intermediate_fname = 'intermediate_fname.sqlite'
     node_serializer_encoding = 'utf8'
     node_serializer_type = 'reg'
+    save_always = True
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -491,16 +505,55 @@ class DBTrie(BaseTrie):
     def size(self):
         return self.cur.execute('SELECT COUNT(*) FROM trie').fetchone()[0]
 
-class Preprocessor(object):
-    def __init__(self, pwd_list, config = ModelDefaults()):
+class BasePreprocessor(object):
+    def __init__(self, config = ModelDefaults()):
         self.config = config
+
+    def begin(self, anobj):
+        raise NotImplementedError()
+
+    def next_chunk(self):
+        raise NotImplementedError()
+
+    def reset(self):
+        raise NotImplementedError()
+
+    def total_chunks(self):
+        raise NotImplementedError()
+
+    def finish(self):
+        pass
+
+    @staticmethod
+    def fromConfig(config):
+        if (config.trie_implementation == 'node_trie' and
+            config.simulated_frequency_optimization):
+            if config.node_serializer_type == 'super':
+                logging.info('Super trie preprocessor')
+                preprocessor = SuperTriePreprocessor(config)
+            else:
+                logging.info('Node trie preprocessor')
+                preprocessor = NodeTriePreprocessor(config)
+        elif (config.trie_implementation is not None and
+              config.simulated_frequency_optimization):
+            logging.info('Trie preprocessor...')
+            preprocessor = TriePreprocessor(config)
+        else:
+            preprocessor = Preprocessor(config)
+        return preprocessor
+
+class Preprocessor(BasePreprocessor):
+    def __init__(self, config = ModelDefaults()):
+        super().__init__(config)
+        self.chunk = 0
+
+    def begin(self, pwd_list):
         self.pwd_freq_dict = {}
         if type(pwd_list) == list:
             self.pwd_whole_list = pwd_list
         elif type(pwd_list) == dict:
             self.pwd_whole_list = list(pwd_list.keys())
             self.pwd_freq_dict = pwd_list
-        self.chunk = 0
         self.reset()
 
     def all_prefixes(self, pwd):
@@ -545,18 +598,16 @@ class Preprocessor(object):
         self.chunk = 0
         random.shuffle(self.pwd_whole_list)
 
-    def finish(self):
-        pass
-
-class TriePreprocessor(object):
+class TriePreprocessor(BasePreprocessor):
     def __init__(self, config = ModelDefaults()):
-        self.config = config
+        super().__init__(config)
         self.instances = 0
         self.trie = BaseTrie.fromConfig(config)
         self._total_size = 0
 
-    def begin(self, prep):
-        self.prep = prep
+    def begin(self, pwd_list):
+        self.prep = Preprocessor(self.config)
+        self.prep.begin(pwd_list)
         x, y, w = self.prep.next_chunk()
         while len(x) != 0:
             self.compress_list(x, y, w)
@@ -582,9 +633,6 @@ class TriePreprocessor(object):
         self.trie.finish()
 
     def reset(self):
-        self.set_generator()
-
-    def set_generator(self):
         if self.config.node_serializer_type == 'super':
             self.current_generator = self.trie.sampled_training()
         else:
@@ -602,8 +650,8 @@ class TriePreprocessor(object):
 
 class NodeTriePreprocessor(TriePreprocessor):
     def begin(self, pwd_list):
-        self.pwd_list = pwd_list
         assert type(pwd_list) == dict
+        self.pwd_list = pwd_list
         chunk = 0
         for pwd in self.pwd_list:
             self.instances += len(pwd) + 1
@@ -615,9 +663,11 @@ class NodeTriePreprocessor(TriePreprocessor):
         self._total_size = math.ceil(
             self.trie.size() / self.config.training_chunk)
         self.reset()
+        logging.info('Saving preprocessing step...')
+        TrieSerializer.fromConfig(self.config).serialize(self.trie)
 
 class SuperTriePreprocessor(NodeTriePreprocessor):
-    def set_generator(self):
+    def reset(self):
         self.current_generator = list(self.trie.sampled_training())
         self._total_size = math.ceil(len(
             self.current_generator) / self.config.training_chunk)
@@ -636,17 +686,14 @@ class SuperTriePreprocessor(NodeTriePreprocessor):
         return (x, y, w)
 
 class DiskPreprocessor(TriePreprocessor):
-    def begin(self):
-        self.serializer = NodeTrieSerializer.fromConfig(self.config)
+    def begin(self, _ = None):
+        self.serializer = TrieSerializer.fromConfig(self.config)
         self.reset()
         self._total_chunks = math.ceil(
             self.serializer.num_records() / self.config.training_chunk)
 
-    def set_generator(self):
+    def reset(self):
         self.current_generator = self.serializer.deserialize()
-
-class SuperDiskPreprocessor(SuperTriePreprocessor, DiskPreprocessor):
-    pass
 
 class Trainer(object):
     def __init__(self, pwd_list, config = ModelDefaults()):
@@ -758,6 +805,15 @@ class Trainer(object):
         logging.info('Done compiling model. Beginning training...')
         self.train_model(serializer)
 
+    @staticmethod
+    def getFactory(config):
+        if config.node_serializer_type == 'super':
+            logging.info('Super trie trainer')
+            return SuperTrieTrainer
+        else:
+            logging.info('Regular trainer')
+            return Trainer
+
 class SuperTrieTrainer(Trainer):
     def prepare_y_data(self, y_str_list):
         y_vec = np.zeros((len(y_str_list), 1, len(self.ctable.chars)))
@@ -791,6 +847,20 @@ class PwdList(object):
         finally:
             ifile.close()
         return answer
+
+    @staticmethod
+    def getFactory(file_format, config):
+        if file_format == 'tsv':
+            if config.simulated_frequency_optimization:
+                return TsvSimulatedList
+            else:
+                return TsvList
+        elif file_format == 'list':
+            if config.simulated_frequency_optimization:
+                logging.error('Cannot enable simulated_frequency_optimization'
+                              ' on list format. Must be in TSV format. ')
+            return PwdList
+        logging.error('Cannot find factory for format of %s', file_format)
 
 class TsvList(PwdList):
     def as_list_iter(self, agen):
@@ -1060,20 +1130,11 @@ def init_logging(args):
     logging.info('Version: %s', get_version_string())
     return config
 
-def read_passwords(args, config):
-    if args['pwd_format'] == 'tsv':
-        if config.simulated_frequency_optimization:
-            input_const = TsvSimulatedList
-        else:
-            input_const = TsvList
-    else:
-        if config.simulated_frequency_optimization:
-            logging.warning('Cannot enable simulated_frequency_optimization'
-                            ' on list format. Must be in TSV format. ')
-        input_const = PwdList
+def read_passwords(pwd_file, pwd_format, config):
+    input_factory = PwdList.getFactory(pwd_format, config)
     filt = Filterer(config)
     logging.info('Reading training set...')
-    plist = filt.filter(input_const(args['pwd_file']).as_list())
+    plist = filt.filter(input_factory(pwd_file).as_list())
     filt.finish()
     logging.info('Done reading passwords...')
     if len(plist) == 0:
@@ -1084,33 +1145,13 @@ def read_passwords(args, config):
 def preprocessing(args, config):
     if args['pwd_format'] == 'trie':
         config.trie_implementation = 'dummy'
-        if config.node_serializer_type == 'super':
-            disk_trie = SuperDiskPreprocessor(config)
-            logging.info('Super disk preprocessor')
-        else:
-            logging.info('Disk preprocessor')
-            disk_trie = DiskPreprocessor(config)
+        logging.info('Disk preprocessor')
+        disk_trie = DiskPreprocessor(config)
         disk_trie.begin()
         return disk_trie
-    plist = read_passwords(args, config)
-    if (config.trie_implementation == 'node_trie' and
-        config.simulated_frequency_optimization):
-        if config.node_serializer_type == 'super':
-            logging.info('Super trie preprocessor')
-            preprocessor = SuperTriePreprocessor(config)
-        else:
-            logging.info('Node trie preprocessor')
-            preprocessor = NodeTriePreprocessor(config)
-        preprocessor.begin(plist)
-        logging.info('Saving preprocessing step...')
-        NodeTrieSerializer.fromConfig(config).serialize(preprocessor.trie)
-    elif (config.trie_implementation is not None and
-          config.simulated_frequency_optimization):
-        logging.info('Trie preprocessor...')
-        preprocessor = TriePreprocessor(config)
-        preprocessor.begin(Preprocessor(plist, config))
-    else:
-        preprocessor = Preprocessor(plist, config)
+    preprocessor = BasePreprocessor.fromConfig(config)
+    preprocessor.begin(
+        read_passwords(args['pwd_file'], args['pwd_format'], config))
     if args['pre_processing_only']:
         logging.info('Only performing pre-processing. ')
         sys.exit(0)
@@ -1118,12 +1159,7 @@ def preprocessing(args, config):
 
 def train(args, config):
     preprocessor = preprocessing(args, config)
-    if config.node_serializer_type == 'super':
-        logging.info('Super trie trainer')
-        trainer = SuperTrieTrainer(preprocessor, config)
-    else:
-        logging.info('Trainer')
-        trainer = Trainer(preprocessor, config)
+    trainer = (Trainer.getFactory(config))(preprocessor, config)
     serializer = ModelSerializer(args['arch_file'], args['weight_file'])
     if args['retrain']:
         logging.info('Retraining model...')
