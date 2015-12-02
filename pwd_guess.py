@@ -251,7 +251,7 @@ class BinaryTrieSerializer(TrieSerializer):
                 afile.write(struct.pack(self._fmt, key, table_of_contents[key]))
         assert toc_start > 0
         with self.open_file('r+b') as afile:
-            logging.info('Wrote %s records', records)
+            logging.info('Wrote %s records to %s', records, self.fname)
             afile.write(struct.pack(self._fmt, records, toc_start))
 
     def deserialize(self):
@@ -310,7 +310,11 @@ class BinaryTrieSerializer(TrieSerializer):
 
     def write_string(self, afile, astring):
         string_bytes = astring.encode(self.encoding)
-        afile.write(struct.pack(self.str_len_fmt, len(string_bytes)))
+        try:
+            afile.write(struct.pack(self.str_len_fmt, len(string_bytes)))
+        except struct.error as e:
+            logging.critical('Error when processing string %s', astring)
+            raise
         afile.write(string_bytes)
 
     def write_record(self, ostream, pwd, val):
