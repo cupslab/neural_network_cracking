@@ -1,3 +1,7 @@
+from keras.models import Sequential, model_from_json
+from keras.layers.core import Activation, Dense, RepeatVector
+from keras.layers import recurrent
+
 import unittest
 from unittest.mock import MagicMock, Mock
 import tempfile
@@ -302,6 +306,36 @@ aa	0.125
 a	0.25
 	0.5
 """, fp.read().decode('utf8'))
+
+class IntegrationTest(unittest.TestCase):
+    def setUp(self):
+        self.archfile = tempfile.NamedTemporaryFile(mode = 'w')
+        self.weightfile = tempfile.NamedTemporaryFile(mode = 'r')
+
+    def test_save_load(self):
+        model = Sequential()
+        model.add(recurrent.JZS1(3, 64))
+        model.add(RepeatVector(1))
+        for _ in range(2):
+            model.add(recurrent.JZS1(64, 64, return_sequences = True))
+        model.add(Dense(64, 3))
+        model.add(Activation('softmax'))
+        model.compile(loss='categorical_crossentropy', optimizer = 'adam')
+        np_inp = np.array([[[False, False, True],
+                            [False, False, True],
+                            [True, False, False]]])
+        test_output_before_save = model.predict(np_inp, verbose = 0).copy()
+        self.archfile.write(model.to_json())
+        self.archfile.flush()
+        model.save_weights(self.weightfile.name, overwrite = True)
+
+        archfile_reopen = open(self.archfile.name, 'r')
+        new_model = model_from_json(archfile_reopen.read())
+        archfile_reopen.close()
+        new_model.load_weights(self.weightfile.name)
+        test_output_after_save = new_model.predict(np_inp, verbose = 0).copy()
+        np.testing.assert_array_equal(
+            test_output_before_save, test_output_after_save)
 
 class EndToEndTest(unittest.TestCase):
 

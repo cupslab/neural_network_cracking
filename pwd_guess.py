@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 # William Melicher
 from __future__ import print_function
 from keras.models import Sequential, slice_X, model_from_json
@@ -55,6 +57,7 @@ class ModelSerializer(object):
         self.model_creator_from_json = model_from_json
 
     def save_model(self, model):
+        globals()['most_recent_model'] = model
         if self.archfile is None or self.weightfile is None:
             logging.info(
                 'Cannot save model because file arguments were not provided')
