@@ -1243,6 +1243,9 @@ def read_config_args(args):
         config_args = json.load(config_arg_file)
         arg_ret = args.copy()
         arg_ret.update(config_args['args'])
+        if 'profile' in config_args['args']:
+            logging.warning(('Profile argument must be given at command line. '
+                             'Proceeding without profiling. '))
         config = ModelDefaults(config_args['config'])
         config.validate()
         return (config, arg_ret)
