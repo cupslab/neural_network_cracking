@@ -539,6 +539,8 @@ class ModelSerializer(object):
         logging.info('Done loading model')
         return model
 
+serializer_type_list = {}
+
 model_type_dict = {
     'JZS1' : recurrent.JZS1,
     'JZS2' : recurrent.JZS2,
@@ -649,6 +651,7 @@ class ModelDefaults(object):
             logging.warning(
                 'Without rare_character_optimization_guessing setting,'
                 ' output guesses may ignore case or special characters')
+        assert self.guess_serialization_method in serializer_type_list
 
     def as_dict(self):
         answer = dict(vars(ModelDefaults).copy())
@@ -1592,16 +1595,13 @@ class Guesser(object):
                 self.config.rare_character_optimization_guessing)
 
     def make_serializer(self):
-        if self.config.guess_serialization_method == 'human':
-            answer = GuessSerializer(self.ostream)
-        elif self.config.guess_serialization_method == 'calculator':
-            answer = GuessNumberGenerator(
+        serializer_factory = serializer_type_list[
+            self.config.guess_serialization_method]
+        if self.config.guess_serialization_method == 'calculator':
+            answer = serializer_factory(
                 self.ostream, self.calculate_probs_from_file())
-        elif self.config.guess_serialization_method == 'random_walk':
-            answer = RandomWalkSerializer(self.ostream)
         else:
-            logging.error('Unknown serialization method %s',
-                          self.config.guess_serialization_method)
+            answer = serializer_factory(self.ostream)
         if self.config.enforced_policy != 'basic':
             answer = PasswordPolicyEnforcingSerializer(
                 BasePasswordPolicy.fromConfig(self.config), answer)
@@ -2110,6 +2110,12 @@ log_level_map = {
     'warning'  : logging.WARNING,
     'debug' : logging.DEBUG,
     'error' : logging.ERROR
+}
+
+serializer_type_list = {
+    'human' : GuessSerializer,
+    'calculator' : GuessNumberGenerator,
+    'random_walk' : RandomWalkSerializer
 }
 
 def get_version_string():
