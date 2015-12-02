@@ -33,6 +33,8 @@ import math
 from unittest.mock import Mock
 import re
 
+import generator
+
 PASSWORD_END = '\n'
 
 FNAME_PREFIX_PREPROCESSOR = 'disk_cache.'
@@ -1350,11 +1352,8 @@ class PasswordTemplateSerializer(object):
                     i, after_image_char, self.post_image[after_image_char]))
 
     def expand_conditional_probs(self, probs, context):
-        answer = probs[self.expander_cache]
-        is_beginning = context == ''
-        for i, after_image_char, post_image in self.post_image_idx:
-            answer[i] *= self.calc(post_image, after_image_char, is_beginning)
-        return answer
+        return generator.expand_conditional_probs(
+            self, probs, context, self.expander_cache)
 
     def find_real_pwd(self, template, pwd):
         assert len(pwd) == len(template)
@@ -1609,7 +1608,8 @@ class RandomWalkGuesser(Guesser):
         next_nodes = []
         for i, cur_node in enumerate(real_node_list):
             astring, prob, d_accum, cost_accum = cur_node
-            poss_next = list(self.next_nodes(astring, prob, predictions[i][0]))
+            poss_next = generator.next_nodes_random_walk(
+                self, astring, prob, predictions[i][0])
             if len(poss_next) == 0:
                 self.estimates.append(cost_accum)
                 continue
@@ -1635,34 +1635,6 @@ class RandomWalkGuesser(Guesser):
         if len(pwd) == 0 or pwd[-1] != PASSWORD_END:
             return 0
         return 1
-
-    def next_nodes(self, astring, prob, prediction):
-        if len(astring) > 0 and astring[-1] == PASSWORD_END:
-            return []
-        if self.should_make_guesses_rare_char_optimizer:
-            conditional_predictions = (
-                self.output_serializer.expand_conditional_probs(
-                    prediction, astring))
-        else:
-            conditional_predictions = prediction
-        total_preds = conditional_predictions * prob
-        if len(astring) + 1 > self.max_len:
-            if (total_preds[self.pwd_end_idx] >=
-                self.lower_probability_threshold):
-                return [(astring + PASSWORD_END,
-                         total_preds[self.pwd_end_idx],
-                         conditional_predictions[self.pwd_end_idx])]
-        else:
-            indexes = np.arange(len(total_preds))
-            above_cutoff = total_preds >= self.lower_probability_threshold
-            above_indices = indexes[above_cutoff]
-            probs_above = total_preds[above_cutoff]
-            answer = [0] * len(probs_above)
-            for i in range(len(probs_above)):
-                index = above_indices[i]
-                answer[i] = (astring + self._chars_list[index], probs_above[i],
-                             conditional_predictions[index])
-            return answer
 
     def seed_data(self):
         for _ in range(self.config.random_walk_seed_num):
@@ -1699,7 +1671,9 @@ class RandomWalkGuesser(Guesser):
             self.ostream.flush()
 
     def guess(self, pwd = '', prob = 1):
-        self.random_walk(list(self.calculate_probs_from_file()))
+        pwds_probs = list(self.calculate_probs_from_file())
+        logging.debug('Beginning probabilities: %s', pwds_probs)
+        self.random_walk(pwds_probs)
 
 class GuesserBuilderError(Exception): pass
 

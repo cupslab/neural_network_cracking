@@ -24,6 +24,7 @@ import itertools
 import sys
 
 import pwd_guess
+import generator
 
 class NodeTrieSerializerTest(unittest.TestCase):
     def setUp(self):
@@ -1521,7 +1522,8 @@ class RandomWalkGuesserTest(unittest.TestCase):
         mock_model.predict = mock_predict_smart_parallel
         builder.add_model(mock_model).add_file(self.tempf.name)
         guesser = builder.build()
-        next = guesser.next_nodes('aa', .5, np.array([.5, .25, .25]))
+        next = generator.next_nodes_random_walk(
+            guesser, 'aa', .5, np.array([.5, .25, .25]))
         self.assertEqual(list(next), [
             ('aa\n', .25, .5), ('aaa', .125, .25), ('aab', .125, .25)])
 
