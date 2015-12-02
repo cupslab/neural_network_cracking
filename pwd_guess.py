@@ -481,6 +481,10 @@ class OptimizingCharacterTable(CharacterTable):
             else:
                 translate_table[c] = c
         self.translate_table = ''.maketrans(translate_table)
+        self.rare_character_postimage = {}
+        for key in self.rare_character_preimage:
+            for item in self.rare_character_preimage[key]:
+                self.rare_character_postimage[item] = key
 
     def translate(self, astring):
         return astring.translate(self.translate_table)
@@ -1273,8 +1277,8 @@ class ProbabilityCalculator(object):
 
 class PasswordTemplateSerializer(object):
     def __init__(self, config, serializer = None, lower_prob_threshold = None):
-        self.preimage = (CharacterTable.fromConfig(config)
-                         .rare_character_preimage)
+        ctable = CharacterTable.fromConfig(config)
+        self.preimage = ctable.rare_character_preimage
         self.char_frequencies = config.get_intermediate_info(
             'character_frequencies')
         self.beginning_char_frequencies = config.get_intermediate_info(
@@ -1288,6 +1292,9 @@ class PasswordTemplateSerializer(object):
         self.beg_cache = self.cache_freqs(self.beginning_char_frequencies)
         self.end_cache = self.cache_freqs(self.end_char_frequencies)
         self.cache = self.cache_freqs(self.char_frequencies)
+        self.chars = config.char_bag
+        self.char_indices = ctable.char_indices
+        self.post_image = ctable.rare_character_postimage
 
     def lookup_in_cache(self, cache, template_char, character):
         return cache[template_char][character]
@@ -1313,6 +1320,20 @@ class PasswordTemplateSerializer(object):
                 self.end_cache, template_char, character)
         return self.lookup_in_cache(
             self.cache, template_char, character)
+
+    def expand_conditional_probs(self, probs, context):
+        answer = np.zeros(len(self.chars))
+        for i, after_image_char in enumerate(self.chars):
+            if after_image_char not in self.post_image:
+                answer[i] = probs[self.char_indices[after_image_char]]
+            else:
+                post_image = self.post_image[after_image_char]
+                answer[i] = probs[self.char_indices[post_image]]
+                answer[i] *= self.calc(
+                    post_image, after_image_char, context == '')
+                # TODO: relevel for the last character if the post image is
+                # PASSWORD_END
+        return answer
 
     def find_real_pwd(self, template, pwd):
         assert len(pwd) == len(template)
@@ -1562,28 +1583,42 @@ class RandomWalkGuesser(Guesser):
         count_pre_serializer = self.output_serializer.get_total_guessed()
         if len(pwd) == 0 or pwd[-1] != PASSWORD_END:
             return 0
-        self.output_serializer.serialize(pwd, prob)
+        if self.should_make_guesses_rare_char_optimizer:
+            self.output_serializer.serializer.serialize(pwd, prob)
+        else:
+            self.output_serializer.serialize(pwd, prob)
         return (self.output_serializer.get_total_guessed() -
                 count_pre_serializer)
+
+    def predictions(self, astring, prediction):
+        if self.should_make_guesses_rare_char_optimizer:
+            return self.output_serializer.expand_conditional_probs(
+                prediction, astring)
+        return prediction
 
     def next_nodes(self, astring, prob, prediction):
         if len(astring) > 0 and astring[-1] == PASSWORD_END:
             return
-        total_preds = prediction * prob
-        for i, char in enumerate(self.chars_list):
+        conditional_predictions = self.predictions(astring, prediction)
+        total_preds = conditional_predictions * prob
+        for i, char in enumerate(self._chars_list):
             chain_prob = total_preds[i]
             if chain_prob < self.lower_probability_threshold:
                 continue
             chain_pass = astring + char
             if len(chain_pass) > self.max_len and char != PASSWORD_END:
                 continue
-            yield chain_pass, chain_prob, prediction[i]
+            yield chain_pass, chain_prob, conditional_predictions[i]
 
     def seed_data(self):
         for _ in range(self.config.random_walk_seed_num):
             yield '', 1, 1, 0
 
     def guess(self, start = '', start_prob = 1):
+        if self.should_make_guesses_rare_char_optimizer:
+            self._chars_list = self.char_bag
+        else:
+            self._chars_list = self.chars_list
         for prob_node in self.calculate_probs_from_file():
             pwd, prob = prob_node
             logging.info('Calculating guess number for %s at %s', pwd, prob)

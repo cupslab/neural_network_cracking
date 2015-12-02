@@ -838,6 +838,44 @@ aa	0.125
 aaa	0.0625
 """, ostream.getvalue())
 
+    def test_guesser_bigger_rare_c(self):
+        with tempfile.NamedTemporaryFile() as intermediatef:
+            config = pwd_guess.ModelDefaults(
+                parallel_guessing = False, char_bag = 'abAB\n', min_len = 3,
+                max_len = 5, uppercase_character_optimization = True,
+                random_walk_seed_num = 10000,
+                intermediate_fname = intermediatef.name,
+                relevel_not_matching_passwords = True,
+                rare_character_optimization_guessing = True,
+                guess_serialization_method = 'human')
+            config.set_intermediate_info(
+                'rare_character_bag', [])
+            freqs = {
+                'a' : .4, 'b' : .4, 'A' : .1, 'B' : .1,
+            }
+            config.set_intermediate_info('character_frequencies', freqs)
+            config.set_intermediate_info(
+                'beginning_character_frequencies', freqs)
+            config.set_intermediate_info(
+                'end_character_frequencies', freqs)
+            self.assertTrue(pwd_guess.Filterer(config).pwd_is_valid('aaa'))
+            builder = pwd_guess.GuesserBuilder(config)
+            mock_model = Mock()
+            mock_model.predict = mock_predict_smart_parallel_skewed
+            ostream = io.StringIO()
+            builder.add_model(mock_model).add_stream(ostream)
+            guesser = builder.build()
+            guesser.guess()
+        found = list(csv.reader(io.StringIO(
+            ostream.getvalue()), delimiter = '\t', quotechar = None))
+        found = sorted(found, key = lambda row: (float(row[1]), row[0]),
+                       reverse = True)
+        with open('test_data/test_skewed.sorted.txt', 'r') as expected_data:
+            expected = csv.reader(
+                expected_data, delimiter = '\t', quotechar = None)
+            for i, row in enumerate(expected):
+                self.assertEqual(row, found[i])
+
     def test_guessing_with_relevel(self):
         config = pwd_guess.ModelDefaults(
             min_len = 3, max_len = 3, char_bag = 'a\n',
@@ -1399,6 +1437,31 @@ class PasswordTemplateSerializerTest(unittest.TestCase):
             ('b!', .4 * (2/3) * (.1 / .4)),
             ('B!', .4 * (1/3) * (.1 / .4))]))
 
+    def test_expand(self):
+        with tempfile.NamedTemporaryFile() as tf:
+            config = pwd_guess.ModelDefaults(
+                min_len = 3, max_len = 3, char_bag = 'abAB:^\n',
+                relevel_not_matching_passwords = False,
+                uppercase_character_optimization = True,
+                rare_character_optimization = True,
+                intermediate_fname = tf.name)
+            config.set_intermediate_info(
+                'rare_character_bag', [':', '^'])
+            freqs = {
+                'a' : .2, 'b' : .2, 'A' : .1, 'B' : .1, '^' : .2, ':' : .2
+            }
+            config.set_intermediate_info(
+                'character_frequencies', freqs)
+            config.set_intermediate_info(
+                'beginning_character_frequencies', freqs)
+            config.set_intermediate_info(
+                'end_character_frequencies', freqs)
+            pts = pwd_guess.PasswordTemplateSerializer(config, Mock())
+            np.testing.assert_array_equal(
+                pts.expand_conditional_probs([.2, .1, .2, .5], ''), [
+                    0.13333333333333333, 0.3333333333333333,
+                    0.06666666666666667, 0.16666666666666666, .05, .05, .2])
+
 class RandomWalkGuesserTest(unittest.TestCase):
     def setUp(self):
         self.tempf = tempfile.NamedTemporaryFile(delete = False)
@@ -1504,19 +1567,19 @@ class RandomWalkGuesserTest(unittest.TestCase):
                     self.assertEqual(prob, '0.0004' if pwd == 'aaaa' else '0.02048')
                     self.assertAlmostEqual(float(gn), 50 if pwd == 'aaaa' else 15, delta = 2)
 
-    @unittest.skip('Not ready')
     def test_guess_simulated(self):
         with tempfile.NamedTemporaryFile(mode = 'w') as gf, \
              tempfile.NamedTemporaryFile() as intermediatef:
-            gf.write('aaaa\nbbbba\n')
+            gf.write('aaaa\nbbbBa\n')
             gf.flush()
             pw = pwd_guess.PwdList(gf.name)
-            self.assertEqual(list(pw.as_list()), [('aaaa', 1), ('bbbba', 1)])
+            self.assertEqual(list(pw.as_list()), [('aaaa', 1), ('bbbBa', 1)])
             config = pwd_guess.ModelDefaults(
                 parallel_guessing = False, char_bag = 'abAB\n', min_len = 3,
                 max_len = 5, password_test_fname = gf.name,
                 uppercase_character_optimization = True,
                 random_walk_seed_num = 10000,
+                rare_character_optimization_guessing = True,
                 intermediate_fname = intermediatef.name,
                 relevel_not_matching_passwords = True,
                 guess_serialization_method = 'random_walk')
@@ -1542,10 +1605,10 @@ class RandomWalkGuesserTest(unittest.TestCase):
                     output, delimiter = '\t', quotechar = None))
                 self.assertEqual(len(reader), 2)
                 for row in reader:
-                    pwd, prob, gn = row
-                    self.assertTrue(pwd == 'aaaa' or pwd == 'bbbba')
-                    self.assertEqual(prob, '0.0004' if pwd == 'aaaa' else '0.02048')
-                    self.assertAlmostEqual(float(gn), 50 if pwd == 'aaaa' else 15, 0)
+                    pwd, prob, gn, *_ = row
+                    self.assertTrue(pwd == 'aaaa' or pwd == 'bbbBa')
+                    self.assertEqual(prob, '0.00016384' if pwd == 'aaaa' else '0.0016777216')
+                    self.assertAlmostEqual(float(gn), 397 if pwd == 'aaaa' else 137, delta = 20)
 
 
 if __name__ == '__main__':
