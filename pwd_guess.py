@@ -534,6 +534,7 @@ class ModelDefaults(object):
     cleanup_guesser_files = True
     use_mmap = True
     compute_stats = False
+    password_test_list = None
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -1088,14 +1089,6 @@ class GuessSerializer(object):
         self.ostream.flush()
         self.ostream.close()
 
-    @staticmethod
-    def fromConfig(config, ostream):
-        if config.guess_serialization_method == 'human':
-            return GuessSerializer(ostream)
-        logging.warning('Unknown serialization method %s',
-                        config.guess_serialization_method)
-        return None
-
 class GuessNumberGenerator(GuessSerializer):
     def __init__(self, ostream, pwd_list):
         super().__init__(ostream)
@@ -1122,14 +1115,49 @@ class GuessNumberGenerator(GuessSerializer):
         self.ostream.flush()
         self.ostream.close()
 
+class ProbabilityCalculator(object):
+    def __init__(self, guesser):
+        self.guesser = guesser
+        self.ctable = CharacterTable.fromConfig(guesser.config)
+        self.preproc = Preprocessor(guesser.config)
+
+    def probability_stream(self, pwd_list):
+        self.preproc.begin(pwd_list)
+        x_strings, y_strings, _ = self.preproc.next_chunk()
+        while len(x_strings) != 0:
+            y_indices = list(map(self.ctable.get_char_index, y_strings))
+            probs = self.guesser.conditional_probs_many(x_strings)
+            for i in range(len(y_indices)):
+                yield x_strings[i], y_strings[i], probs[i][0][y_indices[i]]
+            x_strings, y_strings, _ = self.preproc.next_chunk()
+
+    def calc_probabilities(self, pwd_list):
+        prev_prob = 1
+        for item in self.probability_stream(pwd_list):
+            input_string, next_char, output_prob = item
+            prev_prob *= output_prob
+            if next_char == PASSWORD_END:
+                yield (input_string, prev_prob)
+                prev_prob = 1
+
 class Guesser(object):
     def __init__(self, model, config, ostream):
         self.model = model
         self.config = config
         self.generated = 0
         self.ctable = CharacterTable.fromConfig(self.config)
-        self.output_serializer = GuessSerializer.fromConfig(config, ostream)
         self.filterer = Filterer(self.config)
+        self.output_serializer = self.make_serializer(ostream)
+
+    def make_serializer(self, ostream):
+        if self.config.guess_serialization_method == 'human':
+            return GuessSerializer(ostream)
+        elif self.config.guess_serialization_method == 'calculator':
+            return GuessNumberGenerator(ostream,
+                ProbabilityCalculator(self).calc_probabilities(
+                    PwdList(self.config.password_test_list).as_list()))
+        logging.warning('Unknown serialization method %s',
+                        config.guess_serialization_method)
 
     def cond_prob_from_preds(self, char, preds):
         return preds[self.ctable.get_char_index(char)]
@@ -1145,14 +1173,18 @@ class Guesser(object):
         for i, v in enumerate(preds):
             preds[i] = v / sum_per
 
+    def relevel_prediction_many(self, pred_list, str_list):
+        for i in range(len(pred_list)):
+            self.relevel_prediction(pred_list[i][0], str_list[i])
+
     def conditional_probs(self, astring):
-        np_inp = np.zeros((1, self.config.max_len, len(self.ctable.chars)),
-                          dtype = np.bool)
-        np_inp[0] = self.ctable.encode(
-            astring + (PASSWORD_END * (self.config.max_len - len(astring))))
-        answer = self.model.predict(np_inp, verbose = 0)[0][0].copy()
+        return self.conditional_probs_many([astring])[0][0].copy()
+
+    def conditional_probs_many(self, astring_list):
+        answer = self.model.predict(self.ctable.encode_many(astring_list),
+                                    verbose = 0)
         if self.config.relevel_not_matching_passwords:
-            self.relevel_prediction(answer, astring.strip(PASSWORD_END))
+            self.relevel_prediction_many(answer, astring_list)
         return answer
 
     def recur(self, astring = '', prob = 1):

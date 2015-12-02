@@ -841,6 +841,48 @@ aaa	0.0625
         self.assertEqual([0.0, .4, .6], guesser.conditional_probs('ab'))
         self.assertEqual([1.0, 0.0, 0.0], guesser.conditional_probs('aaa'))
 
+    def test_relevel_tri_alpha_calculator(self):
+        distribution = [0.5, 0.2, 0.3]
+        def smart_mock_predict(str_list, **kwargs):
+            answer = []
+            for i in range(len(str_list)):
+                answer.append([distribution.copy()])
+            return answer
+        with tempfile.NamedTemporaryFile(mode = 'w') as pwd_file, \
+             tempfile.NamedTemporaryFile(mode = 'r') as gfile:
+            password_list = ['aaa', 'abb', 'aab']
+            for pwd in password_list:
+                pwd_file.write('%s\n' % pwd)
+            pwd_file.flush()
+            config = pwd_guess.ModelDefaults(
+                min_len = 3, max_len = 3, char_bag = 'ab\n',
+                lower_probability_threshold = 10**-2,
+                guess_serialization_method = 'calculator',
+                password_test_list = pwd_file.name)
+            mock_model = Mock()
+            mock_model.predict = smart_mock_predict
+            guesser = (pwd_guess.GuesserBuilder(config)
+                       .add_model(mock_model).add_file(gfile.name).build())
+            self.assertEqual(type(guesser.output_serializer),
+                             pwd_guess.GuessNumberGenerator)
+            self.assertEqual([0.0, .4, .6], guesser.conditional_probs(''))
+            self.assertEqual([0.0, .4, .6], guesser.conditional_probs('a'))
+            self.assertEqual([0.0, .4, .6], guesser.conditional_probs('aa'))
+            self.assertEqual([0.0, .4, .6], guesser.conditional_probs('ab'))
+            self.assertEqual([1.0, 0.0, 0.0],
+                             guesser.conditional_probs('aaa'))
+            guesser.complete_guessing()
+            # IMPORTANT: This distribution should give a guess count of 4 for
+            # baa. However, due to floating point rounding error in python, this
+            # is not the case. It seems that in python,
+            # .4 * .4 * .6 != .6 * .4 * .4
+            # This example is fairly sensitive to floating point rounding error
+            self.assertEqual("""Total count: 8
+abb	0.144	1
+aab	0.09600000000000002	4
+aaa	0.06400000000000002	7
+""", gfile.read())
+
     def test_do_guessing(self):
         config = pwd_guess.ModelDefaults(
             min_len = 3, max_len = 3, char_bag = 'a\n',
@@ -911,14 +953,10 @@ class ParallelGuesserTest(unittest.TestCase):
                     csv.reader(io.StringIO(self.mock_output.getvalue()),
                                delimiter = '\t')]
         sort_freq = sorted(pwd_freq, key = lambda x: x[0])
-        self.assertEqual([('aaa', .125),
-                          ('aab', .125),
-                          ('aba', .125),
-                          ('abb', .125),
-                          ('baa', .125),
-                          ('bab', .125),
-                          ('bba', .125),
-                          ('bbb', .125)], sort_freq)
+        self.assertEqual([('aaa', .125), ('aab', .125),
+                          ('aba', .125), ('abb', .125),
+                          ('baa', .125), ('bab', .125),
+                          ('bba', .125), ('bbb', .125)], sort_freq)
         self.assertEqual(8, parallel_guesser.generated)
 
 class GuesserBuilderTest(unittest.TestCase):
@@ -1079,6 +1117,39 @@ aaab\t3""")
             shutil.rmtree('trie_intermediate')
             os.remove('trie_storage')
             os.remove('intermediate_data.sqlite')
+
+class ProbabilityCalculatorTest(unittest.TestCase):
+    def test_calc_one(self):
+        mock_guesser = Mock()
+        mock_guesser.config = pwd_guess.ModelDefaults(
+            min_len = 3, max_len = 3, char_bag = 'ab\n',
+            relevel_not_matching_passwords = False)
+        mock_guesser.conditional_probs_many = MagicMock(
+            return_value=[[[0, 0.5, 0.5]],
+                          [[0, 0.5, 0.5]],
+                          [[0, 0.5, 0.5]],
+                          [[1, 0, 0]]])
+        p = pwd_guess.ProbabilityCalculator(mock_guesser)
+        self.assertEqual(list(p.calc_probabilities([('aaa', 1)])),
+                         [('aaa', 0.125)])
+
+    def test_calc_two(self):
+        mock_guesser = Mock()
+        mock_guesser.config = pwd_guess.ModelDefaults(
+            min_len = 3, max_len = 3, char_bag = 'ab\n',
+            relevel_not_matching_passwords = False)
+        mock_guesser.conditional_probs_many = MagicMock(
+            return_value=[[[0, 0.5, 0.5]],
+                          [[0, 0.5, 0.5]],
+                          [[0, 0.5, 0.5]],
+                          [[1, 0, 0]],
+                          [[0, 0.5, 0.5]],
+                          [[0, 0.5, 0.5]],
+                          [[0, 0.5, 0.5]],
+                          [[1, 0, 0]]])
+        p = pwd_guess.ProbabilityCalculator(mock_guesser)
+        self.assertEqual(set(p.calc_probabilities([('aaa', 1), ('abb', 1)])),
+                         set([('aaa', 0.125), ('abb', 0.125)]))
 
 class GuessNumberGeneratorTest(unittest.TestCase):
     def setUp(self):
