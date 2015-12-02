@@ -127,6 +127,22 @@ class DiskBackedTrieTest(unittest.TestCase):
         self.assertEqual(set([('a', 1), ('aa', 1), ('aaa', 1)]),
                          set(self.trie.iterate('reg')))
 
+    def test_funky_chars(self):
+        self.assertFalse(os.path.exists('trie_storage'))
+        try:
+            self.trie = pwd_guess.DiskBackedTrie(pwd_guess.ModelDefaults(
+                fork_length = 1, trie_intermediate_storage = 'trie_storage'))
+            self.trie.increment('aaa', 1)
+            self.trie.increment('./a', 1)
+            self.assertEqual(pwd_guess.NodeTrieSerializer,
+                             type(self.trie.make_serializer()))
+            self.assertTrue(self.trie.current_node is not None)
+            self.assertEqual(set([('a', 1), ('aa', 1), ('aaa', 1),
+                                  ('.', 1), ('./', 1), ('./a', 1)]),
+                             set(self.trie.iterate('reg')))
+        finally:
+            shutil.rmtree('trie_storage')
+
     def test_iterate_overlap(self):
         self.trie = pwd_guess.DiskBackedTrie(pwd_guess.ModelDefaults())
         self.trie.increment('aaa', 1)
@@ -875,4 +891,5 @@ aaab\t3""")
             os.remove('trie_storage')
 
 if __name__ == '__main__':
+    logging.basicConfig(level = logging.CRITICAL)
     unittest.main()

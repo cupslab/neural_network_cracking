@@ -108,9 +108,13 @@ class DiskBackedTrie(BaseTrie):
     def make_serializer(self):
         return TrieSerializer.getFactory(self.config, True)(
             os.path.join(self.config.trie_intermediate_storage,
-                         self.current_branch_key),
+                         self.sanitize(self.current_branch_key)),
             self.config.max_len,
             self.config.trie_serializer_encoding)
+
+    def sanitize(self, prefix):
+        assert prefix in self.keys
+        return str(self.keys.index(prefix))
 
     def close_branch(self):
         if self.current_branch_key is not None:
@@ -523,6 +527,7 @@ class ModelDefaults(object):
             assert answer.trie_implementation is not None
         assert answer.fork_length < answer.min_len
         assert not os.path.exists(answer.trie_fname)
+        assert not os.path.exists(answer.trie_intermediate_storage)
         return answer
 
     def as_dict(self):
@@ -1154,7 +1159,7 @@ def read_passwords(pwd_file, pwd_format, config):
     input_factory = PwdList.getFactory(pwd_format, config)
     filt = Filterer(config)
     logging.info('Reading training set...')
-    plist = filt.filter(input_factory(pwd_file).as_list())
+    plist = list(filt.filter(input_factory(pwd_file).as_list()))
     filt.finish()
     logging.info('Done reading passwords...')
     return plist
