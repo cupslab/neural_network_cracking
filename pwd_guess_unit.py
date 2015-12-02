@@ -1227,7 +1227,7 @@ class ProbabilityCalculatorTest(unittest.TestCase):
         mock_guesser.config = pwd_guess.ModelDefaults(
             min_len = 3, max_len = 3, char_bag = 'ab\n',
             relevel_not_matching_passwords = False)
-        mock_guesser.conditional_probs_many = MagicMock(
+        mock_guesser.batch_prob = MagicMock(
             return_value=[[[0, 0.5, 0.5]],
                           [[0, 0.5, 0.5]],
                           [[0, 0.5, 0.5]],
@@ -1241,7 +1241,7 @@ class ProbabilityCalculatorTest(unittest.TestCase):
         mock_guesser.config = pwd_guess.ModelDefaults(
             min_len = 3, max_len = 3, char_bag = 'ab\n',
             relevel_not_matching_passwords = False)
-        mock_guesser.conditional_probs_many = MagicMock(
+        mock_guesser.batch_prob = MagicMock(
             return_value=[[[0, 0.5, 0.5]],
                           [[0, 0.5, 0.5]],
                           [[0, 0.5, 0.5]],
@@ -1259,7 +1259,7 @@ class ProbabilityCalculatorTest(unittest.TestCase):
         mock_guesser.config = pwd_guess.ModelDefaults(
             min_len = 3, max_len = 3, char_bag = 'ab\n',
             relevel_not_matching_passwords = False)
-        mock_guesser.conditional_probs_many = MagicMock(
+        mock_guesser.batch_prob = MagicMock(
             return_value=[[[0, 0.5, 0.5]],
                           [[0, 0.4, 0.6]],
                           [[0, 0.5, 0.5]],
@@ -1292,7 +1292,7 @@ class ProbabilityCalculatorTest(unittest.TestCase):
                 'end_character_frequencies', freqs)
             mock_guesser = Mock()
             mock_guesser.config = config
-            mock_guesser.conditional_probs_many = MagicMock(
+            mock_guesser.batch_prob = MagicMock(
                 return_value=[[[0, 0.5, 0.5]],
                               [[0, 0.5, 0.5]],
                               [[1, 0, 0]],

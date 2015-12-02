@@ -1252,7 +1252,7 @@ class ProbabilityCalculator(object):
         x_strings, y_strings, _ = self.preproc.next_chunk()
         while len(x_strings) != 0:
             y_indices = list(map(self.ctable.get_char_index, y_strings))
-            probs = self.guesser.conditional_probs_many(x_strings)
+            probs = self.guesser.batch_prob(x_strings)
             for i in range(len(y_indices)):
                 yield x_strings[i], y_strings[i], probs[i][0][y_indices[i]]
             x_strings, y_strings, _ = self.preproc.next_chunk()
@@ -1460,8 +1460,7 @@ class Guesser(object):
             elif char != PASSWORD_END:
                 yield chain_pass, chain_prob
 
-    def batch_prob(self, node_list):
-        prefixes = list(map(lambda x: x[0], node_list))
+    def batch_prob(self, prefixes):
         logging.info(
             'Super node buffer size %s, guess number %s, gpu_batch: %s',
             len(prefixes), self.generated, self.max_gpu_prediction_size)
@@ -1477,10 +1476,14 @@ class Guesser(object):
             return answer
         return self.conditional_probs_many(prefixes)
 
+    def extract_pwd_from_node(self, node_list):
+        return map(lambda x: x[0], node_list)
+
     def super_node_recur(self, node_list):
         if len(node_list) == 0:
             return
-        predictions = self.batch_prob(node_list)
+        pwds_list = list(self.extract_pwd_from_node(node_list))
+        predictions = self.batch_prob(pwds_list)
         node_batch = []
         for i, cur_node in enumerate(node_list):
             astring, prob = cur_node
@@ -1528,7 +1531,8 @@ class RandomWalkGuesser(Guesser):
                 self.estimates.append(cost_fn)
         if len(real_node_list) == 0:
             return
-        predictions = self.batch_prob(real_node_list)
+        pwd_list = list(self.extract_pwd_from_node(real_node_list))
+        predictions = self.batch_prob(pwd_list)
         next_nodes = []
         for i, cur_node in enumerate(real_node_list):
             astring, prob, d_accum, cost_accum = cur_node
@@ -1678,7 +1682,7 @@ def fork_starting_point(args):
     config = ModelDefaults(**config_dict)
     for node in nodes:
         generated, ofile_path = ParallelGuesser.fork_entry_point(
-            model, config, node)
+            model, config, node, probs)
         generated_list.append(generated)
         ofile_path_list.append(ofile_path)
     with open(ofname, 'w') as outdata:
