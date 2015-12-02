@@ -27,6 +27,9 @@ or to run only specific tests:
     python -m unittest pwd_guess_unit.<specific unit test>
 
 
+Most tests are very quick, however each EndToEnd test may take 10-15 minutes.
+
+
 Help
 ----
 

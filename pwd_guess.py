@@ -22,9 +22,9 @@ import multiprocessing
 import tempfile
 import subprocess as subp
 import io
+import collections
 
 PASSWORD_END = '\n'
-RARE_CHARACTER_SYMBOL = '`'
 
 class CharacterTable(object):
     """
@@ -60,7 +60,7 @@ class CharacterTable(object):
             config.rare_character_optimization):
             return OptimizingCharacterTable(
                 config.char_bag, config.max_len,
-                config.rare_character_optimization,
+                config.rare_character_bag,
                 config.uppercase_character_optimization)
         else:
             return CharacterTable(config.char_bag, config.max_len)
@@ -71,8 +71,8 @@ class OptimizingCharacterTable(CharacterTable):
         char_bag = chars
         for r in rare_characters:
             char_bag = char_bag.replace(r, '')
-        char_bag += RARE_CHARACTER_SYMBOL
-        self.rare_dict = dict([(char, RARE_CHARACTER_SYMBOL)
+        char_bag += rare_characters[0]
+        self.rare_dict = dict([(char, rare_characters[0])
                                for char in rare_characters])
         if uppercase:
             for c in string.ascii_uppercase:
@@ -122,7 +122,6 @@ class ModelSerializer(object):
         logging.info('Done loading model')
         return model
 
-
 class ModelDefaults(object):
     """Configuration information for guessing and training. Can be read from a file
     in json format.
@@ -163,9 +162,16 @@ class ModelDefaults(object):
       characters to treat as rare, then it will model those characters with a
       rare character. This will increase performance at the expense of accuracy.
 
+    rare_character_lowest_threshold - Default 20. The with the lowest frequency
+      in the training data will be modeled as special characters. This number
+      indicates how many to drop.
+
     uppercase_character_optimization - Default false. If true, uppercase
       characters will be treated the same as lower case characters. Increases
       performance at the expense of accuracy.
+
+    guess_serialization_method - Default is 'human'. TODO: add a compressed
+      method.
     """
     char_bag = (string.ascii_lowercase +
                 string.ascii_uppercase +
@@ -189,6 +195,9 @@ class ModelDefaults(object):
     fork_length = 2
     rare_character_optimization = False
     uppercase_character_optimization = False
+    rare_character_lowest_threshold = 20
+    rare_character_bag = ''
+    guess_serialization_method = 'human'
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -200,6 +209,12 @@ class ModelDefaults(object):
             return self.adict[name]
         else:
             return super().__getattribute__(name)
+
+    def __setattr__(self, name, value):
+        if name != 'adict':
+            self.adict[name] = value
+        else:
+            super().__setattr__(name, value)
 
     @staticmethod
     def fromFile(afile):
@@ -393,39 +408,70 @@ class TsvList(PwdList):
 
 class Filterer(object):
     def __init__(self, config):
-        self.char_bag = config.char_bag
-        self.max_len = config.max_len
-        self.min_len = config.min_len
         self.filtered_out = 0
         self.total = 0
-
-    def signal_error(self, pwd):
-        logging.warning('Not a valid password. %s\n' % pwd)
+        self.total_characters = 0
+        self.frequencies = collections.defaultdict(int)
+        self.config = config
 
     def pwd_is_valid(self, pwd):
         pwd = pwd.strip(PASSWORD_END)
-        answer = (all(map(lambda c: c in self.char_bag, pwd)) and
-                  len(pwd) <= self.max_len and len(pwd) >= self.min_len)
-        if not answer:
+        answer = (all(map(lambda c: c in self.config.char_bag, pwd)) and
+                  len(pwd) <= self.config.max_len and
+                  len(pwd) >= self.config.min_len)
+        if answer:
+            self.total_characters += len(pwd)
+            for c in pwd:
+                assert c != ''
+                self.frequencies[c] += 1
+        else:
             self.filtered_out += 1
         self.total += 1
         return answer
 
-    def filter_test(self, alist):
-        for pwd in alist:
-            if self.pwd_is_valid(pwd):
-                self.signal_error(pwd)
+    def rare_characters(self):
+        lowest = list(map(
+            lambda x: x[0],
+            sorted(self.frequencies.items(), key = lambda x: x[1])))
+        return lowest[:min(self.config.rare_character_lowest_threshold,
+                           len(lowest))]
+
+    def finish(self):
+        logging.info('Filtered %s of %s passwords',
+                     self.filtered_out, self.total)
+        char_freqs = {}
+        for key in self.frequencies:
+            char_freqs[key] = self.frequencies[key] / self.total_characters
+        logging.info('Character distributions: %s',
+                     json.dumps(char_freqs, indent = 4))
+        self.config.rare_character_bag = self.rare_characters()
 
     def filter(self, alist):
         return filter(self.pwd_is_valid, alist)
+
+class GuessSerializer(object):
+    def __init__(self, ostream):
+        self.ostream = ostream
+
+    def serialize(self, password, prob):
+        self.ostream.write('%s\t%s\n' % (
+            password.strip(PASSWORD_END), prob))
+
+    @staticmethod
+    def fromConfig(config, ostream):
+        if config.guess_serialization_method == 'human':
+            return GuessSerializer(ostream)
+        logging.warning('Unknown serialization method %s',
+                        config.guess_serialization_method)
+        return None
 
 class Guesser(object):
     def __init__(self, model, config, ostream):
         self.model = model
         self.config = config
-        self.ostream = ostream
         self.generated = 0
         self.ctable = CharacterTable.fromConfig(self.config)
+        self.output_serializer = GuessSerializer.fromConfig(config, ostream)
         self.filterer = Filterer(self.config)
 
     def cond_prob_from_preds(self, char, preds):
@@ -442,11 +488,6 @@ class Guesser(object):
         for i, v in enumerate(preds):
             preds[i] = v / sum_per
 
-    def output_guess(self, password, prob):
-        self.ostream.write('%s\t%s\n' % (
-            password.strip(PASSWORD_END), prob))
-        self.generated += 1
-
     def conditional_probs(self, astring):
         np_inp = np.zeros((1, self.config.max_len, len(self.config.char_bag)),
                           dtype = np.bool)
@@ -462,7 +503,8 @@ class Guesser(object):
             return
         if len(astring) > self.config.max_len:
             if len(astring.strip(PASSWORD_END)) == self.config.max_len:
-                self.output_guess(astring, prob)
+                self.output_serializer.serialize(astring, prob)
+                self.generated += 1
             return
         prediction = self.conditional_probs(astring)
         for char in self.config.char_bag:
@@ -470,7 +512,8 @@ class Guesser(object):
             chain_prob =  self.cond_prob_from_preds(char, prediction) * prob
             if (char == PASSWORD_END and
                 chain_prob >= self.config.lower_probability_threshold):
-                self.output_guess(chain_pass, chain_prob)
+                self.output_serializer.serialize(chain_pass, chain_prob)
+                self.generated += 1
             elif char != PASSWORD_END:
                 self.recur(chain_pass, chain_prob)
 
@@ -583,7 +626,7 @@ def get_version_string():
     p = subp.Popen(['git', 'describe'],
                    stdin=subp.PIPE, stdout=subp.PIPE, stderr=subp.PIPE)
     output, err = p.communicate()
-    return output.decode('utf-8')
+    return output.decode('utf-8').strip('\n')
 
 def init_logging(args, config):
     log_format = '%(asctime)-15s %(levelname)s: %(message)s'
@@ -594,9 +637,9 @@ def init_logging(args, config):
     else:
         logging.basicConfig(level = log_level, format = log_format)
     logging.info('Beginning...')
-    logging.info('Arguments %s', json.dumps(args, indent = 4))
-    logging.info('Configuration %s', json.dumps(config.as_dict(), indent = 4))
-    logging.info('Version: %s')
+    logging.info('Arguments: %s', json.dumps(args, indent = 4))
+    logging.info('Configuration: %s', json.dumps(config.as_dict(), indent = 4))
+    logging.info('Version: %s', get_version_string())
     def except_hook(exctype, value, tb):
         logging.critical('Uncaught exception', exc_info = (exctype, value, tb))
         sys.stderr.write('Uncaught exception!')
@@ -610,11 +653,14 @@ def train(args, config):
     filt = Filterer(config)
     logging.info('Reading training set...')
     plist = list(filt.filter(input_const(args['pwd_file']).as_list()))
-    logging.info('Filtered %s of %s passwords', filt.filtered_out, filt.total)
+    filt.finish()
     logging.info('Done reading passwords...')
     if len(plist) == 0:
         logging.error('Empty training set! Quiting...')
         sys.exit(1)
+    if args['pre_processing_only']:
+        logging.info('Only performing pre-processing. ')
+        sys.exit(0)
     trainer = Trainer(plist, config)
     serializer = ModelSerializer(args['arch_file'], args['weight_file'])
     if args['retrain']:
@@ -640,7 +686,7 @@ def main(args):
         sys.stdout.write(ModelDefaults.__doc__ + '\n')
         sys.exit(0)
     if args['version']:
-        sys.stdout.write(get_version_string())
+        sys.stdout.write(get_version_string() + '\n')
         sys.exit(0)
     config = ModelDefaults.fromFile(args['config'])
     init_logging(args, config)
@@ -654,14 +700,14 @@ def main(args):
     logging.info('Done!')
 
 def make_parser():
-    parser = argparse.ArgumentParser(
-        description=('Neural Network with passwords. This program uses a '
-                     'neural network to guess passwords. This happens in two'
-                     ' phases, training and enumeration. Either --pwd-file or'
-                     ' --enumerate-ofile are required. --pwd-file will give a'
-                     ' password file as training data. --enumerate-ofile will'
-                     ' guess passwords based on an existing model. Version ' +
-                     get_version_string()))
+    parser = argparse.ArgumentParser(description=(
+        """Neural Network with passwords. This program uses a neural network to
+        guess passwords. This happens in two phases, training and
+        enumeration. Either --pwd-file or --enumerate-ofile are required.
+        --pwd-file will give a password file as training data.
+        --enumerate-ofile will guess passwords based on an existing model.
+        Version """ +
+        get_version_string()))
     parser.add_argument('--pwd-file',
                         help=('Input file name. Will be interpreted as a '
                               'gziped file if this argument ends in `.gz\'. '))
@@ -690,6 +736,8 @@ def make_parser():
                         choices = ['debug', 'info', 'warning', 'error'])
     parser.add_argument('--version', action = 'store_true',
                         help = 'Print version number and exit')
+    parser.add_argument('--pre-processing-only', action='store_true',
+                        help = 'Only perform the preprocessing step. ')
     return parser
 
 if __name__=='__main__':
