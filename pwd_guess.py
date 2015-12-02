@@ -619,6 +619,8 @@ class NodeTriePreprocessor(TriePreprocessor):
 class SuperTriePreprocessor(NodeTriePreprocessor):
     def set_generator(self):
         self.current_generator = list(self.trie.sampled_training())
+        self._total_size = math.ceil(len(
+            self.current_generator) / self.config.training_chunk)
         # TODO: make memory efficient
         random.shuffle(self.current_generator)
 
