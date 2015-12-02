@@ -8,7 +8,20 @@ Setup
 
     python packages:
 
-      theano (http://deeplearning.net/software/theano/install.html)
+      theano - Theano requires the version from github instead of the version on
+      pip.
+      https://github.com/Theano/Theano. To setup the GPU, make sure that you
+      read the documentation. Make the .theanorc file in your home directory
+      with this:
+
+        [cuda]
+        root = /usr/local/cuda
+
+        [global]
+        device = gpu
+        floatX = float32
+        warn_float64 = warn
+
 
       keras - at time of writing, the version on pip is not current and will
       cause model saving to fail. Use the version from github instead
