@@ -524,8 +524,6 @@ class ModelDefaults(object):
             assert answer.simulated_frequency_optimization
             assert answer.trie_implementation is not None
         assert answer.fork_length < answer.min_len
-        assert not os.path.exists(answer.trie_fname)
-        assert not os.path.exists(answer.trie_intermediate_storage)
         return answer
 
     def as_dict(self):
