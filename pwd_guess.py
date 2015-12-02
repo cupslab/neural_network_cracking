@@ -397,6 +397,9 @@ class CharacterTable(object):
     def get_char_index(self, character):
         return self.char_indices[character]
 
+    def translate(self, astring):
+        return astring
+
     @staticmethod
     def fromConfig(config):
         if (config.uppercase_character_optimization or
@@ -431,6 +434,16 @@ class OptimizingCharacterTable(CharacterTable):
         super().__init__(char_bag, maxlen)
         for key in self.rare_dict:
             self.char_indices[key] = self.char_indices[self.rare_dict[key]]
+        translate_table = {}
+        for c in chars:
+            if c in self.rare_dict:
+                translate_table[c] = self.rare_dict[c]
+            else:
+                translate_table[c] = c
+        self.translate_table = ''.maketrans(translate_table)
+
+    def translate(self, astring):
+        return astring.translate(self.translate_table)
 
 class ModelSerializer(object):
     def __init__(self, archfile = None, weightfile = None):
@@ -672,10 +685,11 @@ class TriePreprocessor(BasePreprocessor):
         super().__init__(config)
         self.instances = 0
         self.trie = BaseTrie.fromConfig(config)
+        self.ctable = CharacterTable.fromConfig(config)
         self.ordered_randomly = False
 
     def preprocess(self, pwd_list):
-        return pwd_list
+        return map(self.ctable.translate, pwd_list)
 
     def begin(self, pwd_list):
         out_pwd_list = self.preprocess(pwd_list)
@@ -740,7 +754,7 @@ class HybridDiskPreprocessor(TriePreprocessor):
         # TODO: make memory efficient
         out_pwd_list = collections.defaultdict(list)
         fork_len = self.config.fork_length
-        for item in pwd_list:
+        for item in super().preprocess(pwd_list):
             out_pwd_list[item[0][:fork_len]].append(item)
         return self.read(out_pwd_list)
 

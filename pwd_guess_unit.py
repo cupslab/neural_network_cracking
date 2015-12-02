@@ -226,6 +226,8 @@ class CharacterTableTest(unittest.TestCase):
                                                  [True, False]],
                                                 [[False, True],
                                                  [True, False]]]))
+        self.assertEqual(ctable.translate('aba'), 'aba')
+        self.assertEqual(ctable.translate('aba'), 'aba')
 
 class OptimizingTableTest(unittest.TestCase):
     def test_table(self):
@@ -247,6 +249,9 @@ class OptimizingTableTest(unittest.TestCase):
         self.assertEqual(ctable.get_char_index('b'), 0)
         self.assertEqual(ctable.get_char_index('c'), 1)
         self.assertEqual(ctable.get_char_index('d'), 2)
+
+        self.assertEqual(ctable.translate('cdb'), 'cda')
+        self.assertEqual(ctable.translate('cda'), 'cda')
 
     def test_table_upper(self):
         ctable = pwd_guess.OptimizingCharacterTable('abcdABCD:', 2, ':', True)
