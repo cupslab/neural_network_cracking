@@ -3,7 +3,8 @@ Setup
 
     Requirements:
 
-    python - version 3.4.2 was used during development. It should work with 2.7 too.
+    python - version 3.4.2 was used during development. It should work with 2.7
+    too.
 
     python packages:
 
@@ -17,6 +18,8 @@ Setup
       datrie - pip install datrie
 
       scikit-learn - pip install scikit-learn
+
+      sqlitedict - pip install sqlitedict
 
 Tests
 -----
