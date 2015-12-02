@@ -463,6 +463,13 @@ class ModelSerializer(object):
         logging.info('Done loading model')
         return model
 
+model_type_dict = {
+    'JZS1' : recurrent.JZS1,
+    'JZS2' : recurrent.JZS2,
+    'JZS3' : recurrent.JZS3,
+    'GRU' : recurrent.GRU
+}
+
 class ModelDefaults(object):
     char_bag = (string.ascii_lowercase + string.ascii_uppercase +
                 string.digits + '~!@#$%^&*(),.<>/?\'"{}[]\|-_=+;: `' +
@@ -495,6 +502,8 @@ class ModelDefaults(object):
     save_always = True
     randomize_training_order = True
     toc_chunk_size = 1000
+    model_truncate_gradient = -1
+    model_optimizer = 'adam'
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -541,13 +550,7 @@ class ModelDefaults(object):
             and not type(value) == staticmethod)])
 
     def model_type_exec(self):
-        if self.model_type == 'JZS1':
-            return recurrent.JZS1
-        if self.model_type == 'GRU':
-            return recurrent.GRU
-        else:
-            logging.warning('Unknown model type %s', self.model_type)
-            return None
+        return model_type_dict[self.model_type]
 
     def set_intermediate_info(self, key, value):
         with SqliteDict(self.intermediate_fname) as info:
@@ -773,15 +776,17 @@ class Trainer(object):
         model = Sequential()
         model.add(self.config.model_type_exec()(
             self.config.hidden_size,
-            input_shape = (self.config.max_len, len(self.ctable.chars))))
+            input_shape = (self.config.max_len, len(self.ctable.chars)),
+            truncate_gradient = self.config.model_truncate_gradient))
         model.add(RepeatVector(1))
         for _ in range(self.config.layers):
             model.add(self.config.model_type_exec()(
-                self.config.hidden_size, return_sequences = True))
-        model.add(TimeDistributedDense(
-            len(self.ctable.chars)))
+                self.config.hidden_size, return_sequences = True,
+                truncate_gradient = self.config.model_truncate_gradient))
+        model.add(TimeDistributedDense(len(self.ctable.chars)))
         model.add(Activation('softmax'))
-        model.compile(loss='categorical_crossentropy', optimizer = 'adam')
+        model.compile(loss='categorical_crossentropy',
+                      optimizer = self.config.model_optimizer)
         self.model = model
 
     def train_model(self, serializer):

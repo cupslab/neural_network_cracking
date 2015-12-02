@@ -467,7 +467,8 @@ class TrainerTest(unittest.TestCase):
         t.next_train_set_as_np()
 
     def test_build_model(self):
-        t = pwd_guess.Trainer(['pass'])
+        t = pwd_guess.Trainer(['pass'], pwd_guess.ModelDefaults(
+            hidden_size = 12, layers = 1))
         t.build_model()
         self.assertNotEqual(None, t.model)
 
