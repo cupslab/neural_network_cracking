@@ -1231,12 +1231,12 @@ class Guesser(object):
         logging.info('Super node buffer size %s', len(prefixes))
         predictions = self.conditional_probs_many(prefixes)
         cached_prefixes = dict(zip(prefixes, predictions))
+        node_batch = []
         for cur_node in node_list:
             astring, prob = cur_node
-            node_batch = []
             for next_node in self.next_nodes(astring, prob, cached_prefixes):
                 node_batch.append(next_node)
-            self.super_node_recur(node_batch)
+        self.super_node_recur(node_batch)
 
     def recur(self, astring = '', prob = 1):
         self.super_node_recur([(astring, prob)])
