@@ -534,7 +534,7 @@ class ModelDefaults(object):
     cleanup_guesser_files = True
     use_mmap = True
     compute_stats = False
-    password_test_list = None
+    password_test_fname = None
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -574,7 +574,7 @@ class ModelDefaults(object):
         assert self.fork_length < self.min_len
         assert self.max_len <= 255
         if self.guess_serialization_method == 'calculator':
-            assert os.path.exists(self.password_test_list)
+            assert os.path.exists(self.password_test_fname)
 
     def as_dict(self):
         answer = dict(vars(ModelDefaults).copy())
@@ -1157,7 +1157,7 @@ class Guesser(object):
         elif self.config.guess_serialization_method == 'calculator':
             return GuessNumberGenerator(ostream,
                 ProbabilityCalculator(self).calc_probabilities(
-                    PwdList(self.config.password_test_list).as_list()))
+                    PwdList(self.config.password_test_fname).as_list()))
         logging.error('Unknown serialization method %s',
                       config.guess_serialization_method)
 
