@@ -1455,14 +1455,12 @@ class RandomWalkGuesser(Guesser):
         for i, cur_node in enumerate(real_node_list):
             astring, prob, d_accum, cost_accum = cur_node
             poss_next = list(self.next_nodes(astring, prob, predictions[i][0]))
+            if len(poss_next) == 0:
+                continue
             next_node = random.choice(poss_next)
             d_accum_next = len(poss_next) * d_accum
             cost_next = (
                 cost_accum + d_accum_next * self.cost_of_node(*next_node))
-            if len(poss_next) == 0:
-                self.cost_sum += cost_next
-                self.cost_num += 1
-                continue
             next_nodes.append(next_node + (d_accum_next, cost_next))
         if len(next_nodes) != 0:
             self.super_node_recur(next_nodes)
