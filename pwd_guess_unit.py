@@ -34,15 +34,34 @@ class NodeTrieSerializerTest(unittest.TestCase):
         self.tempfile.close()
 
     def test_save_load(self):
-        s = pwd_guess.NodeTrieSerializer(
-            pwd_guess.ModelDefaults(trie_fname = self.tempfile.name))
+        s = pwd_guess.TrieSerializer.fromConfig(
+            pwd_guess.ModelDefaults(trie_fname = self.tempfile.name,
+                                    trie_serializer_type = 'reg'))
+        self.assertEqual(type(s), pwd_guess.NodeTrieSerializer)
         s.serialize(self.trie)
-        s = pwd_guess.NodeTrieSerializer(
-            pwd_guess.ModelDefaults(trie_fname = self.tempfile.name))
+        s = pwd_guess.TrieSerializer.fromConfig(
+            pwd_guess.ModelDefaults(trie_fname = self.tempfile.name,
+                                    trie_serializer_type = 'reg'))
+        self.assertEqual(type(s), pwd_guess.NodeTrieSerializer)
         self.assertEqual(set([('a', 6), ('aa', 6), ('aaa', 1), ('aab', 5)]),
                         set(s.deserialize()))
 
-class TrieSuperSerializerTest(unittest.TestCase):
+class MemoryTrieSerializerTest(unittest.TestCase):
+    def test_save_load(self):
+        trie = pwd_guess.NodeTrie()
+        trie.increment('aaa', 1)
+        trie.increment('aab', 5)
+        s = pwd_guess.TrieSerializer.fromConfig(pwd_guess.ModelDefaults(
+            trie_fname = ':memory:', trie_serializer_type = 'reg'))
+        self.assertEqual(type(s), pwd_guess.MemoryTrieSerializer)
+        s.serialize(trie)
+        s = pwd_guess.TrieSerializer.fromConfig(pwd_guess.ModelDefaults(
+            trie_fname = ':memory:', trie_serializer_type = 'reg'))
+        self.assertEqual(type(s), pwd_guess.MemoryTrieSerializer)
+        self.assertEqual(set([('a', 6), ('aa', 6), ('aaa', 1), ('aab', 5)]),
+                         set(s.deserialize()))
+
+class TrieFuzzySerializerTest(unittest.TestCase):
     def setUp(self):
         self.trie = pwd_guess.NodeTrie()
         self.trie.increment('aaa', 1)
@@ -53,11 +72,15 @@ class TrieSuperSerializerTest(unittest.TestCase):
         self.tempfile.close()
 
     def test_save_load(self):
-        s = pwd_guess.TrieSuperSerializer(
-            pwd_guess.ModelDefaults(trie_fname = self.tempfile.name))
+        s = pwd_guess.TrieSerializer.fromConfig(
+            pwd_guess.ModelDefaults(trie_fname = self.tempfile.name,
+                                    trie_serializer_type = 'fuzzy'))
+        self.assertEqual(type(s), pwd_guess.TrieFuzzySerializer)
         s.serialize(self.trie)
-        s = pwd_guess.TrieSuperSerializer(
-            pwd_guess.ModelDefaults(trie_fname = self.tempfile.name))
+        s = pwd_guess.TrieSerializer.fromConfig(
+            pwd_guess.ModelDefaults(trie_fname = self.tempfile.name,
+                                    trie_serializer_type = 'fuzzy'))
+        self.assertEqual(type(s), pwd_guess.TrieFuzzySerializer)
         self.assertEqual([('', [('a', 6)]),
                           ('a', [('a', 6)]),
                           ('aa', [('a', 1),
@@ -71,14 +94,14 @@ class NodeTrieTest(unittest.TestCase):
     def test_iterate(self):
         self.trie.increment('aaa', 1)
         self.assertEqual([('a', 1), ('aa', 1), ('aaa', 1)],
-                         list(self.trie.random_iterate()))
+                         list(self.trie.iterate('reg')))
         self.assertEqual(self.trie.size(), 3)
 
     def test_iterate_overlap(self):
         self.trie.increment('aaa', 1)
         self.trie.increment('aab', 5)
         self.assertEqual(set([('a', 6), ('aa', 6), ('aaa', 1), ('aab', 5)]),
-                         set(self.trie.random_iterate()))
+                         set(self.trie.iterate('reg')))
         self.assertEqual(self.trie.size(), 4)
 
     def test_sampled_iterate(self):
@@ -88,52 +111,44 @@ class NodeTrieTest(unittest.TestCase):
                           ('a', [('a', 6)]),
                           ('aa', [('a', 1),
                                   ('b', 5)])],
-                         list(self.trie.sampled_training()))
+                         list(self.trie.iterate('fuzzy')))
 
-class TrieTest(unittest.TestCase):
-    def setUp(self):
-        self.trie = pwd_guess.TriePwdList(pwd_guess.ModelDefaults())
+class DiskBackedTrieTest(unittest.TestCase):
+    def test_iterate(self):
+        self.trie = pwd_guess.DiskBackedTrie(pwd_guess.ModelDefaults(
+            fork_length = 1))
+        self.trie.increment('aaa', 1)
+        self.assertEqual(pwd_guess.MemoryTrieSerializer,
+                         type(self.trie.make_serializer()))
+        self.assertEqual(self.trie.current_branch_key, 'a')
+        self.assertTrue(self.trie.current_node is not None)
+        self.assertEqual(set(self.trie.current_node.iterate('reg')),
+                         set([('a', 1), ('aa', 1)]))
+        self.assertEqual(set([('a', 1), ('aa', 1), ('aaa', 1)]),
+                         set(self.trie.iterate('reg')))
 
-    def test_increment(self):
+    def test_iterate_overlap(self):
+        self.trie = pwd_guess.DiskBackedTrie(pwd_guess.ModelDefaults())
         self.trie.increment('aaa', 1)
-        self.assertEqual([('aaa', 1)], list(self.trie.random_iterate()))
-        self.trie.increment('aaa', 1)
-        self.assertEqual([('aaa', 2)], list(self.trie.random_iterate()))
-        self.assertEqual(1, self.trie.size())
-        self.trie.finish()
+        self.trie.increment('aab', 5)
+        self.trie.increment('cab', 2)
+        self.assertEqual(set([('a', 6), ('c', 2), ('aa', 6), ('aaa', 1),
+                              ('aab', 5), ('ca', 2), ('cab', 2)]),
+                         set(self.trie.iterate('reg')))
 
-    def test_increment_diff(self):
+    def test_sampled_iterate(self):
+        self.trie = pwd_guess.DiskBackedTrie(pwd_guess.ModelDefaults(
+            trie_serializer_type = 'fuzzy'))
         self.trie.increment('aaa', 1)
-        self.trie.increment('aaa', 1)
-        self.trie.increment('bb', 8)
-        self.assertEqual([('aaa', 2), ('bb', 8)],
-                        sorted(list(self.trie.random_iterate()),
-                               key = lambda x: x[0]))
-        self.assertEqual(2, self.trie.size())
-        self.trie.finish()
-
-class DBTrieTest(unittest.TestCase):
-    def setUp(self):
-        self.trie = pwd_guess.DBTrie(
-            pwd_guess.ModelDefaults(trie_fname = ':memory:'))
-
-    def test_increment(self):
-        self.trie.increment('aaa', 1)
-        self.assertEqual([('aaa', 1)], list(self.trie.random_iterate()))
-        self.trie.increment('aaa', 1)
-        self.assertEqual([('aaa', 2)], list(self.trie.random_iterate()))
-        self.assertEqual(1, self.trie.size())
-        self.trie.finish()
-
-    def test_increment_diff(self):
-        self.trie.increment('aaa', 1)
-        self.trie.increment('aaa', 1)
-        self.trie.increment('bb', 8)
-        self.assertEqual([('aaa', 2), ('bb', 8)],
-                        sorted(list(self.trie.random_iterate()),
-                               key = lambda x: x[0]))
-        self.assertEqual(2, self.trie.size())
-        self.trie.finish()
+        self.trie.increment('aab', 5)
+        self.trie.increment('cab', 2)
+        hashable = lambda item: (item[0], tuple(item[1]))
+        self.assertEqual(set(map(hashable, [('', [('a', 6), ('c', 2)]),
+                                            ('c', [('a', 2)]),
+                                            ('ca', [('b', 2)]),
+                                            ('a', [('a', 6)]),
+                                            ('aa', [('a', 1), ('b', 5)])])),
+                         set(map(hashable, self.trie.iterate('fuzzy'))))
 
 class CharacterTableTest(unittest.TestCase):
     def test_table(self):
@@ -207,18 +222,39 @@ class OptimizingTableTest(unittest.TestCase):
             [[True, False, False, False, False],
              [True, False, False, False, False]])), '::')
 
+class HybridPreprocessorTest(unittest.TestCase):
+    def test_begin(self):
+        pre = pwd_guess.HybridDiskPreprocessor(pwd_guess.ModelDefaults(
+            min_len = 3,
+            # trie_serializer_type = 'fuzzy',
+            trie_implementation = 'disk'))
+        pre.begin([('aaa', 1), ('caa', 2), ('aab', 5)])
+        prefix, suffix, weight = pre.next_chunk()
+        exp_prefix = ['', 'a', 'aa', 'aa', '', 'c', 'ca', 'aaa', 'aab', 'caa']
+        exp_suffix = ['a', 'a', 'a', 'b', 'c', 'a', 'a', '\n', '\n', '\n']
+        exp_weight = [6, 6, 1, 5, 2, 2, 2, 1, 5, 2]
+        self.assertEqual(
+            set(zip(exp_prefix, exp_suffix, exp_weight)),
+            set(zip(prefix, suffix, weight)))
+
+    def test_preprocess(self):
+        pre = pwd_guess.HybridDiskPreprocessor(pwd_guess.ModelDefaults(
+            min_len = 3,
+            trie_serializer_type = 'fuzzy',
+            trie_implementation = 'disk'))
+        self.assertEqual([('aaa', 1), ('aab', 5), ('caa', 2)], list(
+            pre.preprocess([('aaa', 1), ('caa', 2), ('aab', 5)])))
+
 class DiskPreprocessorTest(unittest.TestCase):
     def setUp(self):
         self.tempfile = tempfile.NamedTemporaryFile()
-        self.config = pwd_guess.ModelDefaults(
-            trie_implementation = 'dummy',
-            trie_fname = self.tempfile.name)
+        self.config = pwd_guess.ModelDefaults(trie_fname = self.tempfile.name)
 
     def tearDown(self):
         self.tempfile.close()
 
     def test_train(self):
-        s = pwd_guess.NodeTrieSerializer(self.config)
+        s = pwd_guess.TrieSerializer.fromConfig(self.config)
         trie = pwd_guess.NodeTrie()
         trie.increment('aaa', 1)
         trie.increment('aab', 5)
@@ -238,20 +274,21 @@ class DiskPreprocessorTest(unittest.TestCase):
 class PreprocessorTest(unittest.TestCase):
     def test_train_set(self):
         p = pwd_guess.Preprocessor(pwd_guess.ModelDefaults(max_len = 40))
-        p.begin(['pass'])
+        p.begin([('pass', 1)])
         prefix, suffix, weight = p.next_chunk()
-        self.assertEqual((['', 'p', 'pa', 'pas', 'pass'],
-                          ['p', 'a', 's', 's', '\n']),
-                         (list(prefix), list(suffix)))
+        self.assertEqual(set(zip(['', 'p', 'pa', 'pas', 'pass'],
+                                 ['p', 'a', 's', 's', '\n'])),
+                         set(zip(list(prefix), list(suffix))))
         self.assertTrue(all(map(lambda x: x == 1, weight)))
 
     def test_training_set_small(self):
         t = pwd_guess.Preprocessor(
             pwd_guess.ModelDefaults(max_len = 3, min_len = 3))
-        t.begin(['aaa'])
+        t.begin([('aaa', 1)])
         prefix, suffix, _ = t.next_chunk()
-        self.assertEqual((['', 'a', 'aa', 'aaa'], ['a', 'a', 'a', '\n']),
-                         (list(prefix), list(suffix)))
+        self.assertEqual(set(zip(['', 'a', 'aa', 'aaa'],
+                                 ['a', 'a', 'a', '\n'])),
+                         set(zip(list(prefix), list(suffix))))
 
     def train_construct_dict(self):
         t = pwd_guess.Preprocessor({'pass' : 2}, pwd_guess.ModelDefaults(
@@ -272,35 +309,36 @@ class PreprocessorTest(unittest.TestCase):
 class TriePreprocessorTest(unittest.TestCase):
     def test_train_set(self):
         config = pwd_guess.ModelDefaults(
-            max_len = 40, trie_implementation = 'DB')
+            max_len = 40, trie_implementation = 'trie')
         trie_p = pwd_guess.TriePreprocessor(config)
-        trie_p.begin({'pass' : 1})
+        trie_p.begin([('pass', 1)])
         prefix, suffix, weight = trie_p.next_chunk()
-        self.assertEqual((['', 'p', 'pa', 'pas', 'pass'],
-                          ['p', 'a', 's', 's', '\n'],
-                          [1, 1, 1 ,1 , 1]),
-                         (prefix, suffix, weight))
+        self.assertEqual(set(zip(['', 'p', 'pa', 'pas', 'pass'],
+                                 ['p', 'a', 's', 's', '\n'],
+                                 [1, 1, 1 ,1 , 1])),
+                         set(zip(prefix, suffix, weight)))
 
     def test_training_set_small(self):
         config = pwd_guess.ModelDefaults(
-            max_len = 3, min_len = 3, trie_implementation = 'DB')
+            max_len = 3, min_len = 3, trie_implementation = 'trie')
         trie_p = pwd_guess.TriePreprocessor(config)
-        trie_p.begin({'aaa' : 1})
+        trie_p.begin([('aaa', 1)])
         prefix, suffix, weight = trie_p.next_chunk()
-        self.assertEqual((['', 'a', 'aa', 'aaa'], ['a', 'a', 'a', '\n'],
-                          [1, 1, 1, 1]),
-                         (prefix, suffix, weight))
+        self.assertEqual(set(zip(['', 'a', 'aa', 'aaa'], ['a', 'a', 'a', '\n'],
+                                 [1, 1, 1, 1])),
+                         set(zip(prefix, suffix, weight)))
 
     def test_train_construct_dict(self):
         config = pwd_guess.ModelDefaults(
-            simulated_frequency_optimization = True, trie_implementation = 'DB')
+            simulated_frequency_optimization = True,
+            trie_implementation = 'trie')
         p = pwd_guess.TriePreprocessor(config)
-        p.begin({'pass' : 2})
+        p.begin([('pass', 2)])
         prefix, suffix, weight = p.next_chunk()
-        self.assertEqual((['', 'p', 'pa', 'pas', 'pass'],
-                          ['p', 'a', 's', 's', '\n'],
-                          [2, 2, 2, 2, 2]),
-                         (prefix, suffix, weight))
+        self.assertEqual(set(zip(['', 'p', 'pa', 'pas', 'pass'],
+                                 ['p', 'a', 's', 's', '\n'],
+                                 [2, 2, 2, 2, 2])),
+                         set(zip(prefix, suffix, weight)))
 
     def test_train_trie_dict_trie(self):
         config = pwd_guess.ModelDefaults(
@@ -308,72 +346,7 @@ class TriePreprocessorTest(unittest.TestCase):
             trie_implementation = 'trie',
             chunk_print_interval = 1)
         p = pwd_guess.TriePreprocessor(config)
-        p.begin({'pass' : 2, 'pasw' : 3})
-        prefix, suffix, weight = p.next_chunk()
-        expected_chunks = ['', 'p', 'pa', 'pas', 'pasw', 'pas', 'pass']
-        expected_out = ['p', 'a', 's', 'w', '\n', 's', '\n']
-        expected_weight = [5, 5, 5, 3, 3, 2, 2]
-        self.assertEqual(
-            set(zip(expected_chunks, expected_out, expected_weight)),
-            set(zip(prefix, suffix, weight)))
-
-    def test_train_trie_dict_db(self):
-        config = pwd_guess.ModelDefaults(
-            simulated_frequency_optimization = True, trie_implementation = 'DB',
-            chunk_print_interval = 1)
-        p = pwd_guess.TriePreprocessor(config)
-        p.begin({'pass' : 2, 'pasw' : 3})
-        prefix, suffix, weight = p.next_chunk()
-        expected_chunks = ['', 'p', 'pa', 'pas', 'pasw', 'pas', 'pass']
-        expected_out = ['p', 'a', 's', 'w', '\n', 's', '\n']
-        expected_weight = [5, 5, 5, 3, 3, 2, 2]
-        self.assertEqual(
-            set(zip(expected_chunks, expected_out, expected_weight)),
-            set(zip(prefix, suffix, weight)))
-
-class NodeTriePreprocessorTest(unittest.TestCase):
-    def test_train_set(self):
-        p = pwd_guess.NodeTriePreprocessor(
-            pwd_guess.ModelDefaults(trie_implementation = 'node_trie'))
-        p.begin({'pass' : 1})
-        self.assertEqual((['', 'p', 'pa', 'pas', 'pass'],
-                          ['p', 'a', 's', 's', '\n'],
-                          [1, 1, 1 ,1 , 1]), p.next_chunk())
-
-    def test_training_set_small(self):
-        p = pwd_guess.NodeTriePreprocessor(
-            pwd_guess.ModelDefaults(trie_implementation = 'node_trie'))
-        p.begin({'aaa' : 1})
-        self.assertEqual((['', 'a', 'aa', 'aaa'], ['a', 'a', 'a', '\n'],
-                          [1, 1, 1, 1]), p.next_chunk())
-
-    def test_train_construct_dict(self):
-        p = pwd_guess.NodeTriePreprocessor(
-            pwd_guess.ModelDefaults(trie_implementation = 'node_trie'))
-        p.begin({'pass' : 2})
-        self.assertEqual((['', 'p', 'pa', 'pas', 'pass'],
-                          ['p', 'a', 's', 's', '\n'],
-                          [2, 2, 2, 2, 2]),
-                         p.next_chunk())
-
-    def test_train_trie_dict_trie(self):
-        p = pwd_guess.NodeTriePreprocessor(
-            pwd_guess.ModelDefaults(chunk_print_interval = 1,
-                                    trie_implementation = 'node_trie'))
-        p.begin({'pass' : 2, 'pasw' : 3})
-        prefix, suffix, weight = p.next_chunk()
-        expected_chunks = ['', 'p', 'pa', 'pas', 'pasw', 'pas', 'pass']
-        expected_out = ['p', 'a', 's', 'w', '\n', 's', '\n']
-        expected_weight = [5, 5, 5, 3, 3, 2, 2]
-        self.assertEqual(
-            set(zip(expected_chunks, expected_out, expected_weight)),
-            set(zip(prefix, suffix, weight)))
-
-    def test_train_trie_dict_db(self):
-        p = pwd_guess.NodeTriePreprocessor(
-            pwd_guess.ModelDefaults(chunk_print_interval = 1,
-                                    trie_implementation = 'node_trie'))
-        p.begin({'pass' : 2, 'pasw' : 3})
+        p.begin([('pass', 2), ('pasw', 3)])
         prefix, suffix, weight = p.next_chunk()
         expected_chunks = ['', 'p', 'pa', 'pas', 'pasw', 'pas', 'pass']
         expected_out = ['p', 'a', 's', 'w', '\n', 's', '\n']
@@ -384,7 +357,7 @@ class NodeTriePreprocessorTest(unittest.TestCase):
 
 class SuperTrieTrainerTest(unittest.TestCase):
     def test_y_data(self):
-        a = pwd_guess.SuperTrieTrainer([], pwd_guess.ModelDefaults(
+        a = pwd_guess.FuzzyTrieTrainer([], pwd_guess.ModelDefaults(
             max_len = 5, char_bag = 'abc\n'))
         answer = a.prepare_y_data([[('a', 1), ('b', 5), ('c', 2)]])
         expected = np.zeros((1, 1, 4))
@@ -398,7 +371,7 @@ class TrainerTest(unittest.TestCase):
     def test_accuracy(self):
         config = pwd_guess.ModelDefaults(max_len = 5)
         pre = pwd_guess.Preprocessor(config)
-        pre.begin(['pass'])
+        pre.begin([('pass', 1)])
         t = pwd_guess.Trainer(pre, config)
         mock_model = Mock()
         mock_model.train_on_batch = MagicMock(return_value = (0.5, 0.5))
@@ -409,7 +382,7 @@ class TrainerTest(unittest.TestCase):
     def test_train_model(self):
         config = pwd_guess.ModelDefaults(max_len = 5, generations = 20)
         pre = pwd_guess.Preprocessor(config)
-        pre.begin(['pass'])
+        pre.begin([('pass', 1)])
         t = pwd_guess.Trainer(pre, config)
         mock_model = Mock()
         mock_model.train_on_batch = MagicMock(return_value = (0.5, 0.5))
@@ -419,13 +392,13 @@ class TrainerTest(unittest.TestCase):
         self.assertEqual(t.generation, 2)
 
     def test_char_table_no_error(self):
-        t = pwd_guess.Trainer(['pass'])
+        t = pwd_guess.Trainer(None)
         self.assertNotEqual(None, t.ctable)
         t.ctable.encode('1234' + ('\n' * 36), 40)
 
     def test_output_as_np(self):
         pre = pwd_guess.Preprocessor()
-        pre.begin(['pass'])
+        pre.begin([('pass', 1)])
         t = pwd_guess.Trainer(pre)
         t.next_train_set_as_np()
 
@@ -437,7 +410,7 @@ class TrainerTest(unittest.TestCase):
     def test_train_set_np_two(self):
         config = pwd_guess.ModelDefaults()
         pre = pwd_guess.Preprocessor(config)
-        pre.begin(['pass', 'word'])
+        pre.begin([('pass', 1), ('word', 1)])
         t = pwd_guess.Trainer(pre, config)
         t.next_train_set_as_np()
 
@@ -470,11 +443,11 @@ class TrainerTest(unittest.TestCase):
         self.assertEqual(1, len(w_v))
 
     def test_get_factory(self):
-        self.assertEqual(pwd_guess.SuperTrieTrainer,
+        self.assertEqual(pwd_guess.FuzzyTrieTrainer,
                          pwd_guess.Trainer.getFactory(pwd_guess.ModelDefaults(
-                             node_serializer_type = 'super')))
+                             trie_serializer_type = 'fuzzy')))
         self.assertEqual(pwd_guess.Trainer, pwd_guess.Trainer.getFactory(
-            pwd_guess.ModelDefaults(node_serializer_type = 'reg')))
+            pwd_guess.ModelDefaults(trie_serializer_type = 'reg')))
 
 class ModelDefaultsTest(unittest.TestCase):
     def test_get_default(self):
@@ -554,31 +527,32 @@ class PwdListTest(unittest.TestCase):
     def test_as_list(self):
         self.make_file('test.txt', open)
         pwd = pwd_guess.PwdList(self.fname)
-        self.assertEqual(['pass ', 'word'], pwd.as_list())
+        self.assertEqual([('pass ', 1), ('word', 1)], list(pwd.as_list()))
 
     def test_tsv(self):
         self.fcontent = 'pass \t1\tR\nword\t1\tR\n'
         self.make_file('test.tsv', open)
         pwd = pwd_guess.TsvList(self.fname)
-        self.assertEqual(['pass ', 'word'], pwd.as_list())
+        self.assertEqual([('pass ', 1), ('word', 1)], list(pwd.as_list()))
 
     def test_tsv_multiplier(self):
         self.fcontent = 'pass \t2\tR\nword\t1\tR\n'
         self.make_file('test.tsv', open)
         pwd = pwd_guess.TsvList(self.fname)
-        self.assertEqual(['pass ', 'pass ', 'word'], pwd.as_list())
+        self.assertEqual([('pass ', 1), ('pass ', 1), ('word', 1)],
+                         list(pwd.as_list()))
 
     def test_tsv_quote_char(self):
         self.fcontent = 'pass"\t1\tR\nword\t1\tR\n'
         self.make_file('test.tsv', open)
         pwd = pwd_guess.TsvList(self.fname)
-        self.assertEqual(['pass"', 'word'], pwd.as_list())
+        self.assertEqual([('pass"', 1), ('word', 1)], list(pwd.as_list()))
 
     def test_tsv_simulated(self):
         self.fcontent = 'pass"\t1\tR\nword\t2\tR\n'
         self.make_file('test.tsv', open)
         pwd = pwd_guess.TsvSimulatedList(self.fname)
-        self.assertEqual({'pass"' : 1, 'word' : 2}, pwd.as_list())
+        self.assertEqual([('pass"', 1), ('word', 2)], list(pwd.as_list()))
 
     def test_factory(self):
         self.assertEqual(
@@ -615,12 +589,13 @@ class FiltererTest(unittest.TestCase):
 
     def test_filter(self):
         f = pwd_guess.Filterer(pwd_guess.ModelDefaults())
-        self.assertEqual(['pass'], list(f.filter(['asdf£jfj', 'pass'])))
+        self.assertEqual([('pass', 1)],
+                         list(f.filter([('asdf£jfj', 1), ('pass', 1)])))
 
     def test_filter_small(self):
         f = pwd_guess.Filterer(pwd_guess.ModelDefaults(
             min_len = 3, max_len = 3))
-        self.assertEqual(['aaa'], list(f.filter(['aaa'])))
+        self.assertEqual([('aaa', 1)], list(f.filter([('aaa', 1)])))
 
     def test_filter_freqs(self):
         with tempfile.NamedTemporaryFile() as tf:
@@ -629,7 +604,8 @@ class FiltererTest(unittest.TestCase):
                 intermediate_fname = tf.name,
                 rare_character_optimization = True)
             f = pwd_guess.Filterer(config)
-            self.assertEqual(['pass'], list(f.filter(['asdf£jfj', 'pass'])))
+            self.assertEqual([('pass', 1)],
+                             list(f.filter([('asdf£jfj', 1), ('pass', 1)])))
             self.assertEqual({'p' : 1, 'a' : 1, 's': 2}, dict(f.frequencies))
             f.finish()
             self.assertEqual(
@@ -643,7 +619,8 @@ class FiltererTest(unittest.TestCase):
                 intermediate_fname = tf.name,
                 rare_character_optimization = True)
             f = pwd_guess.Filterer(config)
-            self.assertEqual(['pass'], list(f.filter(['asdf£jfj', 'pass'])))
+            self.assertEqual([('pass', 1)],
+                             list(f.filter([('asdf£jfj', 1), ('pass', 1)])))
             self.assertEqual({'p' : 1, 'a' : 1, 's': 2}, dict(f.frequencies))
             f.finish()
             self.assertEqual(
@@ -652,7 +629,8 @@ class FiltererTest(unittest.TestCase):
 
     def test_filter_dict(self):
         f = pwd_guess.Filterer(pwd_guess.ModelDefaults(max_len = 6))
-        self.assertEqual({'pass' : 1}, f.filter({'pass' : 1, 'passssss' : 2}))
+        self.assertEqual([('pass', 1)],
+                         list(f.filter([('pass', 1), ('passssss', 2)])))
 
 class ModelSerializerTest(unittest.TestCase):
     def test_model_serializer(self):
@@ -842,6 +820,7 @@ class PreprocessingStepTest(unittest.TestCase):
         real_config_dict = self.base_config.copy()
         real_config_dict.update(config)
         real_config = pwd_guess.ModelDefaults(real_config_dict)
+        self.real_config = real_config
         self.input_file.write("""aaaa\t2
 abbbb\t4
 abab\t1
@@ -862,26 +841,38 @@ aaab\t3""")
             'simulated_frequency_optimization' : True
         }), 21)
 
-    def test_trie_db(self):
-        self.assertEqual(self.do_preprocessing({
-            'simulated_frequency_optimization' : True,
-            'trie_implementation' : 'DB'
-        }), 15)
-
     def test_trie_reg(self):
         self.assertEqual(self.do_preprocessing({
             'simulated_frequency_optimization' : True,
-            'trie_implementation' : 'node_trie'
+            'trie_implementation' : 'trie'
         }), 15)
         self.assertFalse(os.path.exists(":memory:"))
 
     def test_trie_super(self):
         self.assertEqual(self.do_preprocessing({
             'simulated_frequency_optimization' : True,
-            'trie_implementation' : 'node_trie',
-            'node_serializer_type' : 'super'
+            'trie_implementation' : 'trie',
+            'trie_serializer_type' : 'fuzzy'
         }), 12)
         self.assertFalse(os.path.exists(":memory:"))
+
+    def test_trie_fuzzy_disk(self):
+        self.assertFalse(os.path.exists('trie_storage'))
+        try:
+            self.assertEqual(self.do_preprocessing({
+                'simulated_frequency_optimization' : True,
+                'trie_implementation' : 'disk',
+                'trie_serializer_type' : 'fuzzy',
+                'trie_fname' : 'trie_storage',
+                'trie_intermediate_storage' : 'trie_intermediate'
+            }), 12)
+            self.assertFalse(os.path.exists(":memory:"))
+            pre = pwd_guess.DiskPreprocessor(self.real_config)
+            pre.begin()
+            self.assertEqual(12, pre.stats())
+        finally:
+            shutil.rmtree('trie_intermediate')
+            os.remove('trie_storage')
 
 if __name__ == '__main__':
     unittest.main()

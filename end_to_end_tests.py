@@ -267,12 +267,13 @@ aaab\t30""")
             "char_bag" : "ab\n",
             "training_accuracy_threshold": -1,
             "simulated_frequency_optimization" : True,
-            "trie_implementation" : 'node_trie',
-            "node_serializer_type" : "super",
+            "trie_implementation" : 'trie',
+            "trie_serializer_type" : 'fuzzy',
             "trie_fname" : ":memory:"
         }, self.config_file)
         self.input_file.write("""aaaa\t20
 abbbb\t40
+baaa\t100
 abab\t10
 aaab\t30""")
         self.config_file.flush()
@@ -292,4 +293,5 @@ aaab\t30""")
             map(lambda x: x[0],
                 sorted(pwd_freq, key = lambda x: x[1], reverse = True)))
         print(sort_freq)
-        self.assertEqual(['abbbb', 'aaab', 'aaaa', 'abab'], sort_freq[:4])
+        self.assertEqual(['baaa', 'abbbb', 'aaab', 'aaaa', 'abab'],
+                         sort_freq[:5])
