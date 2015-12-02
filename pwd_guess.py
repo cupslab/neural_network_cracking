@@ -358,7 +358,7 @@ class NodeTrieSerializer(BinaryTrieSerializer):
     serializer_type = 'reg'
     def __init__(self, *args):
         super().__init__(*args)
-        self.fmt = '<Q'
+        self.fmt = '<d'
         self.chunk_size = struct.calcsize(self.fmt)
 
     def write_value(self, ostream, weight):
@@ -373,7 +373,7 @@ class TrieFuzzySerializer(BinaryTrieSerializer):
     def __init__(self, *args):
         super().__init__(*args)
         self.in_fmt = '<H'
-        self.out_fmt = '<1sQ'
+        self.out_fmt = '<1sd'
         self.in_fmt_bytes = struct.calcsize(self.in_fmt)
         self.out_fmt_bytes = struct.calcsize(self.out_fmt)
 
