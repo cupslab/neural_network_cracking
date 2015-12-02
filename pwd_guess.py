@@ -48,8 +48,6 @@ class CharacterTable(object):
     def fromConfig(config):
         return CharacterTable(config.char_bag, config.max_len)
 
-sys.setrecursionlimit(10000)
-
 class ModelSerializer(object):
     def __init__(self, archfile = None, weightfile = None):
         self.archfile = archfile
@@ -58,7 +56,7 @@ class ModelSerializer(object):
 
     def save_model(self, model):
         if self.archfile is None or self.weightfile is None:
-            logging.warning(
+            logging.info(
                 'Cannot save model because file arguments were not provided')
             return
         logging.info('Saving model architecture')
@@ -482,7 +480,7 @@ def main(args):
         sys.exit(1)
     logging.info('Done!')
 
-if __name__=='__main__':
+def make_parser():
     parser = argparse.ArgumentParser(
         description=('Neural Network with passwords. This program uses a '
                      'neural network to guess passwords. This happens in two'
@@ -514,7 +512,10 @@ if __name__=='__main__':
     parser.add_argument('--log-file')
     parser.add_argument('--log-level', default = 'info',
                         choices = ['debug', 'info', 'warning', 'error'])
-    args = vars(parser.parse_args())
+    return parser
+
+if __name__=='__main__':
+    args = vars(make_parser().parse_args())
     main_bundle = lambda: main(args)
     if args['profile'] is not None:
         cProfile.run('main_bundle()', filename = args['profile'])

@@ -37,7 +37,7 @@ class TrainerTest(unittest.TestCase):
         mock_model.train_on_batch = MagicMock(return_value = (0.5, 0.5))
         mock_model.test_on_batch = MagicMock(return_value = (0.5, 0.5))
         t.model = mock_model
-        t.train_model(ModelSerializer())
+        t.train_model(pwd_guess.ModelSerializer())
         self.assertEqual(t.generation, 2)
 
     def test_training_set_small(self):
@@ -306,72 +306,77 @@ a	0.25
 class EndToEndTest(unittest.TestCase):
 
     skewed_dict = ['abab', 'abbbb', 'aaaa', 'aaab']
-
     probs = [0.1, 0.4, 0.2, 0.3]
+
 
     def skewed(self):
         return self.skewed_dict[
-            np.random.choice(len(skewed_dict), 1, p = self.probs)[0]]
+            np.random.choice(len(self.skewed_dict), 1, p = self.probs)[0]]
 
-    distributions = {
-        'constant' : lambda: 'aaa',
-        'skewed' : skewed,
-    }
-
-    def make_dist(self, ofile, line_count, distribution):
+    def make_dist(self, line_count, dist):
+        fun = self.skewed if dist == 'skewed' else lambda: 'aaa'
         for _ in range(line_count):
-            ofile.write('%s\n' % self.distributions[distribution]())
-        ofile.close()
+            self.input_file.write('%s\n' % fun())
+
+    def setUp(self):
+        self.config_file, self.output_file, self.input_file = (
+            tempfile.NamedTemporaryFile(mode = 'w'),
+            tempfile.NamedTemporaryFile(mode = 'r'),
+            tempfile.NamedTemporaryFile(mode = 'w'))
 
     def test_skewed(self):
-        with tempfile.NamedTemporaryFile() as output_file, tempfile.NamedTemporaryFile() as input_file, tempfile.NamedTemporaryFile() as config_file:
-            json.dump({
-                "chunk_print_interval" : 100,
-                "training_chunk" : 64,
-                "layers" : 3,
-                "hidden_size" : 256,
-                "generations" : 20,
-                "min_len" : 3,
-                "max_len" : 5,
-                "char_bag" : "ab\n"
-            }, config_file)
-            config_file.flush()
-            make_dist(input_file, 10000, 'skewed')
-            input_file.flush()
-            pwd_guess.main({
-                'pwd_file' : input_file.name,
-                'config' : config_file.name,
-                'enumerate_ofile' : output_file.name
-            })
-            pwd_freq = [(row[0], float(row[1])) for row in
-                        csv.reader(output_file, delimiter = '\t')]
-            sort_freq = sorted(pwd_freq, key = lambda x: x[1], reverse = True)
-            self.assertEqual(['abbbb', 'aaab', 'aaaa', 'abab'], sort_freq[:4])
+        json.dump({
+            "chunk_print_interval" : 100,
+            "training_chunk" : 64,
+            "layers" : 3,
+            "hidden_size" : 256,
+            "generations" : 20,
+            "min_len" : 3,
+            "max_len" : 5,
+            "char_bag" : "ab\n"
+        }, self.config_file)
+        self.make_dist(10000, 'skewed')
+        self.config_file.flush()
+        self.input_file.flush()
+        pwd_guess.main(vars(pwd_guess.make_parser().parse_args([
+            '--pwd-file', self.input_file.name,
+            '--config', self.config_file.name,
+            '--enumerate-ofile', self.output_file.name,
+            '--log-level', 'error'
+        ])))
+        pwd_freq = [(row[0], float(row[1])) for row in
+                    csv.reader(self.output_file, delimiter = '\t')]
+        sort_freq = list(
+            map(lambda x: x[0],
+                sorted(pwd_freq, key = lambda x: x[1], reverse = True)))
+        self.assertEqual(['abbbb', 'aaab', 'aaaa', 'abab'], sort_freq[:4])
 
     def test_constant(self):
-        with tempfile.NamedTemporaryFile() as output_file, tempfile.NamedTemporaryFile() as input_file, tempfile.NamedTemporaryFile() as config_file:
-            json.dump({
-                "chunk_print_interval" : 100,
-                "training_chunk" : 64,
-                "layers" : 3,
-                "hidden_size" : 256,
-                "generations" : 20,
-                "min_len" : 3,
-                "max_len" : 5,
-                "char_bag" : "ab\n"
-            }, config_file)
-            config_file.flush()
-            make_dist(input_file, 10000, 'constant')
-            input_file.flush()
-            pwd_guess.main({
-                'pwd_file' : input_file.name,
-                'config' : config_file.name,
-                'enumerate_ofile' : output_file.name
-            })
-            pwd_freq = [(row[0], float(row[1])) for row in
-                        csv.reader(output_file, delimiter = '\t')]
-            sort_freq = sorted(pwd_freq, key = lambda x: x[1], reverse = True)
-            self.assertEqual(['aaa'], sort_freq[:])
+        json.dump({
+            "chunk_print_interval" : 100,
+            "training_chunk" : 64,
+            "layers" : 3,
+            "hidden_size" : 256,
+            "generations" : 20,
+            "min_len" : 3,
+            "max_len" : 5,
+            "char_bag" : "ab\n"
+        }, self.config_file)
+        self.make_dist(10000, 'constant')
+        self.config_file.flush()
+        self.input_file.flush()
+        pwd_guess.main(vars(pwd_guess.make_parser().parse_args([
+            '--pwd-file', self.input_file.name,
+            '--config', self.config_file.name,
+            '--enumerate-ofile', self.output_file.name,
+            '--log-level', 'error'
+        ])))
+        pwd_freq = [(row[0], float(row[1])) for row in
+                    csv.reader(self.output_file, delimiter = '\t')]
+        sort_freq = list(
+            map(lambda x: x[0],
+                sorted(pwd_freq, key = lambda x: x[1], reverse = True)))
+        self.assertEqual(['aaa'], sort_freq[:1])
 
 if __name__ == '__main__':
     unittest.main()
