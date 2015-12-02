@@ -1235,7 +1235,7 @@ class Guesser(object):
         node_strs, node_probs = zip(*node_list)
         if self.calc_prob_fn is None:
             self.calc_prob_fn = self.calculate_abs_probs_many_compile()
-        pred_out = self.calc_prob_fn(node_probs, predictions)
+        pred_out = self.calc_prob_fn(list(node_probs), predictions)
         for i, node_str in enumerate(node_strs):
             for n in self.next_nodes(node_str, pred_out[i]):
                 yield n
