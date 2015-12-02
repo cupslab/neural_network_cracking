@@ -301,6 +301,19 @@ class OptimizingTableTest(unittest.TestCase):
             [[True, False, False, False, False],
              [True, False, False, False, False]])), '::')
 
+    def test_table_context(self):
+        ctable = pwd_guess.CharacterTable('abc\n', 2)
+        np.testing.assert_array_equal(
+            ctable.encode_many(['', 'a', 'ab', 'abc']),
+            [[[True, False, False, False],
+              [True, False, False, False]],
+             [[False, True, False, False],
+              [True, False, False, False]],
+             [[False, True, False, False],
+              [False, False, True, False]],
+             [[False, False, True, False],
+              [False, False, False, True]]])
+
 class HybridPreprocessorTest(unittest.TestCase):
     def test_begin(self):
         pre = pwd_guess.HybridDiskPreprocessor(pwd_guess.ModelDefaults(
@@ -663,6 +676,15 @@ class ModelDefaultsTest(unittest.TestCase):
             m = pwd_guess.ModelDefaults(
                 intermediate_fname = intermediate_file.name)
             self.assertEqual(m.get_intermediate_info('test'), 8)
+
+    def test_init(self):
+        self.assertTrue(pwd_guess.ModelDefaults().context_length, 40)
+        self.assertTrue(
+            pwd_guess.ModelDefaults(context_length = 20).context_length, 20)
+        self.assertTrue(
+            pwd_guess.ModelDefaults(max_len = 20).context_length, 20)
+        self.assertTrue(pwd_guess.ModelDefaults(
+            max_len = 20, context_length = 15).context_length, 20)
 
 class PwdListTest(unittest.TestCase):
     def setUp(self):

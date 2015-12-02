@@ -404,6 +404,8 @@ class CharacterTable(object):
 
     def pad_to_len(self, astring, maxlen = None):
         maxlen = maxlen if maxlen else self.maxlen
+        if len(astring) > maxlen:
+            return astring[len(astring) - maxlen:]
         return astring + (PASSWORD_END * (maxlen - len(astring)))
 
     def encode_many(self, string_list, maxlen = None):
@@ -441,11 +443,11 @@ class CharacterTable(object):
         if (config.uppercase_character_optimization or
             config.rare_character_optimization):
             return OptimizingCharacterTable(
-                config.char_bag, config.max_len,
+                config.char_bag, config.context_length,
                 config.get_intermediate_info('rare_character_bag'),
                 config.uppercase_character_optimization)
         else:
-            return CharacterTable(config.char_bag, config.max_len)
+            return CharacterTable(config.char_bag, config.context_length)
 
 class OptimizingCharacterTable(CharacterTable):
     def __init__(self, chars, maxlen, rare_characters, uppercase):
@@ -677,11 +679,14 @@ class ModelDefaults(object):
     fuzzy_training_smoothing = False
     scheduled_sampling = False
     final_schedule_ratio  = .05
+    context_length = None
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
         for k in kwargs:
             self.adict[k] = kwargs[k]
+        if self.context_length is None:
+            self.context_length = self.max_len
 
     def __getattribute__(self, name):
         if name != 'adict' and name in self.adict:
@@ -727,6 +732,7 @@ class ModelDefaults(object):
                 'Without rare_character_optimization_guessing setting,'
                 ' output guesses may ignore case or special characters')
         assert self.guess_serialization_method in serializer_type_list
+        assert self.context_length <= self.max_len
 
     def as_dict(self):
         answer = dict(vars(ModelDefaults).copy())
@@ -1024,7 +1030,7 @@ class Trainer(object):
         model = Sequential()
         model.add(self.config.model_type_exec()(
             self.config.hidden_size,
-            input_shape = (self.config.max_len, len(self.ctable.chars)),
+            input_shape = (self.config.context_length, len(self.ctable.chars)),
             truncate_gradient = self.config.model_truncate_gradient))
         model.add(RepeatVector(1))
         for _ in range(self.config.layers):
@@ -1462,7 +1468,7 @@ class ProbabilityCalculator(object):
     def probability_stream(self, pwd_list):
         self.preproc.begin(pwd_list)
         x_strings, y_strings, _ = self.preproc.next_chunk()
-        logging.info('Initial probabilities: %s, %s', x_strings, y_strings)
+        logging.debug('Initial probabilities: %s, %s', x_strings, y_strings)
         while len(x_strings) != 0:
             y_indices = list(map(self.ctable.get_char_index, y_strings))
             probs = self.guesser.batch_prob(x_strings)
