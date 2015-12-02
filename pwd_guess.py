@@ -1170,11 +1170,13 @@ def guess(args, config):
         Guesser.do_guessing(
             serializer.load_model(), config, args['enumerate_ofile'])
 
-def read_config_args(config_arg_fname):
-    config_arg_file = open(config_arg_fname, 'r')
+def read_config_args(args):
+    config_arg_file = open(args['config_args'], 'r')
     try:
         config_args = json.load(config_arg_file)
-        return (config_args['config'], config_args['args'])
+        arg_ret = args.copy()
+        arg_ret.update(config_args['args'])
+        return (config_args['config'], arg_ret)
     finally:
         config_arg_file.close()
 
@@ -1183,7 +1185,7 @@ def main(args):
         sys.stdout.write(get_version_string() + '\n')
         sys.exit(0)
     if args['config_args']:
-        args, config = read_config_args(args['config_args'])
+        args, config = read_config_args(args)
     else:
         config = ModelDefaults.fromFile(args['config'])
     init_logging(args)
