@@ -187,7 +187,7 @@ class TrieSuperSerializer(TrieSerializer):
         return (pwd_bytes.decode(self.encoding)
                 .strip(PASSWORD_FRAGMENT_DELIMITER), record)
 
-    def serialize(self, trie):
+    def do_serialize(self, trie):
         with gzip.open(self.config.trie_fname, 'wb') as afile:
             for item in trie.sampled_training():
                 pwd, records = item

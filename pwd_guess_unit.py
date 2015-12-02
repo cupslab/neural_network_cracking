@@ -873,6 +873,7 @@ aaab\t3""")
             'simulated_frequency_optimization' : True,
             'trie_implementation' : 'node_trie'
         }), 15)
+        self.assertFalse(os.path.exists(":memory:"))
 
     def test_trie_super(self):
         self.assertEqual(self.do_preprocessing({
@@ -880,6 +881,7 @@ aaab\t3""")
             'trie_implementation' : 'node_trie',
             'node_serializer_type' : 'super'
         }), 12)
+        self.assertFalse(os.path.exists(":memory:"))
 
 if __name__ == '__main__':
     unittest.main()
