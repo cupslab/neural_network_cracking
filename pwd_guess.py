@@ -702,8 +702,10 @@ class TriePreprocessor(BasePreprocessor):
         return (x, y, w)
 
 class DiskPreprocessor(TriePreprocessor):
-    def begin(self, _ = None):
-        self.serializer = TrieSerializer.fromConfig(self.config)
+    def begin(self, pwd_file = None):
+        trie_file = pwd_file if pwd_file is not None else self.config.trie_fname
+        self.serializer = TrieSerializer.getFactory(self.config)(
+            trie_file, config.max_len, config.trie_serializer_encoding)
         self.reset()
         self._total_chunks = math.ceil(
             self.serializer.num_records() / self.config.training_chunk)
@@ -1166,7 +1168,7 @@ def preprocessing(args, config):
     if args['pwd_format'] == 'trie':
         logging.info('Disk preprocessor')
         disk_trie = DiskPreprocessor(config)
-        disk_trie.begin()
+        disk_trie.begin(args['pwd_file'])
         return disk_trie
     preprocessor = BasePreprocessor.fromConfig(config)
     preprocessor.begin(
