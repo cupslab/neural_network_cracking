@@ -31,6 +31,7 @@ import bisect
 import unittest
 import math
 from unittest.mock import Mock
+import re
 
 PASSWORD_END = '\n'
 
@@ -1153,22 +1154,35 @@ class GuessSerializer(object):
 
     def serialize(self, password, prob):
         self.total_guessed += 1
-        self.ostream.write('%s\t%s\n' % (
-            password.strip(PASSWORD_END), prob))
+        self.ostream.write('%s\t%s\n' % (password.strip(PASSWORD_END), prob))
 
     def get_total_guessed(self):
         return self.total_guessed
+
+    def collect_answer(self, real_output, istream):
+        for line in istream:
+            real_output.write(line)
+
+    def finish_collecting(self, real_output):
+        logging.info('Finishing aggregating child output')
+        real_output.flush()
 
     def finish(self):
         self.ostream.flush()
         self.ostream.close()
 
 class GuessNumberGenerator(GuessSerializer):
+    TOTAL_COUNT_RE = re.compile('Total count: (\d*)\n')
+    TOTAL_COUNT_FORMAT = 'Total count: %s\n'
+
     def __init__(self, ostream, pwd_list):
         super().__init__(ostream)
         self.pwds, self.probs = zip(*sorted(pwd_list, key = lambda x: x[1]))
         self.guess_numbers = [0] * len(self.pwds)
         self.total_guessed = 0
+        self.collected_freqs = collections.defaultdict(int)
+        self.collected_probs = {}
+        self.collected_total_count = 0
 
     def serialize(self, _, prob):
         self.total_guessed += 1
@@ -1176,18 +1190,47 @@ class GuessNumberGenerator(GuessSerializer):
         if idx >= 0:
             self.guess_numbers[idx] += 1
 
-    def finish(self):
-        self.guess_numbers[-1] += 1
-        for i in range(len(self.guess_numbers) - 1, 0, -1):
-            self.guess_numbers[i - 1] += self.guess_numbers[i]
-        logging.info('Guessed %s passwords', self.total_guessed)
-        self.ostream.write('Total count: %s\n' % self.total_guessed)
-        writer = csv.writer(self.ostream, delimiter = '\t', quotechar = None)
+    def collect_answer(self, real_output, istream):
+        lineOne = istream.readline()
+        total_count = int(self.TOTAL_COUNT_RE.match(lineOne).groups(0)[0])
+        self.collected_total_count += total_count
+        for row in csv.reader(istream, delimiter = '\t', quotechar = None):
+            pwd, prob, freq = row
+            freq_num = int(freq)
+            if pwd in self.collected_probs:
+                assert self.collected_probs[pwd] == prob
+            else:
+                self.collected_probs[pwd] = prob
+            if freq_num >= total_count:
+                continue
+            self.collected_freqs[pwd] += freq_num
+
+    def write_to_file(self, ostream, total_count, get_freq):
+        ostream.write(self.TOTAL_COUNT_FORMAT % total_count)
+        writer = csv.writer(ostream, delimiter = '\t', quotechar = None)
         for i in range(len(self.pwds), 0, -1):
             idx = i - 1
             writer.writerow([
-                self.pwds[idx], self.probs[idx], self.guess_numbers[idx]])
-        self.ostream.flush()
+                self.pwds[idx], self.probs[idx], get_freq(idx)])
+        ostream.flush()
+
+    def finish_collecting(self, real_output):
+        def get_pwd_freq(idx):
+            pwd = self.pwds[idx]
+            if pwd in self.collected_freqs:
+                return self.collected_freqs[pwd]
+            else:
+                return self.collected_total_count
+        logging.info('Finishing collecting answers')
+        self.write_to_file(
+            real_output, self.collected_total_count, get_pwd_freq)
+
+    def finish(self):
+        for i in range(len(self.guess_numbers) - 1, 0, -1):
+            self.guess_numbers[i - 1] += self.guess_numbers[i]
+        logging.info('Guessed %s passwords', self.total_guessed)
+        self.write_to_file(self.ostream, self.total_guessed,
+                           lambda idx: self.guess_numbers[idx])
         self.ostream.close()
 
 class ProbabilityCalculator(object):
@@ -1295,6 +1338,12 @@ class PasswordTemplateSerializer(object):
         else:
             self.recursive_helper(
                 cur_template[1:], cur_template[0] + cur_pwd, cur_prob)
+
+    def finish_collecting(self, real_output):
+        self.serializer.finish_collecting(real_output)
+
+    def collect_answer(self, real_output, istream):
+        self.serializer.collect_answer(real_output, istream)
 
     def serialize(self, pwd_template, prob):
         self.recursive_helper(pwd_template, '', prob)
@@ -1481,8 +1530,6 @@ class RandomWalkGuesser(Guesser):
             self.super_node_recur(next_nodes)
 
     def choose_next_node(self, node_list):
-        # answer = random.choice(node_list)
-        # return answer[0], answer[1], 1 / len(node_list)
         total = sum(map(lambda x: x[2], node_list))
         r = random.uniform(0, total)
         upto = 0
@@ -1491,7 +1538,6 @@ class RandomWalkGuesser(Guesser):
                 return pwd, prob, (cond_prob / total)
             upto += cond_prob
         assert False, "Shouldn't go here"
-        return answer[0], answer[1], 1 / len(node_list)
 
     def cost_of_node(self, pwd, prob):
         count_pre_serializer = self.output_serializer.get_total_guessed()
@@ -1643,17 +1689,16 @@ class ParallelGuesser(Guesser):
         for file_name in file_name_list:
             with open(file_name, 'r') as istream:
                 logging.info('Collecting guesses from %s', file_name)
-                for line in istream:
-                    self.real_output.write(line)
+                self.output_serializer.collect_answer(self.real_output, istream)
             if self.config.cleanup_guesser_files:
                 os.remove(file_name)
+        self.output_serializer.finish_collecting(self.real_output)
         if self.config.cleanup_guesser_files:
             try:
                 os.rmdir(self.config.guesser_intermediate_directory)
             except OSError as e:
                 logging.error('Cannot remove %s because it is not empty. ',
                               self.config.guesser_intermediate_directory)
-        self.real_output.flush()
 
     @staticmethod
     def subp_command(argfname, logfile):
@@ -1697,8 +1742,7 @@ class ParallelGuesser(Guesser):
                     ]}, config_fname)
             return (argfname, prefix_pl_conf + pnum, tempfile.mkdtemp(
                 prefix = FNAME_PREFIX_THEANO_COMPILE + pnum,
-                dir = self.config.guesser_intermediate_directory),
-                    ofile)
+                dir = self.config.guesser_intermediate_directory), ofile)
         subarglist = []
         for i, arg_chunk in enumerate(grouper(arglist, pool_size)):
             subarglist.append(prepare(list(arg_chunk), str(i + 1)))

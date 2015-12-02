@@ -925,9 +925,9 @@ aaa	0.0625
             # The GPU also computes at a rounding error higher than the original
             # computation
             self.assertEqual("""Total count: 8
-abb	0.144	2
-aab	0.096	5
-aaa	0.064	8
+abb	0.144	1
+aab	0.096	4
+aaa	0.064	7
 """, gfile.read())
 
     def test_do_guessing(self):
@@ -1010,6 +1010,31 @@ class ParallelGuesserTest(unittest.TestCase):
                           ('baa', .125), ('bab', .125),
                           ('bba', .125), ('bbb', .125)], sort_freq)
         self.assertEqual(8, parallel_guesser.generated)
+
+    def test_forking_calculator(self):
+        with tempfile.NamedTemporaryFile(mode = 'w') as tf:
+            for s in ['aaa', 'bbb', 'aab']:
+                tf.write('%s\n' % (s))
+            tf.flush()
+            self.config.guess_serialization_method = 'calculator'
+            self.config.password_test_fname = tf.name
+            parallel_guesser = pwd_guess.ParallelGuesser(
+                self.serializer, self.config, self.mock_output,
+            )
+            json.dump({
+                'mock_model' : [0.5, 0.25, 0.25]
+            }, self.archfile)
+            self.archfile.flush()
+            parallel_guesser.guess()
+            odata_file = io.StringIO(self.mock_output.getvalue())
+            line = odata_file.readline()
+            out_data = list(csv.reader(odata_file, delimiter = '\t'))
+            pwd_freq = [(row[0], float(row[1]), int(row[2]))
+                        for row in out_data]
+            sort_freq = sorted(pwd_freq, key = lambda x: x[0])
+            self.assertEqual([('aaa', .125, 0), ('aab', .125, 0),
+                              ('bbb', .125, 0)], sort_freq)
+            self.assertEqual(8, parallel_guesser.generated)
 
     def test_parse_cmd(self):
         cmd = pwd_guess.ParallelGuesser.subp_command('argfname', 'logfile')
@@ -1283,7 +1308,7 @@ class GuessNumberGeneratorTest(unittest.TestCase):
         gng.finish()
         with open(self.ostream.name, 'r') as guesses:
             self.assertEqual(
-                'Total count: 6\nword\t0.25\t2\ngmail\t0.04\t4\npass\t0.025\t5\n',
+                'Total count: 6\nword\t0.25\t1\ngmail\t0.04\t3\npass\t0.025\t4\n',
                 guesses.read())
 
     def test_guessing_real(self):
@@ -1298,10 +1323,10 @@ class GuessNumberGeneratorTest(unittest.TestCase):
         with open(self.ostream.name, 'r') as guesses:
             self.assertEqual(
                 """Total count: 235
-forever	0.00013370734607	1
-william	2.12144662517e-05	73
-    	1.26799704013e-05	161
-8daddy	1.00234253381e-05	235
+forever	0.00013370734607	0
+william	2.12144662517e-05	72
+    	1.26799704013e-05	160
+8daddy	1.00234253381e-05	234
 """,
                 guesses.read())
 
@@ -1420,7 +1445,7 @@ class RandomWalkGuesserTest(unittest.TestCase):
             config = pwd_guess.ModelDefaults(
                 parallel_guessing = False, char_bag = 'ab\n', min_len = 3,
                 max_len = 3, password_test_fname = gf.name,
-                random_walk_seed_num = 10,
+                random_walk_seed_num = 1000,
                 relevel_not_matching_passwords = True,
                 guess_serialization_method = 'random_walk')
             self.assertTrue(pwd_guess.Filterer(config).pwd_is_valid('aaa'))
@@ -1438,7 +1463,7 @@ class RandomWalkGuesserTest(unittest.TestCase):
                     pwd, prob, gn = row
                     self.assertTrue(pwd == 'aaa' or pwd == 'bbb')
                     self.assertEqual(prob, '0.008' if pwd == 'aaa' else '0.512')
-                    self.assertAlmostEqual(float(gn), 8 if pwd == 'aaa' else 1, 0)
+                    self.assertAlmostEqual(float(gn), 8 if pwd == 'aaa' else 1, delta = 2)
 
     def test_guess_wide(self):
         with tempfile.NamedTemporaryFile(mode = 'w') as gf:
@@ -1463,12 +1488,11 @@ class RandomWalkGuesserTest(unittest.TestCase):
                 reader = list(csv.reader(
                     output, delimiter = '\t', quotechar = None))
                 self.assertEqual(len(reader), 2)
-                print(reader)
                 for row in reader:
                     pwd, prob, gn = row
                     self.assertTrue(pwd == 'aaaa' or pwd == 'bbbba')
                     self.assertEqual(prob, '0.0004' if pwd == 'aaaa' else '0.02048')
-                    self.assertAlmostEqual(float(gn), 50 if pwd == 'aaaa' else 15, 0)
+                    self.assertAlmostEqual(float(gn), 50 if pwd == 'aaaa' else 15, delta = 2)
 
     @unittest.skip('Not ready')
     def test_guess_simulated(self):
@@ -1507,7 +1531,6 @@ class RandomWalkGuesserTest(unittest.TestCase):
                 reader = list(csv.reader(
                     output, delimiter = '\t', quotechar = None))
                 self.assertEqual(len(reader), 2)
-                print(reader)
                 for row in reader:
                     pwd, prob, gn = row
                     self.assertTrue(pwd == 'aaaa' or pwd == 'bbbba')
