@@ -29,6 +29,8 @@ import os.path
 import mmap
 import bisect
 
+import generator
+
 PASSWORD_END = '\n'
 
 FNAME_PREFIX_PREPROCESSOR = 'disk_cache.'
@@ -1213,34 +1215,18 @@ class Guesser(object):
             self.relevel_prediction_many(answer, astring_list)
         return answer
 
-    def next_nodes(self, astring, prob, cache):
-        prediction = self._conditional_probs(astring, cache)
-        total_preds = np.array(prediction) * prob
-        for i, char in enumerate(self.chars_list):
-            chain_prob = total_preds[i]
-            if chain_prob < self.lower_probability_threshold:
-                continue
-            chain_pass = astring + char
-            if char == PASSWORD_END:
-                self.output_serializer.serialize(chain_pass, chain_prob)
-                self.generated += 1
-            elif len(chain_pass) > self.max_len:
-                continue
-            elif char != PASSWORD_END:
-                yield chain_pass, chain_prob
-
     def super_node_recur(self, node_list):
         prefixes = list(map(lambda x: x[0], node_list))
         if len(prefixes) == 0:
             return
         logging.info('Super node buffer size %s, guess number %s',
                      len(prefixes), self.generated)
-        predictions = self.conditional_probs_many(prefixes)
-        cached_prefixes = dict(zip(prefixes, predictions))
+        predictions = np.array(self.conditional_probs_many(prefixes))
         node_batch = []
-        for cur_node in node_list:
+        for i, cur_node in enumerate(node_list):
             astring, prob = cur_node
-            for next_node in self.next_nodes(astring, prob, cached_prefixes):
+            for next_node in generator.next_nodes(
+                    self, astring, prob, predictions[i][0]):
                 node_batch.append(next_node)
                 if len(node_batch) == self.chunk_size_guesser:
                     self.super_node_recur(node_batch)

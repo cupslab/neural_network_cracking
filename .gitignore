@@ -1,2 +1,5 @@
 *.pyc
 __pycache__
+build
+generator.so
+pwd_guess_ctypes.c
