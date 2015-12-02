@@ -11,7 +11,6 @@ import gzip
 import io
 import json
 import numpy as np
-import contextlib
 import csv
 
 import pwd_guess
@@ -341,7 +340,6 @@ class EndToEndTest(unittest.TestCase):
 
     skewed_dict = ['abab', 'abbbb', 'aaaa', 'aaab']
     probs = [0.1, 0.4, 0.2, 0.3]
-
 
     def skewed(self):
         return self.skewed_dict[

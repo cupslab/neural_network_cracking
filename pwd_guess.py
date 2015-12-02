@@ -141,7 +141,11 @@ class ModelDefaults(object):
         if afile is None:
             return ModelDefaults()
         with open(afile, 'r') as f:
-            return ModelDefaults(json.load(f))
+            try:
+                return ModelDefaults(json.load(f))
+            except ValueError as e:
+                logging.error('Error loading config. %s', str(e))
+                sys.exit(1)
 
     def as_dict(self):
         answer = dict(vars(ModelDefaults).copy())
