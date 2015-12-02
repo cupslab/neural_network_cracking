@@ -878,13 +878,12 @@ class FuzzyTrieTrainer(Trainer):
     def prepare_y_data(self, y_str_list):
         y_vec = np.zeros((len(y_str_list), 1, len(self.ctable.chars)))
         for i, records in enumerate(y_str_list):
-            value = np.zeros((1, len(self.ctable.chars)))
             weight_sum = 0
             for record in records:
                 outchar, weight = record
                 weight_sum += weight
-                value += self.ctable.encode(outchar, maxlen = 1) * weight
-            y_vec[i] = value / weight_sum
+                y_vec[i, 0, self.ctable.get_char_index(outchar)] = weight
+            y_vec[i] /= weight_sum
         return y_vec
 
 class PwdList(object):
