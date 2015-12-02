@@ -465,11 +465,14 @@ class ModelDefaults(object):
                 logging.error(('Error loading config. Config file is not valid'
                                ' JSON format. %s'), str(e))
                 return None
-        if answer.trie_serializer_type == 'fuzzy':
-            assert answer.simulated_frequency_optimization
-            assert answer.trie_implementation is not None
-        assert answer.fork_length < answer.min_len
+        answer.validate()
         return answer
+
+    def validate(self):
+        if self.trie_serializer_type == 'fuzzy':
+            assert self.simulated_frequency_optimization
+            assert self.trie_implementation is not None
+        assert self.fork_length < self.min_len
 
     def as_dict(self):
         answer = dict(vars(ModelDefaults).copy())
@@ -1176,7 +1179,9 @@ def read_config_args(args):
         config_args = json.load(config_arg_file)
         arg_ret = args.copy()
         arg_ret.update(config_args['args'])
-        return (config_args['config'], arg_ret)
+        config = ModelDefaults(config_args['config'])
+        config.validate()
+        return (config, arg_ret)
     finally:
         config_arg_file.close()
 
