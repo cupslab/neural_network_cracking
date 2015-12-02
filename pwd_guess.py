@@ -1116,6 +1116,8 @@ class ConcatenatingList(object):
         for key in self.frequencies.keys():
             sum_all += self.frequencies[key]
         for key in self.config.pwd_list_weights:
+            logging.info('Number of unfiltered passwords in %s = %s',
+                         key, self.frequencies[key])
             answer[key] = (self.config.pwd_list_weights[key] / len(
                 self.config.pwd_list_weights)) * (
                     sum_all / self.frequencies[key])
