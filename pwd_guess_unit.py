@@ -817,8 +817,8 @@ class PwdListTest(unittest.TestCase):
                 ('word9', 1), ('ppppp', 1)])
             concat_list.finish()
             self.assertEqual(list(fact(fnames).as_list()), [
-                ('pass ', 1.25), ('word', 1.25), ('pass', 0.16666666666666669),
-                ('word9', 0.16666666666666669), ('ppppp', 0.16666666666666669)])
+                ('pass ', 1), ('word', 1), ('pass', .2),
+                ('word9', .2), ('ppppp', .2)])
 
 class FiltererTest(unittest.TestCase):
     def test_pwd_is_valid(self):
