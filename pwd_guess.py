@@ -490,7 +490,7 @@ class ModelDefaults(object):
     trie_implementation = None
     trie_fname = ':memory:'
     trie_intermediate_storage = ':memory:'
-    intermediate_fname = 'intermediate_fname.sqlite'
+    intermediate_fname = ':memory:'
     trie_serializer_encoding = 'utf8'
     trie_serializer_type = 'reg'
     save_always = True

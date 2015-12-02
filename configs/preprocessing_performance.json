@@ -1,0 +1,33 @@
+{
+    "args" : {
+        "pwd_file" : [
+            "../leaks/Rockyou_onlyvalidutf8.gz"
+        ],
+        "pwd_format" : [
+            "tsv"
+        ],
+        "pre_processing_only" : true,
+        "log_file" : "log.txt",
+        "profile" : "profilebin"
+    },
+    "config" : {
+        "training_chunk" : 500,
+        "min_len" : 4,
+        "max_len" : 30,
+        "chunk_print_interval" : 1000,
+        "layers" : 2,
+        "hidden_size" : 512,
+        "generations" : 20,
+        "training_accuracy_threshold" : -1,
+        "train_test_ratio" : 10,
+        "simulated_frequency_optimization" : true,
+        "trie_implementation" : "disk",
+        "trie_serializer_type" : "fuzzy",
+        "trie_fname" : "trie_binary.gz",
+        "trie_intermediate_storage" : "trie_intermediate_binaries",
+        "intermediate_fname" : "intermediate_data.sqlite",
+        "randomize_training_order" : false,
+        "uppercase_character_optimization" : true,
+        "rare_character_optimization" : true
+    }
+}

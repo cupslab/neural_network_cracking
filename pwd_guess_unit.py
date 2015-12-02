@@ -288,8 +288,7 @@ class OptimizingTableTest(unittest.TestCase):
 class HybridPreprocessorTest(unittest.TestCase):
     def test_begin(self):
         pre = pwd_guess.HybridDiskPreprocessor(pwd_guess.ModelDefaults(
-            min_len = 3,
-            # trie_serializer_type = 'fuzzy',
+            min_len = 3, intermediate_fname = ':memory:',
             trie_implementation = 'disk'))
         pre.begin([('aaa', 1), ('caa', 2), ('aab', 5)])
         pre.reset()
@@ -303,9 +302,8 @@ class HybridPreprocessorTest(unittest.TestCase):
 
     def test_preprocess(self):
         pre = pwd_guess.HybridDiskPreprocessor(pwd_guess.ModelDefaults(
-            min_len = 3,
-            trie_serializer_type = 'fuzzy',
-            trie_implementation = 'disk'))
+            min_len = 3, trie_serializer_type = 'fuzzy',
+            trie_implementation = 'disk', intermediate_fname = ':memory:'))
         self.assertEqual([('aaa', 1), ('aab', 5), ('caa', 2)], list(
             pre.preprocess([('aaa', 1), ('caa', 2), ('aab', 5)])))
 
@@ -965,13 +963,15 @@ aaab\t3""")
     def test_trie_fuzzy_disk_intermediate(self):
         self.assertFalse(os.path.exists('trie_storage'))
         self.assertFalse(os.path.exists('trie_intermediate'))
+        self.assertFalse(os.path.exists('intermediate_data.sqlite'))
         try:
             self.assertEqual(self.do_preprocessing({
                 'simulated_frequency_optimization' : True,
                 'trie_implementation' : 'disk',
                 'trie_serializer_type' : 'fuzzy',
                 'trie_fname' : 'trie_storage',
-                'trie_intermediate_storage' : 'trie_intermediate'
+                'trie_intermediate_storage' : 'trie_intermediate',
+                'intermediate_fname' : 'intermediate_data.sqlite'
             }), 12)
             self.assertFalse(os.path.exists(":memory:"))
             pre = pwd_guess.BasePreprocessor.byFormat('im_trie',
@@ -982,6 +982,7 @@ aaab\t3""")
         finally:
             shutil.rmtree('trie_intermediate')
             os.remove('trie_storage')
+            os.remove('intermediate_data.sqlite')
 
 if __name__ == '__main__':
     logging.basicConfig(level = logging.CRITICAL)
