@@ -862,6 +862,7 @@ class Filterer(object):
         self.total_characters = 0
         self.frequencies = collections.defaultdict(int)
         self.config = config
+        self.longest_pwd = 0
 
     def pwd_is_valid(self, pwd):
         pwd = pwd.strip(PASSWORD_END)
@@ -876,6 +877,7 @@ class Filterer(object):
         else:
             self.filtered_out += 1
         self.total += 1
+        self.longest_pwd = max(self.longest_pwd, len(pwd))
         return answer
 
     def rare_characters(self):
@@ -897,6 +899,8 @@ class Filterer(object):
             self.config.set_intermediate_info(
                 'rare_character_bag', self.rare_characters())
         logging.info('Rare characters: %s', self.rare_characters())
+        logging.info('Longest pwd is : %s characters long', self.longest_pwd)
+        self.config.max_len = self.longest_pwd
 
     def filter(self, alist):
         return filter(lambda x: self.pwd_is_valid(x[0]), alist)
