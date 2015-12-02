@@ -113,9 +113,7 @@ class DiskBackedTrie(BaseTrie):
     def make_serializer(self):
         return TrieSerializer.getFactory(self.config, True)(
             os.path.join(self.config.trie_intermediate_storage,
-                         self.sanitize(self.current_branch_key)),
-            self.config.max_len,
-            self.config.trie_serializer_encoding)
+                         self.sanitize(self.current_branch_key)))
 
     def sanitize(self, prefix):
         assert prefix in self.keys
@@ -164,13 +162,11 @@ class DiskBackedTrie(BaseTrie):
         return answer
 
 class TrieSerializer(object):
-    def __init__(self, fname, max_len, encoding):
+    def __init__(self, fname):
         self.fname = fname
-        self.max_len = max_len
-        self.encoding = encoding
 
-    def open_file(self, mode):
-        return open(self.fname, mode)
+    def open_file(self, mode, fname = None):
+        return open(fname if fname else self.fname, mode)
 
     def serialize(self, trie):
         directory = os.path.dirname(self.fname)
@@ -187,29 +183,28 @@ class TrieSerializer(object):
 
     @staticmethod
     def fromConfig(config):
-        return TrieSerializer.getFactory(config)(
-            config.trie_fname, config.max_len, config.trie_serializer_encoding)
+        return TrieSerializer.getFactory(config)(config.trie_fname)
 
     @staticmethod
     def getFactory(config, intermediate_serializer = False):
         if config.trie_fname == ':memory:' and not intermediate_serializer:
-            return lambda x, y, z: MemoryTrieSerializer(
-                config.trie_serializer_type, x, y, z)
+            return lambda x: MemoryTrieSerializer(
+                x, config.trie_serializer_type)
         elif (config.trie_intermediate_storage == ':memory:'
               and intermediate_serializer):
-            return lambda x, y, z: MemoryTrieSerializer(
-                config.trie_serializer_type, x, y, z)
+            return lambda x: MemoryTrieSerializer(
+                x, config.trie_serializer_type)
         elif config.trie_serializer_type == 'fuzzy':
-            return TrieFuzzySerializer
+            return lambda x: TrieFuzzySerializer(x, config)
         elif config.trie_serializer_type == 'reg':
-            return NodeTrieSerializer
+            return lambda x: NodeTrieSerializer(x, config)
         logging.error('No serializer of type %s', config.trie_serializer_type)
 
 class MemoryTrieSerializer(TrieSerializer):
     memory_cache = {}
 
-    def __init__(self, serializer_type, *args):
-        super().__init__(*args)
+    def __init__(self, fname, serializer_type):
+        super().__init__(fname)
         self.serializer_type = serializer_type
 
     def serialize(self, trie):
@@ -220,18 +215,21 @@ class MemoryTrieSerializer(TrieSerializer):
         return trie.iterate(self.serializer_type)
 
 class BinaryTrieSerializer(TrieSerializer):
-    toc_chunk_size = 1000
     _fmt = '<QQ'
     _fmt_size = struct.calcsize('<QQ')
+
+    def __init__(self, fname, config):
+        super().__init__(fname)
+        self.max_len = config.max_len
+        self.encoding = config.trie_serializer_encoding
+        self.toc_chunk_size = config.toc_chunk_size
 
     def do_serialize(self, trie):
         records = 0
         table_of_contents = {}
         toc_start = -1
         with self.open_file('wb') as afile:
-            # Write 0 to save space when we jump back
             afile.write(struct.pack(self._fmt, 0, 0))
-            # Write all the records
             for item in trie.iterate(self.serializer_type()):
                 pwd, weight = item
                 self.write_record(afile, pwd, weight)
@@ -249,13 +247,44 @@ class BinaryTrieSerializer(TrieSerializer):
         with self.open_file('rb') as afile:
             num_records, toc_start = struct.unpack(
                 self._fmt, afile.read(self._fmt_size))
-            cur_read = 0
-            while True:
+            for _ in range(num_records):
                 answer = self.read_record(afile)
-                cur_read += 1
-                if answer is None or cur_read > num_records:
+                if answer is None:
                     break
                 yield answer
+
+    def read_toc(self, afile):
+        num_records, toc_start = struct.unpack(
+            self._fmt, afile.read(self._fmt_size))
+        afile.seek(toc_start)
+        toc = {}
+        while True:
+            chunk = afile.read(self._fmt_size)
+            if len(chunk) == 0:
+                break
+            key, toc_pos = struct.unpack(self._fmt, chunk)
+            toc[key] = toc_pos
+        return toc, toc_start
+
+    def read_from_pos(self, afile, start_pos, end_pos):
+        afile.seek(start_pos)
+        while afile.tell() < end_pos:
+            item = self.read_record(afile)
+            assert item is not None
+            yield item
+
+    def random_access(self):
+        with self.open_file('rb') as afile:
+            toc, toc_start = self.read_toc(afile)
+            toc_locations = list(map(lambda k: toc[k], sorted(toc.keys())))
+            start_pos = [self._fmt_size] + toc_locations
+            end_pos = toc_locations + [toc_start]
+            intervals = list(zip(start_pos, end_pos))
+            random.shuffle(intervals)
+            for interval in intervals:
+                start, end = interval
+                for item in self.read_from_pos(afile, start, end):
+                    yield item
 
     def write_record(self, ostream, pwd, val):
         raise NotImplementedError()
@@ -465,6 +494,7 @@ class ModelDefaults(object):
     trie_serializer_type = 'reg'
     save_always = True
     randomize_training_order = True
+    toc_chunk_size = 1000
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -636,6 +666,7 @@ class TriePreprocessor(BasePreprocessor):
         super().__init__(config)
         self.instances = 0
         self.trie = BaseTrie.fromConfig(config)
+        self.ordered_randomly = False
 
     def preprocess(self, pwd_list):
         return pwd_list
@@ -657,7 +688,7 @@ class TriePreprocessor(BasePreprocessor):
 
     def reset(self):
         self.set_iterator()
-        if self.config.randomize_training_order:
+        if self.config.randomize_training_order and not self.ordered_randomly:
             self.current_generator = list(self.current_generator)
             random.shuffle(self.current_generator)
             self.current_generator = iter(self.current_generator)
@@ -684,11 +715,14 @@ class TriePreprocessor(BasePreprocessor):
 class DiskPreprocessor(TriePreprocessor):
     def begin(self, pwd_file = None):
         self.serializer = TrieSerializer.getFactory(self.config)(
-            pwd_file if pwd_file is not None else self.config.trie_fname,
-            self.config.max_len, self.config.trie_serializer_encoding)
+            pwd_file if pwd_file is not None else self.config.trie_fname)
 
     def set_iterator(self):
-        self.current_generator = self.serializer.deserialize()
+        self.ordered_randomly = self.config.randomize_training_order
+        if self.config.randomize_training_order:
+            self.current_generator = self.serializer.random_access()
+        else:
+            self.current_generator = self.serializer.deserialize()
 
 class IntermediatePreprocessor(TriePreprocessor):
     def begin(self, pwd_file = None):
@@ -947,9 +981,8 @@ class Filterer(object):
         char_freqs = {}
         for key in self.frequencies:
             char_freqs[key] = self.frequencies[key] / self.total_characters
-        if self.config.rare_character_optimization:
-            self.config.set_intermediate_info(
-                'rare_character_bag', self.rare_characters())
+        self.config.set_intermediate_info(
+            'rare_character_bag', self.rare_characters())
         logging.info('Rare characters: %s', self.rare_characters())
         logging.info('Longest pwd is : %s characters long', self.longest_pwd)
         self.config.max_len = self.longest_pwd

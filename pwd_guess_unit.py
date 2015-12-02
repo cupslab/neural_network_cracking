@@ -20,6 +20,7 @@ import string
 import random
 import re
 import logging
+import itertools
 
 import pwd_guess
 
@@ -44,7 +45,26 @@ class NodeTrieSerializerTest(unittest.TestCase):
                                     trie_serializer_type = 'reg'))
         self.assertEqual(type(s), pwd_guess.NodeTrieSerializer)
         self.assertEqual(set([('a', 6), ('aa', 6), ('aaa', 1), ('aab', 5)]),
-                        set(s.deserialize()))
+                         set(s.deserialize()))
+
+    def test_save_load_many(self):
+        s = pwd_guess.TrieSerializer.fromConfig(
+            pwd_guess.ModelDefaults(trie_fname = self.tempfile.name,
+                                    trie_serializer_type = 'reg'))
+        self.assertEqual(type(s), pwd_guess.NodeTrieSerializer)
+        for astring in itertools.permutations('abcdefg', 6):
+            self.trie.increment(''.join(astring))
+        items = list(self.trie.iterate('reg'))
+        s.serialize(self.trie)
+        s = pwd_guess.TrieSerializer.fromConfig(
+            pwd_guess.ModelDefaults(trie_fname = self.tempfile.name,
+                                    trie_serializer_type = 'reg'))
+        self.assertEqual(type(s), pwd_guess.NodeTrieSerializer)
+        inorder = list(s.deserialize())
+        randomorder = list(s.random_access())
+        self.assertEqual(set(items), set(inorder))
+        self.assertEqual(set(items), set(randomorder))
+        self.assertNotEqual(inorder, randomorder)
 
 class MemoryTrieSerializerTest(unittest.TestCase):
     def test_save_load(self):
@@ -86,6 +106,28 @@ class TrieFuzzySerializerTest(unittest.TestCase):
                           ('aa', [('a', 1),
                                   ('b', 5)])],
                          list(s.deserialize()))
+
+    def test_save_load_many(self):
+        s = pwd_guess.TrieSerializer.fromConfig(
+            pwd_guess.ModelDefaults(trie_fname = self.tempfile.name,
+                                    trie_serializer_type = 'fuzzy'))
+        self.assertEqual(type(s), pwd_guess.TrieFuzzySerializer)
+        for astring in itertools.permutations('abcdefg', 6):
+            self.trie.increment(''.join(astring))
+        items = list(self.trie.iterate('fuzzy'))
+        s.serialize(self.trie)
+        s = pwd_guess.TrieSerializer.fromConfig(
+            pwd_guess.ModelDefaults(trie_fname = self.tempfile.name,
+                                    trie_serializer_type = 'fuzzy'))
+        self.assertEqual(type(s), pwd_guess.TrieFuzzySerializer)
+        hashable = lambda x: (x[0], tuple(x[1]))
+        inorder = list(s.deserialize())
+        randomorder = list(s.random_access())
+        self.assertEqual(set(map(hashable, items)), set(map(hashable, inorder)))
+        self.assertEqual(set(map(hashable, items)),
+                         set(map(hashable, randomorder)))
+        self.assertNotEqual(list(map(hashable, inorder)),
+                            list(map(hashable, randomorder)))
 
 class NodeTrieTest(unittest.TestCase):
     def setUp(self):
