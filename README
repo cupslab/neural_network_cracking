@@ -58,3 +58,76 @@ Use:
 python pwd_guess.py --version
 
 to find the version.
+
+
+Config files
+------------
+
+Configuration information for guessing and training. Can be read from a file
+in json format.
+
+Attributes:
+char_bag - alphabet of characters over which to guess.
+
+model_type - type of model. Read keras documentation for more types.
+
+hidden_size - size of each layer. More means better accuracy.
+
+layers - number of hidden layers. More means better accuracy.
+
+max_len - maximum length of any password in training data. This can be
+  larger than all passwords in the data and the network may output guesses
+  that are this many characters long.
+
+min_len - minimum length of any password that will be guessed.
+
+training_chunk - Smaller training chunk means less memory consumed. This is
+  using memory on the GPU which is small.
+
+generations - More generations means it takes longer but is more accurate.
+  Default is 20.
+
+chunk_print_interval - Interval over which to print info to the log.
+
+lower_probability_threshold - This controls how many passwords to output
+  during generation. Lower means more passwords.
+
+relevel_not_matching_passwords - If true, then passwords that do not match
+  the filter policy will have their probability equal to zero. Recommended
+  true.
+
+training_accuracy_threshold - If the accuracy is not improving by this
+  amount, then quit. Set to -1 to never quit early.
+
+rare_character_optimization - Default false. If you specify a list of
+  characters to treat as rare, then it will model those characters with a
+  rare character. This will increase performance at the expense of accuracy.
+
+rare_character_lowest_threshold - Default 20. The characters with the lowest
+  frequency in the training data will be modeled as special characters. This
+  number indicates how many to drop.
+
+uppercase_character_optimization - Default false. If true, uppercase
+  characters will be treated the same as lower case characters. Increases
+  performance at the expense of accuracy.
+
+guess_serialization_method - Default is 'human'. TODO: add a compressed
+  method.
+
+simulated_frequency_optimization - Default false. Only for TSV files. If set
+  to true, then multiple instances of the same password are simulated. This
+  improves performance. True is recommended.
+
+trie_implementation - Trie implementation. 'trie' for custom
+  implementation. None for no trie optimization.
+
+trie_fname - File name for storing trie.
+
+trie_intermediate_storage - File for storing intermediate trie.
+
+save_always - Boolean. Default true. If false, then only the networks which
+  perform best on verification data will be saved to disk.
+
+trie_serializer_encoding - default is 'utf8'.
+
+trie_serializer_type - 'reg' or 'fuzzy'.

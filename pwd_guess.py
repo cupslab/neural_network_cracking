@@ -267,11 +267,10 @@ class TrieFuzzySerializer(TrieSerializer):
         pwd_bytes, num_rec = struct.unpack_from(self.in_fmt, input_rec)
         record = []
         for _ in range(num_rec):
-            output_rec = istream.read(self.out_fmt_bytes)
-            out_char, out_weight = struct.unpack_from(self.out_fmt, output_rec)
+            out_char, out_weight = struct.unpack_from(
+                self.out_fmt, istream.read(self.out_fmt_bytes))
             record.append(
-                (out_char.decode(self.encoding),
-                 out_weight))
+                (out_char.decode(self.encoding), out_weight))
         return (pwd_bytes.decode(self.encoding)
                 .strip(PASSWORD_FRAGMENT_DELIMITER), record)
 
@@ -390,82 +389,12 @@ class ModelSerializer(object):
         return model
 
 class ModelDefaults(object):
-    """
-    Configuration information for guessing and training. Can be read from a file
-    in json format.
-
-    Attributes:
-    char_bag - alphabet of characters over which to guess.
-
-    model_type - type of model. Read keras documentation for more types.
-
-    hidden_size - size of each layer. More means better accuracy.
-
-    layers - number of hidden layers. More means better accuracy.
-
-    max_len - maximum length of any password in training data. This can be
-      larger than all passwords in the data and the network may output guesses
-      that are this many characters long.
-
-    min_len - minimum length of any password that will be guessed.
-
-    training_chunk - Smaller training chunk means less memory consumed. This is
-      using memory on the GPU which is small.
-
-    generations - More generations means it takes longer but is more accurate.
-      Default is 20.
-
-    chunk_print_interval - Interval over which to print info to the log.
-
-    lower_probability_threshold - This controls how many passwords to output
-      during generation. Lower means more passwords.
-
-    relevel_not_matching_passwords - If true, then passwords that do not match
-      the filter policy will have their probability equal to zero. Recommended
-      true.
-
-    training_accuracy_threshold - If the accuracy is not improving by this
-      amount, then quit. Set to -1 to never quit early.
-
-    rare_character_optimization - Default false. If you specify a list of
-      characters to treat as rare, then it will model those characters with a
-      rare character. This will increase performance at the expense of accuracy.
-
-    rare_character_lowest_threshold - Default 20. The characters with the lowest
-      frequency in the training data will be modeled as special characters. This
-      number indicates how many to drop.
-
-    uppercase_character_optimization - Default false. If true, uppercase
-      characters will be treated the same as lower case characters. Increases
-      performance at the expense of accuracy.
-
-    guess_serialization_method - Default is 'human'. TODO: add a compressed
-      method.
-
-    simulated_frequency_optimization - Default false. Only for TSV files. If set
-      to true, then multiple instances of the same password are simulated. This
-      improves performance. True is recommended.
-
-    trie_implementation - Trie implementation. 'trie' for custom
-      implementation. None for no trie optimization.
-
-    trie_fname - File name for storing trie's.
-
-    trie_intermediate_storage - File for storing intermediate tries.
-
-    save_always - Boolean. Default true. If false, then only the networks which
-      perform best on verification data will be saved to disk.
-
-    trie_serializer_encoding - default is 'utf8'.
-
-    trie_serializer_type - 'reg' or 'fuzzy'.
-    """
     char_bag = (string.ascii_lowercase +
                 string.ascii_uppercase +
                 string.digits +
                 '~!@#$%^&*(),.<>/?\'"{}[]\|-_=+;: `' +
                 PASSWORD_END)
-    model_type = "JZS1"
+    model_type = 'JZS1'
     hidden_size = 128
     layers = 1
     max_len = 40
@@ -548,8 +477,13 @@ class ModelDefaults(object):
             info.commit()
 
     def get_intermediate_info(self, key):
-        with SqliteDict(self.intermediate_fname) as info:
-            return info[key]
+        try:
+            with SqliteDict(self.intermediate_fname) as info:
+                return info[key]
+        except KeyError as e:
+            logging.error('Cannot find intermediate data %s. Looking in %s',
+                          str(e), self.intermediate_fname)
+            raise
 
 class BasePreprocessor(object):
     def __init__(self, config = ModelDefaults()):
@@ -587,8 +521,8 @@ class BasePreprocessor(object):
             return HybridDiskPreprocessor(config)
         elif config.trie_implementation is None:
             return Preprocessor(config)
-        logging.info('Cannot find trie_implementation %s',
-                     config.trie_implementation)
+        logging.error('Cannot find trie_implementation %s',
+                      config.trie_implementation)
 
 class Preprocessor(BasePreprocessor):
     def __init__(self, config = ModelDefaults()):
@@ -1209,9 +1143,6 @@ def guess(args, config):
             serializer.load_model(), config, args['enumerate_ofile'])
 
 def main(args):
-    if args['help_config']:
-        sys.stdout.write(ModelDefaults.__doc__ + '\n')
-        sys.exit(0)
     if args['version']:
         sys.stdout.write(get_version_string() + '\n')
         sys.exit(0)
@@ -1256,8 +1187,6 @@ def make_parser():
     parser.add_argument('--config', help = 'Config file in json. ')
     parser.add_argument('--profile',
                         help = 'Profile execution and save to the given file. ')
-    parser.add_argument('--help-config', action = 'store_true',
-                        help = 'Print help for config files and exit')
     parser.add_argument('--log-file')
     parser.add_argument('--log-level', default = 'info',
                         choices = ['debug', 'info', 'warning', 'error'])
