@@ -536,7 +536,8 @@ class ScheduledSamplingCharacterTable(object):
         cond_probs = self.probability_calculator.batch_prob(strs)
         choices = self.chars
         for i in range(len(cond_probs)):
-            yield np.random.choice(choices, p = cond_probs[i][0])
+            cp = cond_probs[i][0]
+            yield np.random.choice(choices, p=cp / np.sum(cp))
 
     def encode_many(self, xstrs):
         assert self.probability_calculator is not None
