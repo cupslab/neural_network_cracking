@@ -170,7 +170,7 @@ class TrieSerializer(object):
         self.encoding = encoding
 
     def open_file(self, mode):
-        return gzip.open(self.fname, mode)
+        return open(self.fname, mode)
 
     def serialize(self, trie):
         directory = os.path.dirname(self.fname)
@@ -219,41 +219,84 @@ class MemoryTrieSerializer(TrieSerializer):
         trie = self.memory_cache[self.fname]
         return trie.iterate(self.serializer_type)
 
-class NodeTrieSerializer(TrieSerializer):
+class BinaryTrieSerializer(TrieSerializer):
+    toc_chunk_size = 1000
+    _fmt = '<QQ'
+    _fmt_size = struct.calcsize('<QQ')
+
+    def do_serialize(self, trie):
+        records = 0
+        table_of_contents = {}
+        toc_start = -1
+        with self.open_file('wb') as afile:
+            # Write 0 to save space when we jump back
+            afile.write(struct.pack(self._fmt, 0, 0))
+            # Write all the records
+            for item in trie.iterate(self.serializer_type()):
+                pwd, weight = item
+                self.write_record(afile, pwd, weight)
+                records += 1
+                if records % self.toc_chunk_size == 0:
+                    table_of_contents[records] = afile.tell()
+            toc_start = afile.tell()
+            for key in sorted(table_of_contents.keys()):
+                afile.write(struct.pack(self._fmt, key, table_of_contents[key]))
+        assert toc_start > 0
+        with self.open_file('r+b') as afile:
+            afile.write(struct.pack(self._fmt, records, toc_start))
+
+    def deserialize(self):
+        with self.open_file('rb') as afile:
+            num_records, toc_start = struct.unpack(
+                self._fmt, afile.read(self._fmt_size))
+            cur_read = 0
+            while True:
+                answer = self.read_record(afile)
+                cur_read += 1
+                if answer is None or cur_read > num_records:
+                    break
+                yield answer
+
+    def write_record(self, ostream, pwd, val):
+        raise NotImplementedError()
+
+    def read_record(self, afile):
+        raise NotImplementedError()
+
+    def serializer_type(self):
+        raise NotImplementedError()
+
+class NodeTrieSerializer(BinaryTrieSerializer):
     def __init__(self, *args):
         super().__init__(*args)
         self.fmt = '<' + str(self.max_len) + 'sQ'
         self.chunk_size = struct.calcsize(self.fmt)
 
-    def do_serialize(self, trie):
-        with self.open_file('wb') as afile:
-            for item in trie.iterate('reg'):
-                pwd, weight = item
-                afile.write(struct.pack(
-                    self.fmt, pwd.encode(self.encoding), weight))
+    def write_record(self, ostream, pwd, weight):
+        ostream.write(struct.pack(self.fmt, pwd.encode(self.encoding), weight))
 
-    def load_one_record(self, somebytes):
+    def read_record(self, afile):
+        somebytes = afile.read(self.chunk_size)
+        if len(somebytes) == 0:
+            return None
         pwd, weight =  struct.unpack_from(self.fmt, somebytes)
         return (pwd.decode(self.encoding)
                 .strip(PASSWORD_FRAGMENT_DELIMITER),
                 weight)
 
-    def deserialize(self):
-        with self.open_file('rb') as afile:
-            while True:
-                chunk = afile.read(self.chunk_size)
-                if chunk:
-                    yield self.load_one_record(chunk)
-                else:
-                    break
+    def serializer_type(self):
+        return 'reg'
 
-class TrieFuzzySerializer(TrieSerializer):
+class TrieFuzzySerializer(BinaryTrieSerializer):
     def __init__(self, *args):
         super().__init__(*args)
         self.in_fmt = '<' + str(self.max_len) + 'sH'
         self.out_fmt = '<1sQ'
         self.in_fmt_bytes = struct.calcsize(self.in_fmt)
         self.out_fmt_bytes = struct.calcsize(self.out_fmt)
+
+    def serializer_type(self):
+        return 'fuzzy'
 
     def write_record(self, ostream, input_str, output_list):
         ostream.write(struct.pack(
@@ -276,20 +319,6 @@ class TrieFuzzySerializer(TrieSerializer):
                 (out_char.decode(self.encoding), out_weight))
         return (pwd_bytes.decode(self.encoding)
                 .strip(PASSWORD_FRAGMENT_DELIMITER), record)
-
-    def do_serialize(self, trie):
-        with self.open_file('wb') as afile:
-            for item in trie.iterate('fuzzy'):
-                pwd, records = item
-                self.write_record(afile, pwd, records)
-
-    def deserialize(self):
-        with self.open_file('rb') as afile:
-            while True:
-                answer = self.read_record(afile)
-                if answer is None:
-                    break
-                yield answer
 
 class CharacterTable(object):
     """
@@ -874,6 +903,7 @@ class ConcatenatingList(object):
         answer = []
         for atuple in self.file_tuples:
             iterable = self.get_iterable(atuple)
+            logging.info('Reading from %s', atuple)
             answer.append(iterable.as_list())
         return itertools.chain.from_iterable(answer)
 
