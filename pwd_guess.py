@@ -1119,7 +1119,6 @@ class Trainer(object):
             x_all, y_all, w_all = self.next_train_set_as_np()
             chunk += 1
         instances = map(lambda x: x[0], accuracy_accum)
-        logging.info('Trained on %s instances this generation', instances)
         return sum(map(lambda x: x[0] * x[1], accuracy_accum)) / sum(instances)
 
     def train(self, serializer):
@@ -1593,14 +1592,15 @@ class PasswordTemplateSerializer(DelegatingSerializer):
         if cur_template[0] in self.preimage:
             preimages = self.preimage[cur_template[0]]
             for c in preimages:
+                recur_pwd = cur_pwd + c
                 self.recursive_helper(
-                    cur_template[1:], cur_pwd + c,
+                    cur_template[1:], recur_pwd,
                     cur_prob * self.calc(cur_template[0], c,
                                          len(cur_pwd) == 0,
                                          len(cur_template) == 1))
         else:
             self.recursive_helper(
-                cur_template[1:], cur_template[0] + cur_pwd, cur_prob)
+                cur_template[1:], cur_pwd + cur_template[0], cur_prob)
 
     def serialize(self, pwd_template, prob):
         self.recursive_helper(pwd_template, '', prob)
@@ -1694,7 +1694,7 @@ class OneUppercasePolicy(ComplexPasswordPolicy):
 policy_list = {
     'complex' : ComplexPasswordPolicy(),
     'basic' : BasicPolicy(),
-    'basic_long' : PasswordPolicy('.{8}.*'),
+    'basic_long' : PasswordPolicy('.{16,}'),
     'complex_lowercase' : ComplexPasswordPolicyLowercase(),
     'complex_long' : ComplexPasswordPolicy(16),
     'complex_long_lowercase' : ComplexPasswordPolicyLowercase(16),

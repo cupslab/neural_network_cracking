@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# author: William Melicher
 from theano import function, config, shared, sandbox
 import theano.tensor as T
 from keras.models import Sequential, model_from_json
@@ -1626,7 +1627,7 @@ class PasswordTemplateSerializerTest(unittest.TestCase):
         mock_serializer.finish = mock_finish
         with tempfile.NamedTemporaryFile() as tf:
             config = pwd_guess.ModelDefaults(
-                min_len = 2, max_len = 2, char_bag = 'abABc:!@\n',
+                min_len = 2, max_len = 5, char_bag = 'abABc:!@\n',
                 uppercase_character_optimization = True,
                 rare_character_optimization = True,
                 relevel_not_matching_passwords = False,
@@ -1654,6 +1655,7 @@ class PasswordTemplateSerializerTest(unittest.TestCase):
             pts.serialize('aa', .5)
             pts.serialize('b:', .4)
             pts.serialize('cc', .4)
+            pts.serialize('cc:c:', .4)
             self.assertAlmostEqual(
                 pts.find_real_pwd('aa', 'aA'), (2/3) * (1/3))
             self.assertAlmostEqual(
@@ -1670,7 +1672,12 @@ class PasswordTemplateSerializerTest(unittest.TestCase):
             ('b:', .4 * (2/3) * (.3 / .4)),
             ('B:', .4 * (1/3) * (.3 / .4)),
             ('b!', .4 * (2/3) * (.1 / .4)),
-            ('B!', .4 * (1/3) * (.1 / .4))]))
+            ('B!', .4 * (1/3) * (.1 / .4)),
+            ('cc:c:', .4 * (.19 / .4) * (.3 / .4)),
+            ('cc:c!', .4 * (.19 / .4) * (.1 / .4)),
+            ('cc!c:', .4 * (.19 / .4) * (.3 / .4)),
+            ('cc!c!', .4 * (.19 / .4) * (.1 / .4)),
+            ('cc@c:', .4 * (.02 / .4) * (.3 / .4))]))
 
     def test_expand(self):
         with tempfile.NamedTemporaryFile() as tf:
