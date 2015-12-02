@@ -2493,7 +2493,7 @@ def main(args):
         config.validate()
     except AssertionError as e:
         logging.critical('Configuration not valid %s', str(e))
-        sys.exit(1)
+        raise
     logging.info('Configuration: %s', json.dumps(config.as_dict(), indent = 4))
     if theano.config.floatX == 'float64':
         logging.warning(('Using float64 instead of float32 for theano will'
