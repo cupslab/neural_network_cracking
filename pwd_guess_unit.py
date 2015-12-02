@@ -1095,7 +1095,8 @@ class ParallelGuesserTest(unittest.TestCase):
     def test_parse_cmd(self):
         cmd = pwd_guess.ParallelGuesser.subp_command('argfname', 'logfile')
         self.assertEqual(cmd[2:], [
-            '--forked', '--config-args', 'argfname', '--log-file', 'logfile'])
+            '--forked', 'guesser', '--config-args', 'argfname', '--log-file',
+            'logfile'])
         pwd_guess.make_parser().parse_args(cmd[2:])
 
     def test_map_pool(self):
@@ -1619,6 +1620,85 @@ class RandomWalkGuesserTest(unittest.TestCase):
                     self.assertEqual(prob, '0.00016384' if pwd == 'aaaa' else '0.0016777216')
                     self.assertAlmostEqual(float(gn), 397 if pwd == 'aaaa' else 137, delta = 20)
 
+class ParallelRandomWalkGuesserTest(unittest.TestCase):
+    def setUp(self):
+        self.tempf = tempfile.NamedTemporaryFile(delete = False)
+        self.intermediate_dir = tempfile.mkdtemp()
+        self.archfile = tempfile.NamedTemporaryFile(mode = 'w', delete = False)
+        self.weightfile = tempfile.NamedTemporaryFile(
+            mode = 'w', delete = False)
+        self.serializer = Mock()
+        self.serializer.archfile = self.archfile.name
+        self.serializer.weightfile = self.weightfile.name
+
+    def tearDown(self):
+        self.tempf.close()
+        if os.path.exists(self.tempf.name):
+            os.remove(self.tempf.name)
+        shutil.rmtree(self.intermediate_dir)
+        os.remove(self.archfile.name)
+        os.remove(self.weightfile.name)
+
+    def test_arglist(self):
+        with tempfile.NamedTemporaryFile(mode = 'w') as gf:
+            gf.write('aaaaa\nbbbbb\ncccc\ncccc\n')
+            gf.flush()
+            config = pwd_guess.ModelDefaults(
+                parallel_guessing = True, password_test_fname = gf.name,
+                guess_serialization_method = 'random_walk', cpu_limit = 2)
+            builder = pwd_guess.GuesserBuilder(config)
+            builder.add_serializer(self.serializer).add_file(self.tempf.name)
+            guesser = builder.build()
+            self.assertEqual(type(guesser), pwd_guess.ParallelRandomWalker)
+            arg_list = guesser.arg_list()
+            self.assertEqual(len(arg_list), 2)
+            self.assertEqual(set(itertools.chain.from_iterable(arg_list)),
+                             set([('aaaaa', 1), ('bbbbb', 1), ('cccc', 1)]))
+
+    def test_guess_simulated(self):
+        with tempfile.NamedTemporaryFile(mode = 'w') as gf, \
+             tempfile.NamedTemporaryFile() as intermediatef:
+            gf.write('aaaa\nbbbBa\n')
+            gf.flush()
+            pw = pwd_guess.PwdList(gf.name)
+            self.assertEqual(list(pw.as_list()), [('aaaa', 1), ('bbbBa', 1)])
+            config = pwd_guess.ModelDefaults(
+                parallel_guessing = True, char_bag = 'abAB\n', min_len = 3,
+                max_len = 5, password_test_fname = gf.name,
+                uppercase_character_optimization = True,
+                random_walk_seed_num = 10000,
+                rare_character_optimization_guessing = True,
+                intermediate_fname = intermediatef.name,
+                guesser_intermediate_directory = self.intermediate_dir,
+                relevel_not_matching_passwords = True,
+                guess_serialization_method = 'random_walk')
+            config.set_intermediate_info(
+                'rare_character_bag', [])
+            freqs = {
+                'a' : .4, 'b' : .4, 'A' : .1, 'B' : .1,
+            }
+            config.set_intermediate_info('character_frequencies', freqs)
+            config.set_intermediate_info(
+                'beginning_character_frequencies', freqs)
+            config.set_intermediate_info(
+                'end_character_frequencies', freqs)
+            json.dump({
+                'mock_model' : [0.5, 0.1, 0.4]
+            }, self.archfile)
+            self.archfile.flush()
+            builder = pwd_guess.GuesserBuilder(config)
+            builder.add_serializer(self.serializer).add_file(self.tempf.name)
+            guesser = builder.build()
+            guesser.complete_guessing()
+            with open(self.tempf.name, 'r') as output:
+                reader = list(csv.reader(
+                    output, delimiter = '\t', quotechar = None))
+                self.assertEqual(len(reader), 2)
+                for row in reader:
+                    pwd, prob, gn, *_ = row
+                    self.assertTrue(pwd == 'aaaa' or pwd == 'bbbBa')
+                    self.assertEqual(prob, '0.00016384' if pwd == 'aaaa' else '0.0016777216')
+                    self.assertAlmostEqual(float(gn), 397 if pwd == 'aaaa' else 137, delta = 20)
 
 if __name__ == '__main__':
     unittest.main()
