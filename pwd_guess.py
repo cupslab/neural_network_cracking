@@ -677,7 +677,7 @@ def make_parser():
                         help = 'Enumerate guesses output file')
     parser.add_argument('--retrain', action='store_true',
                         help = ('Instead of training a new model, begin '
-                                'training the model in the pwd-file and '
+                                'training the model in the weight-file and '
                                 'arch-file arguments. '))
     parser.add_argument('--config', help = 'Config file in json. ')
     parser.add_argument('--profile',

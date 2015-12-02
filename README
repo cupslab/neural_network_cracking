@@ -2,7 +2,50 @@ Setup
 -----
 
     Requirements:
-    . python3 (version 3.4.2 was used during development)
-    . python packages:
-        theano (http://deeplearning.net/software/theano/install.html)
-        keras (pip3 install keras)
+
+    python - version 3.4.2 was used during development. It should work with 2.7 too.
+
+    python packages:
+
+      theano (http://deeplearning.net/software/theano/install.html)
+
+      keras - at time of writing, the version on pip is not current and will
+      cause model saving to fail. Use the version from github instead
+      (https://github.com/fchollet/keras). Run the IntegrationTest unit test to
+      verify that you have a proper version of keras.
+
+
+Tests
+-----
+
+Run automated tests by:
+
+    python pwd_guess_unit.py
+
+or to run only specific tests:
+
+    python -m unittest pwd_guess_unit.<specific unit test>
+
+
+Help
+----
+
+Use:
+
+python pwd_guess.py --help
+
+for general command line help. Use:
+
+python pwd_guess.py --help-config
+
+for help about variables in configuration files.
+
+
+Version
+-------
+
+Use:
+
+python pwd_guess.py --version
+
+to find the version.
