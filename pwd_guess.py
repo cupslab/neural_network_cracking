@@ -1185,7 +1185,7 @@ def main(args):
         sys.stdout.write(get_version_string() + '\n')
         sys.exit(0)
     if args['config_args']:
-        args, config = read_config_args(args)
+        config, args = read_config_args(args)
     else:
         config = ModelDefaults.fromFile(args['config'])
     init_logging(args)
