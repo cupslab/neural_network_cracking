@@ -23,21 +23,24 @@ class CompressActor(object):
 class Compressor(CompressActor):
     def act(self):
         self.out_floats = []
-        out_struct = {}
+        out_struct = {
+            'groups' : []
+        }
         with h5py.File(self.fname, 'r') as dataset:
             for key in dataset.keys():
                 subgroup = dataset[key]
-                outgroup = {}
+                outgroup = {
+                    'datasets' : []
+                }
                 assert type(subgroup) == h5py.Group
                 for gkey in subgroup.keys():
                     datablock = subgroup[gkey]
                     assert type(datablock) == h5py.Dataset
-                    outgroup[gkey] = self.output_datablock(datablock)
-                assert 'attr' not in outgroup
+                    outgroup['datasets'].append(
+                        [gkey, self.output_datablock(datablock)])
                 outgroup['attr'] = list(map(lambda t: (t[0], int(t[1])),
                                             subgroup.attrs.items()))
-                out_struct[key] = outgroup
-            assert 'attr' not in dataset
+                out_struct['groups'].append([key, outgroup])
             out_struct['attr'] = list(map(lambda t: (t[0], int(t[1])),
                                           dataset.attrs.items()))
         self.output_head(out_struct)
@@ -81,19 +84,16 @@ class Decompressor(CompressActor):
     def output(self, item):
         with h5py.File(self.ofile, 'w') as ofile:
             ctr = 0
-            for key in item:
-                if key == 'attr':
-                    continue
+            for agroup in item['groups']:
+                key, groups = agroup
                 grp = ofile.create_group(key)
-                for attr in item[key]['attr']:
+                for attr in groups['attr']:
                     grp.attrs[attr[0]] = attr[1]
-                for gkey in item[key]:
-                    if gkey == 'attr':
-                        continue
-                    shape = item[key][gkey]
+                for adataset in groups['datasets']:
+                    name, shape = adataset
                     num_elems = self.calc_num_elems(shape)
                     data = np.reshape(self.weights[ctr:num_elems + ctr], shape)
-                    grp.create_dataset(gkey, data=data, dtype=np.float32)
+                    grp.create_dataset(name, data=data, dtype=np.float32)
                     ctr += num_elems
             for attr in item['attr']:
                 ofile.attrs[attr[0]] = attr[1]

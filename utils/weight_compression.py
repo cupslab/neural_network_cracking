@@ -20,7 +20,6 @@ def read_chunk_decompress(chunkbytes):
 def read_input(fname, read_chunk_fn, chunksize):
     with open(fname, 'rb') as afile:
         chunkbytes = afile.read(chunksize)
-        yield read_chunk_fn(chunkbytes)
         while chunkbytes != b'':
             yield read_chunk_fn(chunkbytes)
             chunkbytes = afile.read(chunksize)
@@ -31,9 +30,7 @@ def write_output_compress(next_float):
     return bytes(memoryview(out_bytes))
 
 def write_output_decompress(next_float):
-    out_bytes = numpy.float32(next_float)
-    assert numpy.isfinite(out_bytes)
-    return bytes(memoryview(out_bytes))
+    return struct.pack(model_compression.CompressActor.RECORD_FMT, next_float)
 
 def write_output(input_floats, outfile, write_fn):
     with open(outfile, 'wb') as ofile:
