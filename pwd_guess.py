@@ -2029,7 +2029,8 @@ class RandomWalkGuesser(Guesser):
 
     def guess(self, pwd = '', prob = 1):
         pwds_probs = list(self.calculate_probs_from_file())
-        logging.info('Beginning probabilities: %s', pwds_probs)
+        logging.debug('Beginning probabilities: %s', json.dumps(
+            pwds_probs, indent=4))
         self.random_walk(pwds_probs)
 
 class RandomWalkDelAmico(RandomWalkGuesser):
