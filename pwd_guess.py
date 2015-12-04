@@ -691,6 +691,7 @@ class ModelDefaults(object):
     dense_hidden_size = 128
     secondary_training = False
     secondary_train_sets = None
+    training_main_memory_chunksize = 1000000
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -744,6 +745,7 @@ class ModelDefaults(object):
         assert self.guess_serialization_method in serializer_type_list
         assert self.context_length <= self.max_len
         assert self.model_type in model_type_dict
+        assert self.training_main_memory_chunksize > self.training_chunk
 
     def as_dict(self):
         answer = dict(vars(ModelDefaults).copy())
@@ -778,6 +780,9 @@ class BasePreprocessor(object):
 
     def begin(self, anobj):
         raise NotImplementedError()
+
+    def begin_resetable(self, resetable):
+        self.begin(resetable.create_new())
 
     def next_chunk(self):
         raise NotImplementedError()
@@ -819,9 +824,13 @@ class Preprocessor(BasePreprocessor):
     def __init__(self, config = ModelDefaults()):
         super().__init__(config)
         self.chunk = 0
+        self.resetable_pwd_list = None
 
     def begin(self, pwd_list):
         self.pwd_whole_list = list(pwd_list)
+
+    def begin_resetable(self, anobj):
+        self.resetable_pwd_list = anobj
         self.reset()
 
     def all_prefixes(self, pwd):
@@ -843,15 +852,22 @@ class Preprocessor(BasePreprocessor):
 
     def next_chunk(self):
         if self.chunk * self.config.training_chunk >= len(self.pwd_whole_list):
-            return [], [], []
+            if self.resetable_pwd_list is None:
+                return [], [], []
+            try:
+                new_iterator = self.chunked_pwd_list.__next__()
+            except StopIteration:
+                return [], [], []
+            self.begin(new_iterator)
+            self.reset_subiterator()
+            return self.next_chunk()
         pwd_list = self.pwd_whole_list[
             self.chunk * self.config.training_chunk:
             min((self.chunk + 1) * self.config.training_chunk,
                 len(self.pwd_whole_list))]
         self.chunk += 1
         pwd_input, output, weight = self.train_from_pwds(pwd_list)
-        return (
-            list(pwd_input), list(output), list(weight))
+        return (list(pwd_input), list(output), list(weight))
 
     def password_weight(self, pwd):
         if pwd in self.pwd_freqs:
@@ -860,6 +876,19 @@ class Preprocessor(BasePreprocessor):
         return 1
 
     def reset(self):
+        if self.resetable_pwd_list is None:
+            self.reset_subiterator()
+            return
+        self.chunked_pwd_list = iter(grouper(
+            self.resetable_pwd_list.as_iterator(),
+            self.config.training_main_memory_chunksize))
+        try:
+            self.begin(self.chunked_pwd_list.__next__())
+        except StopIteration:
+            logging.warning('Password list has no passwords?')
+        self.reset_subiterator()
+
+    def reset_subiterator(self):
         self.chunk = 0
         if self.config.randomize_training_order:
             random.shuffle(self.pwd_whole_list)
@@ -1382,6 +1411,31 @@ class Filterer(object):
 
     def filter(self, alist):
         return filter(lambda x: self.pwd_is_valid(x[0]), alist)
+
+class ResetablePwdList(object):
+    def __init__(self, pwd_file, pwd_format, config):
+        self.pwd_file = pwd_file
+        self.pwd_format = pwd_format
+        self.config = config
+
+    def create_new(self):
+        return Filterer(self.config).filter(
+            PwdList.getFactory(
+                self.pwd_format, self.config)(self.pwd_file).as_list())
+
+    def initialize(self):
+        input_factory = PwdList.getFactory(self.pwd_format, self.config)
+        filt = Filterer(self.config)
+        logging.info('Reading training set...')
+        input_list = input_factory(self.pwd_file)
+        for item in filt.filter(input_list.as_list()):
+            pass
+        filt.finish()
+        input_list.finish()
+        logging.info('Done reading passwords...')
+
+    def as_iterator(self):
+        return (pwd for pwd in self.create_new())
 
 class GuessSerializer(object):
     TOTAL_COUNT_RE = re.compile('Total count: (\d*)\n')
@@ -2434,18 +2488,6 @@ def init_logging(args):
     logging.info('Arguments: %s', json.dumps(args, indent = 4))
     logging.info('Version: %s', get_version_string())
 
-def read_passwords(pwd_file, pwd_format, config):
-    input_factory = PwdList.getFactory(pwd_format, config)
-    filt = Filterer(config)
-    logging.info('Reading training set...')
-    input_list = input_factory(pwd_file)
-    for item in filt.filter(input_list.as_list()):
-        pass
-    filt.finish()
-    input_list.finish()
-    logging.info('Done reading passwords...')
-    return filt.filter(input_factory(pwd_file).as_list())
-
 def preprocessing(args, config):
     pwd_format_first = args['pwd_format'][0]
     if pwd_format_first in BasePreprocessor.format_keys:
@@ -2456,14 +2498,15 @@ def preprocessing(args, config):
         assert os.path.exists(pwd_file)
         disk_trie.begin(pwd_file)
         return disk_trie
-    # read_passwords must be called before creating the preprocessor because it
+    resetable = ResetablePwdList(args['pwd_file'], args['pwd_format'], config)
+    # must be called before creating the preprocessor because it
     # initializes statistics needed for some preprocessors
-    plist = read_passwords(args['pwd_file'], args['pwd_format'], config)
+    resetable.initialize()
     if args['stats_only']:
         logging.info('Only getting stats. Quitting...')
         return None
     preprocessor = BasePreprocessor.fromConfig(config)
-    preprocessor.begin(plist)
+    preprocessor.begin_resetable(resetable)
     if args['pre_processing_only']:
         logging.info('Only performing pre-processing. ')
         if config.compute_stats:

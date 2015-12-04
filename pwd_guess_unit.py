@@ -396,21 +396,54 @@ class PreprocessorTest(unittest.TestCase):
                                  ['a', 'a', 'a', '\n'])),
                          set(zip(list(prefix), list(suffix))))
 
-    def train_construct_dict(self):
-        t = pwd_guess.Preprocessor({'pass' : 2}, pwd_guess.ModelDefaults(
+    def test_train_construct_dict(self):
+        t = pwd_guess.Preprocessor(pwd_guess.ModelDefaults(
             simulated_frequency_optimization = True))
+        t.begin({'pass' : 1}.items())
+        prefix, suffix, weight = t.next_chunk()
+        self.assertEqual(set(zip(['', 'p', 'pa', 'pas', 'pass'],
+                                 ['p', 'a', 's', 's', '\n'],
+                                 [1, 1, 1, 1, 1])),
+                         set(zip(list(prefix), list(suffix), list(weight))))
+
+    def test_resetable(self):
+        config = pwd_guess.ModelDefaults(
+            training_main_memory_chunksize = 2,
+            training_chunk = 2)
+        p = pwd_guess.Preprocessor(config)
+        resetable = Mock()
+        resetable.as_iterator = MagicMock(return_value = [
+            ('pwd', 1), ('j', 1), ('y', 1), ('a', 1), ('b', 1)])
+        p.begin_resetable(resetable)
         prefix, suffix, weight = p.next_chunk()
-        self.assertEqual((['', 'p', 'pa', 'pas', 'pass'],
-                          ['p', 'a', 's', 's', '\n'],
-                          [2, 2, 2, 2, 2]),
-                         (prefix, suffix, weight))
-        t = pwd_guess.Preprocessor({'pass' : 2}, pwd_guess.ModelDefaults(
-            simulated_frequency_optimization = False))
+        self.assertEqual(set(zip(list(prefix), list(suffix), list(weight))),
+                         set([('', 'p', 1), ('p', 'w', 1), ('pw', 'd', 1),
+                              ('pwd', '\n', 1), ('', 'j', 1), ('j', '\n', 1)]))
         prefix, suffix, weight = p.next_chunk()
-        self.assertEqual((['', 'p', 'pa', 'pas', 'pass'],
-                          ['p', 'a', 's', 's', '\n'],
-                          [1, 1, 1, 1, 1]),
-                         (prefix, suffix, weight))
+        self.assertEqual(set(zip(list(prefix), list(suffix), list(weight))),
+                         set([('', 'y', 1), ('y', '\n', 1),
+                              ('', 'a', 1), ('a', '\n', 1)]))
+        prefix, suffix, weight = p.next_chunk()
+        self.assertEqual(set(zip(list(prefix), list(suffix), list(weight))),
+                         set([('', 'b', 1), ('b', '\n', 1)]))
+        prefix, suffix, weight = p.next_chunk()
+        self.assertEqual(set(zip(list(prefix), list(suffix), list(weight))),
+                         set([]))
+        p.reset()
+        prefix, suffix, weight = p.next_chunk()
+        self.assertEqual(set(zip(list(prefix), list(suffix), list(weight))),
+                         set([('', 'p', 1), ('p', 'w', 1), ('pw', 'd', 1),
+                              ('pwd', '\n', 1), ('', 'j', 1), ('j', '\n', 1)]))
+        prefix, suffix, weight = p.next_chunk()
+        self.assertEqual(set(zip(list(prefix), list(suffix), list(weight))),
+                         set([('', 'y', 1), ('y', '\n', 1),
+                              ('', 'a', 1), ('a', '\n', 1)]))
+        prefix, suffix, weight = p.next_chunk()
+        self.assertEqual(set(zip(list(prefix), list(suffix), list(weight))),
+                         set([('', 'b', 1), ('b', '\n', 1)]))
+        prefix, suffix, weight = p.next_chunk()
+        self.assertEqual(set(zip(list(prefix), list(suffix), list(weight))),
+                         set([]))
 
 class TriePreprocessorTest(unittest.TestCase):
     def test_train_set(self):
@@ -1413,10 +1446,11 @@ abbbb\t4
 abab\t1
 aaab\t3""")
         self.input_file.flush()
-        plist = pwd_guess.read_passwords(
+        resetable = pwd_guess.ResetablePwdList(
             [self.input_file.name], ['tsv'], real_config)
+        resetable.initialize()
         preprocessor = pwd_guess.BasePreprocessor.fromConfig(real_config)
-        preprocessor.begin(plist)
+        preprocessor.begin_resetable(resetable)
         return preprocessor.stats()
 
     def test_normal(self):

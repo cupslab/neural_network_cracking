@@ -26,6 +26,9 @@ Setup
         lot slower than previously. I reverted to version
         0.7.0.dev-dab522df32a84085cb9f60beaf012ae010a07b82 which is better.
 
+        Using the GPU will require that you have nvidia drivers installed and
+        CUDA.
+
       keras - at time of writing, the version on pip is not current and will
       cause model saving to fail. Use the version from github instead
       (https://github.com/fchollet/keras). Run the IntegrationTest unit test to
@@ -34,6 +37,10 @@ Setup
       scikit-learn - pip install scikit-learn
 
       sqlitedict - pip install sqlitedict
+
+      numpy
+
+      cython
 
     Compiling:
 
