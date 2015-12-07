@@ -1105,7 +1105,7 @@ class Trainer(object):
 
     def init_layers(self):
         assert self.model is not None
-        assert len(self.classficiation_layers) == 0
+        assert len(self.classification_layers) == 0
         assert len(self.feature_layers) == 0
         for layer in self.model.layers:
             if (type(layer) == TimeDistributedDense or
