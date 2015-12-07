@@ -1103,6 +1103,17 @@ class Trainer(object):
                       optimizer=self.config.model_optimizer)
         self.model = model
 
+    def init_layers(self):
+        assert self.model is not None
+        assert len(self.classficiation_layers) == 0
+        assert len(self.feature_layers) == 0
+        for layer in self.model.layers:
+            if (type(layer) == TimeDistributedDense or
+                type(layer) == Activation):
+                self.classification_layers.append(layer)
+            else:
+                self.feature_layers.append(layer)
+
     def train_model(self, serializer):
         prev_accuracy = 0
         max_accuracy = 0
@@ -2524,7 +2535,9 @@ def train(args, config):
     if args['retrain']:
         logging.info('Retraining model...')
         trainer.model = serializer.load_model()
-    trainer.train(serializer)
+        trainer.init_layers()
+    if not args['train_secondary_only']:
+        trainer.train(serializer)
     if config.secondary_training:
         fake_args = config.secondary_train_sets
         fake_args['stats_only'] = False
@@ -2655,6 +2668,8 @@ def make_parser():
                         help='Internal use only. ')
     parser.add_argument('--calc-probability-only', action='store_true',
                         help='Only output password probabilities')
+    parser.add_argument('--train-secondary-only', action='store_true',
+                        help='Only train on secondary data. ')
     return parser
 
 if __name__=='__main__':
