@@ -2537,8 +2537,12 @@ def train(args, config):
         trainer.model = serializer.load_model()
         trainer.init_layers()
     if not args['train_secondary_only']:
+        logging.info('Training model with primary data')
         trainer.train(serializer)
+    else:
+        logging.info('Not training model with primary data')
     if config.secondary_training:
+        logging.info('Secondary training')
         fake_args = config.secondary_train_sets
         fake_args['stats_only'] = False
         fake_args['pre_processing_only'] = False
