@@ -5,9 +5,11 @@ import json
 import pwd_guess
 
 def main(args):
-    config = pwd_guess.ModelDefaults.fromFile(args.config)
+    with open(args.config, 'r') as config_args:
+        c = json.load(config_args)
+        config = pwd_guess.ModelDefaults(c['config'])
     ctable = pwd_guess.CharacterTable.fromConfig(config)
-    with open(args.ofile, 'r') as ofile:
+    with open(args.ofile, 'w') as ofile:
         json.dump({
             'char_bag': config.char_bag,
             'uppercase': config.uppercase_character_optimization,
@@ -20,7 +22,8 @@ def main(args):
             'beginning_character_frequencies': config.get_intermediate_info(
                 'beginning_character_frequencies'),
             'end_character_frequencies': config.get_intermediate_info(
-                'end_character_frequencies')
+                'end_character_frequencies'),
+            'train_backwards': config.train_backwards
         }, ofile)
 
 if __name__=='__main__':
