@@ -6,7 +6,7 @@ import pwd_guess
 
 def main(args):
     config = pwd_guess.ModelDefaults.fromFile(args.config)
-    ctable = pwd_guess.fromConfig(config)
+    ctable = pwd_guess.CharacterTable.fromConfig(config)
     with open(args.ofile, 'r') as ofile:
         json.dump({
             'char_bag': config.char_bag,
