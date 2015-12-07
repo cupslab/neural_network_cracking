@@ -46,7 +46,7 @@ function CharacterTable(intermediate_info) {
 }
 
 CharacterTable.prototype.encode_char = function(achar) {
-  var answer = new Array(this.characters.length);
+  var answer = new Array(this.real_characters.length);
   var template_char = achar;
   if (achar in this.rare_chars) {
     template_char = this.rare_chars[achar];
@@ -86,7 +86,7 @@ CharacterTable.prototype.decode_probs = function(prob_list) {
     answer[this.real_characters[i]] = prob_list[i];
   }
   return answer;
-}
+};
 
 function PwdInput(elem, output_elem, ctable) {
   this.elem = elem;
