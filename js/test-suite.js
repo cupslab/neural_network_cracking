@@ -22,17 +22,17 @@ function assertEqual(valueA, valueB, message) {
   if (value) {
     success += 1;
   } else {
-    console.error(message, 'ERROR', valueA, valueB);
+    console.error(message, 'ERROR', valueA, '!=', valueB);
     errors += 1;
   }
 }
 
 function assertAlmostEqual(valueA, valueB, message) {
   var value = Math.abs(valueA - valueB);
-  if (value <= EPSILON) {
+  if (value <= EPSILON || (!isFinite(valueA)) && !isFinite(valueB)) {
     success += 1;
   } else {
-    console.error(message, 'ERROR', valueA, valueB);
+    console.error(message, 'ERROR', valueA, '!=', valueB);
     errors += 1;
   }
 }
@@ -40,6 +40,7 @@ function assertAlmostEqual(valueA, valueB, message) {
 function testCase1(done) {
   var key = 'test_case1_conditional_prob';
   var i = 0;
+  var msg = 'testing conditional probability';
   var fn_cb = function(ret_val) {
     var expected = test_cases[key][i];
     assertEqual(expected.length, ret_val.length, 'Outputs correct length');
@@ -49,62 +50,69 @@ function testCase1(done) {
     }
     i += 1;
     if (i < input_data.length) {
-      console.log('testing', input_data[i][0], '...');
+      console.log(msg, input_data[i][0], '...');
       client.raw_predict_next(input_data[i][0]);
     } else {
       done();
     }
   };
-  console.log('testing', input_data[i][0], '...');
+  console.log(msg, input_data[i][0], '...');
   client.callback = fn_cb;
   client.raw_predict_next(input_data[i][0]);
 }
 
 function testCase2(done) {
-  var key = 'test_case3_total_prob_template_noprefix';
-  var i = 0;
-  var fn_cb = function(ret_val) {
-    var expected = test_cases[key][i];
-    assertAlmostEqual(Math.log(ret_val), Math.log(expected[1]),
-                      'Outputs correct prefix prediction on log scale');
-    i += 1;
-    if (i < input_data.length) {
-      console.log('testing', input_data[i][0], '...');
-      client.query(input_data[i][0]);
-    } else {
-      done();
-    }
-  };
-  client.callback = fn_cb;
-  console.log('testing', input_data[i][0], '...');
-  client.query(input_data[i][0]);
-}
-
-function testCase3(done) {
   var key = 'test_case2_total_prob_template_prefix';
   var i = 0;
+  var msg = 'testing prefix probability';
   var fn_cb = function(ret_val) {
     var expected = test_cases[key][i];
     assertAlmostEqual(Math.log(ret_val), Math.log(expected[1]),
                       'Outputs correct prefix prediction on log scale');
     i += 1;
     if (i < input_data.length) {
-      console.log('testing', input_data[i][0], '...');
+      console.log(msg, input_data[i][0], '...');
       client.query(input_data[i][0], true);
     } else {
       done();
     }
   };
   client.callback = fn_cb;
-  console.log('testing', input_data[i][0], '...');
+  console.log(msg, input_data[i][0], '...');
   client.query(input_data[i][0], true);
+}
+
+function testCase3(done) {
+  var key = 'test_case3_total_prob_template_noprefix';
+  var i = 0;
+  var msg = 'testing total probability';
+  var fn_cb = function(ret_val) {
+    var expected = test_cases[key][i];
+    assertAlmostEqual(Math.log(ret_val), Math.log(expected[1]),
+                      'Outputs correct prefix prediction on log scale');
+    i += 1;
+    if (i < input_data.length) {
+      console.log(msg, input_data[i][0], '...');
+      client.query(input_data[i][0]);
+    } else {
+      done();
+    }
+  };
+  client.callback = fn_cb;
+  console.log(msg, input_data[i][0], '...');
+  client.query(input_data[i][0]);
 }
 
 var client = new NeuralNetworkClient(null);
 
 function doTests() {
+  console.log('running test case 1');
   testCase1(function() {
+    // Log probabilities should be compared to lower accuracy
+    EPSILON = 0.0001;
+    console.log('running test case 2');
     testCase2(function() {
+      console.log('running test case 3');
       testCase3(function() {
         console.log('done errors:', errors, 'successes:', success);
       });

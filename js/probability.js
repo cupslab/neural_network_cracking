@@ -14,23 +14,13 @@ function PwdInput(elem, callback) {
 }
 
 PwdInput.prototype.onChangeTriggered = function(event) {
-  this.client.predict_next(this.elem.val());
+  this.client.query_guess_number(this.elem.val());
 };
 
 function init() {
   console.log('Loading scripts');
   var display_next = $(DISPLAY_CLASS);
-  pwd_input = new PwdInput($(INPUT_CLASS), function(probs) {
-    var output_text = '';
-    var keys = Object.keys(probs);
-    var keys_sorted = keys.map(function(k) {
-      return [probs[k], k];
-    }).sort(function(a, b) {
-      return b[0] - a[0];
-    });
-    for (var i = 0; i < keys_sorted.length; i++) {
-      output_text += keys_sorted[i][1] + ': ' + keys_sorted[i][0] + '<br/>';
-    }
-    display_next.html(output_text);
+  pwd_input = new PwdInput($(INPUT_CLASS), function(value) {
+    display_next.html(value);
   });
 }

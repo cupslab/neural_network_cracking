@@ -18,6 +18,13 @@ NeuralNetworkClient.prototype.query = function(pwd, prefix) {
   });
 };
 
+NeuralNetworkClient.prototype.query_guess_number = function(pwd) {
+  this.worker.postMessage({
+    inputData : pwd,
+    action : 'guess_number'
+  });
+};
+
 NeuralNetworkClient.prototype.predict_next = function(pwd) {
   this.worker.postMessage({
     inputData : pwd,

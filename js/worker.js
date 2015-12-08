@@ -5,9 +5,10 @@ importScripts('neocortex.min.js');
 var ACTION_TOTAL_PROB = 'total_prob';
 var ACTION_PREDICT_NEXT = 'predict_next';
 var ACTION_RAW_PREDICT_NEXT = 'raw_predict_next';
+var ACTION_GUESS_NUMBER = 'guess_number';
 var UPPERCASE = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 var END_CHAR = '\n';
-var NEURAL_NETWORK_INTERMEDIATE = 'js_information.json';
+var NEURAL_NETWORK_INTERMEDIATE = 'js_info_and_gn.json';
 var NEURAL_NETWORK_FILE = './js_model_small.json';
 
 var nn = new NeuralNet({
@@ -17,6 +18,7 @@ var nn = new NeuralNet({
 });
 
 var ctable;
+var guess_numbers;
 var onLoadMsgs = [];
 onmessage = function(e) {
   onLoadMsgs.push(e);
@@ -28,21 +30,55 @@ function CharacterTable(intermediate_info) {
   this.min_len = intermediate_info.min_len || 0;
   this.ctable_idx = {};
   this.rare_chars = {};
+  this.rare_chars_opposite = {};
+  var add_to_rco = (function(from, to) {
+    if (!(from in this.rare_chars_opposite)) {
+      this.rare_chars_opposite[from] = []
+    }
+    this.rare_chars_opposite[from].push(to);
+  }).bind(this);
   this.backwards = intermediate_info.train_backwards;
   var rare_char_list = intermediate_info.rare_char_bag.join('')
   this.real_characters = intermediate_info.char_bag_real.join('');
   for (var i = 0; i < rare_char_list; i++) {
     this.real_characters = this.real_characters.replace(rare_char[i], '');
     this.rare_chars[rare_char_list[i]] = rare_char_list[0];
+    add_to_rco(rare_char_list[0], rare_char_list[i]);
   }
+  add_to_rco(rare_char_list[0], rare_char_list[0]);
+  this.rare_chars[rare_char_list[0]] = rare_char_list[0];
   for (var i = 0; i < UPPERCASE.length; i++) {
     this.real_characters = this.real_characters.replace(UPPERCASE[i], '');
-    this.rare_chars[UPPERCASE[i]] = UPPERCASE[i].toLowerCase();
+    var lowercase = UPPERCASE[i].toLowerCase();
+    this.rare_chars[UPPERCASE[i]] = lowercase;
+    this.rare_chars[lowercase] = lowercase;
+    add_to_rco(lowercase, lowercase);
+    add_to_rco(lowercase, UPPERCASE[i]);
   }
   for (var i = 0; i < this.real_characters.length; i++) {
     this.ctable_idx[this.real_characters[i]] = i;
   }
+  this.rare_character_calc = this.calc_cache(
+    intermediate_info.character_frequencies);
+  this.beginning_rare_character_calc = this.calc_cache(
+    intermediate_info.beginning_character_frequencies);
 }
+
+CharacterTable.prototype.calc_cache = function(freqs) {
+  var answer = {};
+  for (var fromKey in this.rare_chars_opposite) {
+    var toKeys = this.rare_chars_opposite[fromKey];
+    answer[fromKey] = {};
+    var sum_prob = 0;
+    for (var i = 0; i < toKeys.length; i++) {
+      sum_prob += freqs[toKeys[i]];
+    }
+    for (var i = 0; i < toKeys.length; i++) {
+      answer[fromKey][toKeys[i]] = freqs[toKeys[i]] / sum_prob;
+    }
+  }
+  return answer;
+};
 
 CharacterTable.prototype.encode_char = function(achar) {
   var answer = new Array(this.real_characters.length);
@@ -98,13 +134,25 @@ CharacterTable.prototype.decode_probs = function(prob_list) {
   return answer;
 };
 
-CharacterTable.prototype.probability_of_char = function(prob_list, next_char) {
+CharacterTable.prototype.probability_of_char = function(
+  prob_list, next_char, beginning) {
   var value = ctable.decode_probs(prob_list);
+  var answer;
   if (next_char in value) {
-    return value[next_char];
+    answer = value[next_char];
   } else {
-    return value[this.rare_chars[next_char]];
+    answer = value[this.rare_chars[next_char]];
   }
+  var prev = answer;
+  if (next_char in this.rare_chars) {
+    var template_char = this.rare_chars[next_char]
+    if (!beginning) {
+      answer *= this.rare_character_calc[template_char][next_char];
+    } else {
+      answer *= this.beginning_rare_character_calc[template_char][next_char];
+    }
+  }
+  return answer;
 };
 
 function predictNext(input_pwd) {
@@ -120,13 +168,27 @@ function totalProb(input_pwd, prefix) {
   for (var i = 0; i < input_pwd.length; i++) {
     accum *= ctable.probability_of_char(
       ctable.cond_prob(input_pwd.substring(0, i), nn),
-      input_pwd[i]);
+      input_pwd[i], i == 0);
   }
-  if (prefix) {
+  if (!prefix) {
     accum *= ctable.probability_of_char(ctable.cond_prob(input_pwd, nn),
                                         END_CHAR);
   }
   return accum;
+}
+
+function lookupGuessNumber(input_pwd) {
+  var prob = totalProb(input_pwd, false);
+  if (prob == 0) {
+    return -1;
+  }
+  for (var i = guess_numbers.length - 1; i >= 0; i--) {
+    var gn = guess_numbers[i];
+    if (gn[0] < prob) {
+      return Math.round(gn[1]);
+    }
+  }
+  return Infinity;
 }
 
 function handleMsg(e) {
@@ -134,6 +196,10 @@ function handleMsg(e) {
   if (e.data.action == ACTION_TOTAL_PROB) {
     message = {
       prediction : totalProb(e.data.inputData, e.data.prefix)
+    };
+  } else if (e.data.action == ACTION_GUESS_NUMBER) {
+    message = {
+      prediction : lookupGuessNumber(e.data.inputData)
     };
   } else if (e.data.action == ACTION_PREDICT_NEXT) {
     message = {
@@ -152,7 +218,9 @@ function handleMsg(e) {
 var request = new XMLHttpRequest();
 request.addEventListener('load', function() {
   console.log('Network loaded')
-  ctable = new CharacterTable(JSON.parse(this.responseText));
+  var info = JSON.parse(this.responseText)
+  ctable = new CharacterTable(info);
+  guess_numbers = info['guessing_table'];
   nn.init().then(function() {
     console.log('Worker ready for passwords!');
     onLoadMsgs.forEach(handleMsg);
