@@ -23,7 +23,8 @@ def main(args):
                 'beginning_character_frequencies'),
             'end_character_frequencies': config.get_intermediate_info(
                 'end_character_frequencies'),
-            'train_backwards': config.train_backwards
+            'train_backwards': config.train_backwards,
+            'min_len': config.min_len
         }, ofile)
 
 if __name__=='__main__':

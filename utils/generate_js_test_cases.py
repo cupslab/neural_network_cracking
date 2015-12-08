@@ -26,13 +26,15 @@ def main(args):
         args.model_file, args.weight_file).load_model(), config, None)
     prob_calculator_prefix = pwd_guess.ProbabilityCalculator(
         guesser, prefixes = True)
+    assert prob_calculator_prefix.template_probs
     prob_calculator_noprefix = pwd_guess.ProbabilityCalculator(guesser)
+    assert prob_calculator_noprefix.template_probs
     cond_prob_tests_tuples = list(map(lambda x: (x, 1), CONDITIONAL_PROB_TESTS))
     json.dump({
         'test_data': cond_prob_tests_tuples,
         'test_case1_conditional_prob': list(map(
             lambda x: x.tolist(), map(guesser.conditional_probs,
-                                      CONDITIONAL_PROB_TESTS)))),
+                                      CONDITIONAL_PROB_TESTS))),
         'test_case2_total_prob_template_prefix': list(
             prob_calculator_prefix.calc_probabilities(cond_prob_tests_tuples)),
         'test_case3_total_prob_template_noprefix': (

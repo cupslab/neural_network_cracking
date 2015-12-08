@@ -25,6 +25,7 @@ onmessage = function(e) {
 function CharacterTable(intermediate_info) {
   this.characters = intermediate_info.char_bag;
   this.pwd_len = intermediate_info.context_length;
+  this.min_len = intermediate_info.min_len || 0;
   this.ctable_idx = {};
   this.rare_chars = {};
   this.backwards = intermediate_info.train_backwards;
@@ -65,6 +66,8 @@ CharacterTable.prototype.encode_pwd = function(pwd) {
   if (pwd.length > this.pwd_len) {
     query_text = query_text.substring(pwd.length - this.pwd_len);
   }
+  query_text = query_text + (
+    Array(this.pwd_len - query_text.length + 1).join(END_CHAR));
   if (this.backwards) {
     query_text = query_text.split('').reverse().join('');
   }
@@ -72,10 +75,19 @@ CharacterTable.prototype.encode_pwd = function(pwd) {
   for (var i = 0; i < query_text.length; i++) {
     chartable[i] = this.encode_char(query_text[i]);
   }
-  for (var j = query_text.length; j < this.pwd_len; j++) {
-    chartable[j] = this.encode_char(END_CHAR);
-  }
   return chartable;
+};
+
+CharacterTable.prototype.cond_prob = function(pwd, nn) {
+  var answer = nn.predict(this.encode_pwd(pwd));
+  if (pwd.length < this.min_len) {
+    answer[this.ctable_idx[END_CHAR]] = 0;
+    var sum = answer.reduce( (prev, cur) => prev + cur );
+    for (var j = 0; j < answer.length; j++) {
+      answer[j] = answer[j] / sum;
+    }
+  }
+  return answer;
 };
 
 CharacterTable.prototype.decode_probs = function(prob_list) {
@@ -86,45 +98,55 @@ CharacterTable.prototype.decode_probs = function(prob_list) {
   return answer;
 };
 
+CharacterTable.prototype.probability_of_char = function(prob_list, next_char) {
+  var value = ctable.decode_probs(prob_list);
+  if (next_char in value) {
+    return value[next_char];
+  } else {
+    return value[this.rare_chars[next_char]];
+  }
+};
+
 function predictNext(input_pwd) {
-  return ctable.decode_probs(nn.predict(ctable.encode_pwd(input_pwd)))
+  return ctable.decode_probs(ctable.cond_prob(input_pwd, nn));
 }
 
 function rawPredictNext(input_pwd) {
-  return nn.predict(ctable.encode_pwd(input_pwd));
+  return ctable.cond_prob(input_pwd, nn);
 }
 
 function totalProb(input_pwd, prefix) {
   var accum = 1;
   for (var i = 0; i < input_pwd.length; i++) {
-    var values = ctable.decode_probs(nn.predict(
-      ctable.encode_pwd(input_pwd.substring(0, i))));
-    accum *= values[input_pwd[i]];
+    accum *= ctable.probability_of_char(
+      ctable.cond_prob(input_pwd.substring(0, i), nn),
+      input_pwd[i]);
   }
   if (prefix) {
-    var values = ctable.decode_probs(nn.predict(
-      ctable.encode_pwd(input_pwd)));
-    accum *= values[PASSWORD_END];
+    accum *= ctable.probability_of_char(ctable.cond_prob(input_pwd, nn),
+                                        END_CHAR);
   }
   return accum;
 }
 
 function handleMsg(e) {
+  var message;
   if (e.data.action == ACTION_TOTAL_PROB) {
-    self.postMessage({
+    message = {
       prediction : totalProb(e.data.inputData, e.data.prefix)
-    });
+    };
   } else if (e.data.action == ACTION_PREDICT_NEXT) {
-    self.postMessage({
+    message = {
       prediction : predictNext(e.data.inputData)
-    });
+    };
   } else if (e.data.action == ACTION_RAW_PREDICT_NEXT) {
-    self.postMessage({
+    message = {
       prediction : rawPredictNext(e.data.inputData)
-    });
+    };
   } else {
     console.error('Unknown message action', e.data.action);
   }
+  self.postMessage(message);
 }
 
 var request = new XMLHttpRequest();

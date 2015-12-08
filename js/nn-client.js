@@ -10,10 +10,11 @@ NeuralNetworkClient.prototype.onMessageTriggered = function(event) {
   this.callback(event.data.prediction);
 };
 
-NeuralNetworkClient.prototype.query = function(pwd) {
+NeuralNetworkClient.prototype.query = function(pwd, prefix) {
   this.worker.postMessage({
     inputData : pwd,
-    action : 'total_prob'
+    action : 'total_prob',
+    prefix : prefix
   });
 };
 

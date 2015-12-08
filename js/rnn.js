@@ -1,5 +1,6 @@
 var INPUT_CLASS = '.nn-password';
 var DISPLAY_CLASS = '.nn-display';
+var pwd_input;
 
 function PwdInput(elem, output_elem) {
   this.elem = elem;
@@ -17,8 +18,7 @@ PwdInput.prototype.onChangeTriggered = function(event) {
   this.client.predict_next(this.elem.val());
 };
 
-PwdInput.prototype.onProbCallback = function(event) {
-  var probs = event.data.prediction;
+PwdInput.prototype.onProbCallback = function(probs) {
   var output_text = '';
   var keys = Object.keys(probs);
   var keys_sorted = keys.map(function(k) {
@@ -34,5 +34,5 @@ PwdInput.prototype.onProbCallback = function(event) {
 
 function init() {
   console.log('Loading scripts');
-  var pwd_input = new PwdInput($(INPUT_CLASS), $(DISPLAY_CLASS));
+  pwd_input = new PwdInput($(INPUT_CLASS), $(DISPLAY_CLASS));
 }
