@@ -38,3 +38,11 @@ NeuralNetworkClient.prototype.raw_predict_next = function(pwd) {
     action : 'raw_predict_next'
   });
 };
+
+
+NeuralNetworkClient.prototype.probability_char = function(pwd, next_char) {
+  this.worker.postMessage({
+    inputData : pwd,
+    action : 'probability_char'
+  });
+};

@@ -118,7 +118,7 @@ CharacterTable.prototype.cond_prob = function(pwd, nn) {
   var answer = nn.predict(this.encode_pwd(pwd));
   if (pwd.length < this.min_len) {
     answer[this.ctable_idx[END_CHAR]] = 0;
-    var sum = answer.reduce( (prev, cur) => prev + cur );
+    var sum = answer.reduce( function(prev, cur) { return prev + cur } );
     for (var j = 0; j < answer.length; j++) {
       answer[j] = answer[j] / sum;
     }

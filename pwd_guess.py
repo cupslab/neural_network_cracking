@@ -110,6 +110,24 @@ class NodeTrie(BaseTrie):
             for item in others:
                 yield item
 
+    def set(self, key, value):
+        node = self
+        for c in key:
+            node = node.nodes[c]
+        node.weight = value
+
+    def get_longest_prefix(self, key):
+        node = self
+        value, accum = 0, 0;
+        for i, c in enumerate(key):
+            if c in node.nodes:
+                node = node.nodes[c]
+                if node.weight != 0:
+                    value, accum = node.weight, i + 1
+            else:
+                break
+        return key[:accum], value
+
     def sampled_training(self, value = ''):
         node_children = [(k, self.nodes[k].weight)
                          for k in sorted(self.nodes.keys())]
@@ -403,6 +421,7 @@ class CharacterTable(object):
         self.char_indices = dict((c, i) for i, c in enumerate(self.chars))
         self.indices_char = dict((i, c) for i, c in enumerate(self.chars))
         self.maxlen = maxlen
+        self.vocab_size = len(self.chars)
 
     def pad_to_len(self, astring, maxlen = None):
         maxlen = maxlen if maxlen else self.maxlen
@@ -496,11 +515,88 @@ class OptimizingCharacterTable(CharacterTable):
     def translate(self, astring):
         return astring.translate(self.translate_table)
 
-class ScheduledSamplingCharacterTable(object):
-    def __init__(self, config):
-        self.real_ctable = CharacterTable.fromConfig(config)
+class DelegatingCharacterTable(object):
+    def __init__(self, ctable):
+        self.real_ctable = ctable
         self.chars = self.real_ctable.chars
-        self.config = config
+        self.vocab_size = len(self.chars)
+
+    def encode(self, ystr, maxlen = None):
+        return self.real_ctable.encode(ystr, maxlen)
+
+    def get_char_index(self, char):
+        return self.real_ctable.get_char_index(char)
+
+    def decode(self, X, argmax = True):
+        return self.real_ctable.decode(X, argmax)
+
+    def encode_many(self, xstrs):
+        return self.real_ctable.encode_many(xstrs)
+
+class TokenizingCharacterTable(DelegatingCharacterTable):
+    def __init__(self, config):
+        super().__init__(CharacterTable.fromConfig(config))
+        self.token_list = list(map(
+            self.real_ctable.translate,
+            config.get_intermediate_info('most_common_tokens')))
+        assert (len(self.token_list) > 0 and
+                len(self.token_list) <= config.most_common_token_count)
+        assert len(set(self.token_list)) == len(self.token_list)
+        if len(self.token_list) < config.most_common_token_count:
+            logging.warning(('Token list is smaller than specified. This can '
+                             'happen if the training set does not have enough '
+                             'tokens. Size is %s but expected %s. '),
+                            len(self.token_list),
+                            config.most_common_token_count)
+        self.vocab_size = len(self.real_ctable.chars) + len(self.token_list)
+        self.indices_char = {}
+        self.char_indices = {}
+        for i, token in enumerate(self.token_list):
+            self.indices_char[i] = token
+            self.char_indices[token] = i
+        for idx in self.real_ctable.indices_char:
+            self.indices_char[idx + len(self.token_list)] = (
+                self.real_ctable.indices_char[idx])
+        self.maxlen = self.real_ctable.maxlen
+        self.tokenizer = SpecificTokenizer(self.token_list)
+
+    def decode(self, X, calc_argmax=True):
+        if calc_argmax:
+            X = X.argmax(axis=-1)
+        return ''.join(self.indices_char[x] for x in X)
+
+    def encode_many(self, string_list, maxlen = None):
+        maxlen = maxlen if maxlen else self.maxlen
+        x_vec = np.zeros((len(string_list), maxlen, self.vocab_size),
+                         dtype = np.bool)
+        for i, xstr in enumerate(string_list):
+            self._encode_into(x_vec[i], xstr)
+        return x_vec
+
+    def get_char_index(self, char):
+        if len(char) == 1:
+            return self.real_ctable.get_char_index(char) + len(self.token_list)
+        else:
+            return self.char_indices[char]
+
+    def _encode_into(self, X, C):
+        if type(C) == str:
+            C = self.tokenizer.tokenize(self.real_ctable.translate(C))
+        for i, token in enumerate(C[-self.maxlen:]):
+            X[i, self.get_char_index(token)] = 1
+        if len(C) < X.shape[0]:
+            for j in range(len(C), self.maxlen):
+                X[j, self.get_char_index(PASSWORD_END)] = 1
+
+    def encode(self, C, maxlen=None):
+        maxlen = maxlen if maxlen else self.maxlen
+        X = np.zeros((maxlen, self.vocab_size), dtype = np.bool)
+        self._encode_into(X, C)
+        return X
+
+class ScheduledSamplingCharacterTable(DelegatingCharacterTable):
+    def __init__(self, config):
+        super().__init__(CharacterTable.fromConfig(config))
         self.probability_calculator = None
         self.sigma = 0
         self.generation_size = 0
@@ -508,15 +604,10 @@ class ScheduledSamplingCharacterTable(object):
         self.total_size = 0
         self.generation = 0
         self.generations = self.config.generations
+        self.config = config
 
     def init_model(self, model):
         self.probability_calculator = Guesser(model, self.config, io.StringIO())
-
-    def encode(self, ystr, maxlen = None):
-        return self.real_ctable.encode(ystr, maxlen)
-
-    def get_char_index(self, char):
-        return self.real_ctable.get_char_index(char)
 
     def end_generation(self):
         if self.generation == 0:
@@ -692,6 +783,8 @@ class ModelDefaults(object):
     secondary_training = False
     secondary_train_sets = None
     training_main_memory_chunksize = 1000000
+    tokenize_words = False
+    most_common_token_count = 2000
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -825,6 +918,12 @@ class Preprocessor(BasePreprocessor):
         super().__init__(config)
         self.chunk = 0
         self.resetable_pwd_list = None
+        self.tokenize_words = config.tokenize_words
+        if self.tokenize_words:
+            self.ctable = CharacterTable.fromConfig(config)
+            self.tokenizer = SpecificTokenizer(list(map(
+                self.ctable.translate,
+                config.get_intermediate_info('most_common_tokens'))))
 
     def begin(self, pwd_list):
         self.pwd_whole_list = list(pwd_list)
@@ -845,6 +944,9 @@ class Preprocessor(BasePreprocessor):
     def train_from_pwds(self, pwd_tuples):
         self.pwd_freqs = dict(pwd_tuples)
         pwds = list(map(lambda x: x[0], pwd_tuples))
+        if self.tokenize_words:
+            pwds = list(map(tuple, map(self.tokenizer.tokenize,
+                                       map(self.ctable.translate, pwds))))
         return (
             itertools.chain.from_iterable(map(self.all_prefixes, pwds)),
             itertools.chain.from_iterable(map(self.all_suffixes, pwds)),
@@ -870,6 +972,8 @@ class Preprocessor(BasePreprocessor):
         return (list(pwd_input), list(output), list(weight))
 
     def password_weight(self, pwd):
+        if type(pwd) == tuple:
+            pwd = ''.join(pwd)
         if pwd in self.pwd_freqs:
             return self.pwd_freqs[pwd]
         logging.warning('Cannot find frequency for password %s', pwd)
@@ -1044,6 +1148,9 @@ class Trainer(object):
         if config.scheduled_sampling:
             logging.info('Using scheduled sampling')
             self.ctable = ScheduledSamplingCharacterTable(self.config)
+        elif config.tokenize_words:
+            logging.info('Using word tokenizer')
+            self.ctable = TokenizingCharacterTable(self.config)
         else:
             self.ctable = CharacterTable.fromConfig(self.config)
         self.feature_layers = []
@@ -1062,7 +1169,7 @@ class Trainer(object):
         return self.ctable.encode_many(x_strs)
 
     def prepare_y_data(self, y_str_list):
-        y_vec = np.zeros((len(y_str_list), 1, len(self.ctable.chars)),
+        y_vec = np.zeros((len(y_str_list), 1, self.ctable.vocab_size),
                          dtype = np.bool)
         for i, ystr in enumerate(y_str_list):
             y_vec[i] = self.ctable.encode(ystr, maxlen = 1)
@@ -1073,7 +1180,7 @@ class Trainer(object):
         model_type = self.config.model_type_exec()
         self.feature_layers.append(model_type(
             self.config.hidden_size,
-            input_shape=(self.config.context_length, len(self.ctable.chars)),
+            input_shape=(self.config.context_length, self.ctable.vocab_size),
             truncate_gradient=self.config.model_truncate_gradient,
             go_backwards=self.config.train_backwards))
         self.feature_layers.append(RepeatVector(1))
@@ -1094,7 +1201,7 @@ class Trainer(object):
             self.classification_layers.append(
                 TimeDistributedDense(self.config.dense_hidden_size))
         self.classification_layers.append(
-            TimeDistributedDense(len(self.ctable.chars)))
+            TimeDistributedDense(self.ctable.vocab_size))
         self.classification_layers.append(
             Activation('softmax'))
         for layer in self.feature_layers + self.classification_layers:
@@ -1364,6 +1471,12 @@ class Filterer(object):
         self.min_len = config.min_len
         self.uniquify = uniquify
         self.seen = set()
+        self.count_tokens = config.tokenize_words
+        self.most_common_token_count = config.most_common_token_count
+        self.token_counter = collections.Counter()
+        self.tokenizer = Tokenizer(
+            config.char_bag, config.uppercase_character_optimization)
+        self.not_equal_to_one = lambda x: len(x) != 1
 
     def inc_frequencies(adict, pwd):
         for c in pwd:
@@ -1386,6 +1499,10 @@ class Filterer(object):
             Filterer.inc_frequencies(self.frequencies, pwd)
             Filterer.inc_frequencies(self.beg_frequencies, pwd[0])
             Filterer.inc_frequencies(self.end_frequencies, pwd[-1])
+            if self.count_tokens:
+                self.token_counter.update(
+                    filter(self.not_equal_to_one,
+                           self.tokenizer.tokenize(pwd)))
         else:
             self.filtered_out += 1
         self.total += 1
@@ -1419,6 +1536,11 @@ class Filterer(object):
                 'beginning_character_frequencies', self.beg_frequencies)
             self.config.set_intermediate_info(
                 'end_character_frequencies', self.end_frequencies)
+            if self.count_tokens:
+                self.config.set_intermediate_info(
+                    'most_common_tokens',
+                    [x[0] for x in self.token_counter.most_common(
+                        self.most_common_token_count)])
 
     def filter(self, alist):
         return filter(lambda x: self.pwd_is_valid(x[0]), alist)
@@ -1790,6 +1912,69 @@ policy_list = {
     'one_uppercase' : OneUppercasePolicy(3)
 }
 
+class Tokenizer(object):
+    digits = set(string.digits)
+    uppercase = set(string.ascii_uppercase)
+    lowercase = set(string.ascii_lowercase)
+    upper_and_lowercase = set(string.ascii_uppercase + string.ascii_lowercase)
+    non_symbols = set(
+        string.digits + string.ascii_uppercase + string.ascii_lowercase)
+
+    def __init__(self, char_bag, ignore_uppercase):
+        self.ignore_uppercase = ignore_uppercase
+        if ignore_uppercase:
+            self.tokenize_classes = [
+                self.digits, self.lowercase,
+                set(char_bag).difference(self.non_symbols)]
+        else:
+            self.tokenize_classes = [
+                self.digits, self.uppercase, self.lowercase,
+                set(char_bag).difference(self.non_symbols)]
+        self.class_map = {}
+        for c in char_bag:
+            for i in range(len(self.tokenize_classes)):
+                if c in self.tokenize_classes[i]:
+                    self.class_map[c] = i
+
+    def tokenize(self, password):
+        prev_class = -1
+        tokens = []
+        accum = ''
+        if self.ignore_uppercase:
+            password = password.lower()
+        for i, c in enumerate(password):
+            if prev_class < 0:
+                accum += c
+                prev_class = self.class_map[c]
+            elif c in self.tokenize_classes[prev_class]:
+                accum += c
+            else:
+                tokens.append(accum)
+                accum = c
+                prev_class = self.class_map[c]
+        if accum != '':
+            tokens.append(accum)
+        return tokens
+
+class SpecificTokenizer(object):
+    def __init__(self, token_list):
+        self.token_to_index = NodeTrie()
+        self.token_list = token_list
+        for token in self.token_list:
+            self.token_to_index.set(token, 1)
+
+    def tokenize(self, pwd):
+        real_token_indexes = []
+        while len(pwd) != 0:
+            key, _ = self.token_to_index.get_longest_prefix(pwd)
+            if key != '':
+                real_token_indexes.append(key)
+                pwd = pwd[len(key):]
+            else:
+                real_token_indexes.append(pwd[0])
+                pwd = pwd[1:]
+        return real_token_indexes
+
 class PasswordPolicyEnforcingSerializer(DelegatingSerializer):
     def __init__(self, policy, serializer):
         super().__init__(serializer)
@@ -1880,7 +2065,7 @@ class Guesser(object):
             preds[i] = v / sum_per
 
     def relevel_prediction_many(self, pred_list, str_list):
-        if (self.filterer.pwd_is_valid(str_list[0]) and
+        if (self.filterer.pwd_is_valid(str_list[0], quick = True) and
             len(str_list[0]) != self.max_len):
             return
         for i in range(len(pred_list)):

@@ -1,0 +1,14 @@
+{
+  "name" : "pwd_nn",
+  "version" : "0.0.1",
+  "description" : "Run password guessing neural network in browser",
+  "main" : "dist/index.js",
+  "devDependencies" : {
+    "browserify": "^12.0.1",
+    "minifyify": "^7.1.0"
+  },
+  "scripts" : {
+    "build-browser" : "mkdir -p build && browserify src/worker.js -p [minifyify --no-map] -o build/worker.min.js && browserify src/nn-client.js -p [minifyify --no-map] -o build/nn-client.min.js",
+    "build-browser-debug" : "mkdir -p build && browserify src/nn-client.js -o build/nn-client.js"
+  }
+}

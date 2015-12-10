@@ -137,6 +137,18 @@ class NodeTrieTest(unittest.TestCase):
     def setUp(self):
         self.trie = pwd_guess.NodeTrie()
 
+    def test_set(self):
+        trie = pwd_guess.NodeTrie()
+        trie.set('asdf', 1)
+        self.assertEqual(trie.get_longest_prefix('asdf'), ('asdf', 1))
+        self.assertEqual(trie.get_longest_prefix('as'), ('', 0))
+        self.assertEqual(trie.get_longest_prefix('$$$'), ('', 0))
+        self.assertEqual(trie.get_longest_prefix('asdf1'), ('asdf', 1))
+        trie.set('asdf1', 2)
+        trie.set('a', 3)
+        self.assertEqual(trie.get_longest_prefix('a999'), ('a', 3))
+        self.assertEqual(trie.get_longest_prefix('asdf1'), ('asdf1', 2))
+
     def test_iterate(self):
         self.trie.increment('aaa', 1)
         self.assertEqual([('a', 1), ('aa', 1), ('aaa', 1)],
@@ -315,6 +327,113 @@ class OptimizingTableTest(unittest.TestCase):
              [[False, False, True, False],
               [False, False, False, True]]])
 
+class TokenizingTableTest(unittest.TestCase):
+    def test_create(self):
+        tokens = ['password', '123', '456']
+        config = Mock()
+        config.char_bag = (string.ascii_lowercase + string.ascii_uppercase
+                           + string.digits + ':!~')
+        config.most_common_token_count = len(tokens)
+        config.uppercase_character_optimization = False
+        config.rare_character_optimization = False
+        config.get_intermediate_info = MagicMock(return_value = tokens)
+        config.context_length = 4
+        t = pwd_guess.TokenizingCharacterTable(config)
+
+    def test_create_rare(self):
+        tokens = ['password', '123', '456']
+        rare_chars = [':', '!', '~']
+        def get_im(key):
+            if key == 'most_common_tokens':
+                return tokens
+            else:
+                return rare_chars
+        config = Mock()
+        config.char_bag = (string.ascii_lowercase + string.ascii_uppercase
+                           + string.digits + ':!~')
+        config.most_common_token_count = len(tokens)
+        config.get_intermediate_info = get_im
+        config.uppercase_character_optimization = True
+        config.rare_character_optimization = True
+        config.context_length = 4
+        t = pwd_guess.TokenizingCharacterTable(config)
+
+    def test_encode(self):
+        tokens = ['ab', 'bc']
+        config = Mock()
+        config.char_bag = 'abc\n'
+        config.most_common_token_count = len(tokens)
+        config.uppercase_character_optimization = False
+        config.rare_character_optimization = False
+        config.context_length = 2
+        config.get_intermediate_info = MagicMock(return_value = tokens)
+        t = pwd_guess.TokenizingCharacterTable(config)
+        np.testing.assert_array_equal(t.encode('abbc'),
+            [[True, False, False, False, False, False],
+             [False, True, False, False, False, False]])
+        np.testing.assert_array_equal(t.encode('ba'),
+            [[False, False, False, False, True, False],
+             [False, False, False, True, False, False]])
+        np.testing.assert_array_equal(t.encode('abc'),
+            [[True, False, False, False, False, False],
+             [False, False, False, False, False, True]])
+        np.testing.assert_array_equal(t.encode('a'),
+            [[False, False, False, True, False, False],
+             [False, False, True, False, False, False]])
+        np.testing.assert_array_equal(t.encode('abbcbc'),
+            [[False, True, False, False, False, False],
+             [False, True, False, False, False, False]])
+        self.assertEqual(
+            t.decode(np.array([[False, True, False, False, False, False],
+                               [False, True, False, False, False, False]])),
+            'bcbc')
+        self.assertEqual(
+            t.decode(np.array([[False, False, False, True, False, False],
+                               [False, False, True, False, False, False]])),
+            'a\n')
+        self.assertEqual(
+            t.decode(np.array([[True, False, False, False, False, False],
+                               [False, True, False, False, False, False]])),
+            'abbc')
+
+    def test_encode_rare(self):
+        tokens = ['ab', 'bc', '::']
+        rare_chars = [':', '!', '~']
+        def get_im(key):
+            if key == 'most_common_tokens':
+                return tokens
+            else:
+                return rare_chars
+        config = Mock()
+        config.char_bag = '\nabc:!~'
+        config.most_common_token_count = len(tokens)
+        config.get_intermediate_info = get_im
+        config.uppercase_character_optimization = False
+        config.rare_character_optimization = True
+        config.context_length = 2
+        t = pwd_guess.TokenizingCharacterTable(config)
+        np.testing.assert_array_equal(t.encode('a::'),
+            [[False, False, False, False, False, True, False, False],
+             [False, False, True, False, False, False, False, False]])
+        np.testing.assert_array_equal(t.encode('a:!'),
+            [[False, False, False, False, False, True, False, False],
+             [False, False, True, False, False, False, False, False]])
+        np.testing.assert_array_equal(t.encode('a!a'),
+            [[False, False, False, False, True, False, False, False],
+             [False, False, False, False, False, True, False, False]])
+        np.testing.assert_array_equal(t.encode('abc'),
+            [[True, False, False, False, False, False, False, False],
+             [False, False, False, False, False, False, False, True]])
+        np.testing.assert_array_equal(t.encode('a'),
+            [[False, False, False, False, False, True, False, False],
+             [False, False, False, True, False, False, False, False]])
+        self.assertEqual(t.decode(np.array(
+            [[False, False, False, False, False, True, False, False]])), 'a')
+        self.assertEqual(t.decode(np.array(
+            [[False, False, False, False, True, False, False, False]])), ':')
+        self.assertEqual(t.decode(np.array(
+            [[False, False, True, False, False, False, False, False]])), '::')
+
 class HybridPreprocessorTest(unittest.TestCase):
     def test_begin(self):
         pre = pwd_guess.HybridDiskPreprocessor(pwd_guess.ModelDefaults(
@@ -405,6 +524,26 @@ class PreprocessorTest(unittest.TestCase):
                                  ['p', 'a', 's', 's', '\n'],
                                  [1, 1, 1, 1, 1])),
                          set(zip(list(prefix), list(suffix), list(weight))))
+
+    def test_tokenized(self):
+        config = Mock()
+        config.tokenize_words = True
+        config.training_chunk = 2
+        config.training_main_memory_chunksize = 10
+        config.randomize_training_order = True
+        config.uppercase_character_optimization = False
+        config.rare_character_optimization = False
+        config.char_bag = 'abc\n'
+        config.context_length = 2
+        config.get_intermediate_info = MagicMock(return_value = ['ab', 'bc'])
+        t = pwd_guess.Preprocessor(config)
+        t.begin([('abc', 1), ('bcaa', 1)])
+        x, y, z = t.next_chunk()
+        self.assertEqual(set(zip(((), ('ab',), ('ab', 'c'),
+                                  (), ('bc',), ('bc', 'a'), ('bc', 'a', 'a')),
+                                 ('ab', 'c', '\n', 'bc', 'a', 'a', '\n'),
+                                 (1, 1, 1, 1, 1, 1, 1))),
+                         set(zip(tuple(x), tuple(y), tuple(z))))
 
     def test_resetable(self):
         config = pwd_guess.ModelDefaults(
@@ -567,6 +706,24 @@ class TrainerTest(unittest.TestCase):
         t.model = mock_model
         self.assertEqual(0.5, t.train_model_generation())
 
+    def test_tokenize(self):
+        config = Mock()
+        config.tokenize_words = True
+        config.training_chunk = 1
+        config.training_main_memory_chunksize = 10
+        config.randomize_training_order = True
+        config.uppercase_character_optimization = False
+        config.rare_character_optimization = False
+        config.char_bag = 'abc\n'
+        config.context_length = 2
+        config.scheduled_sampling = False
+        config.most_common_token_count = 2
+        config.get_intermediate_info = MagicMock(return_value = ['ab', 'bc'])
+        pre = pwd_guess.Preprocessor(config)
+        pre.begin([('abc', 1), ('bca', 1)])
+        t = pwd_guess.Trainer(pre, config)
+        xv, yv, wv = t.next_train_set_as_np()
+
     def test_train_model(self):
         config = pwd_guess.ModelDefaults(max_len = 5, generations = 20)
         pre = pwd_guess.Preprocessor(config)
@@ -579,6 +736,7 @@ class TrainerTest(unittest.TestCase):
         t.train_model(pwd_guess.ModelSerializer())
         self.assertEqual(t.generation, 2)
 
+    @unittest.skip('Not supported anymore')
     def test_train_model_scheduled_sampling(self):
         config = pwd_guess.ModelDefaults(max_len = 5, generations = 20,
                                          scheduled_sampling = True)
@@ -592,6 +750,7 @@ class TrainerTest(unittest.TestCase):
         t.train_model(pwd_guess.ModelSerializer())
         self.assertEqual(t.generation, 2)
 
+    @unittest.skip('Not supported anymore')
     def test_train_model_scheduled_sampling_high_sigma(self):
         config = pwd_guess.ModelDefaults(max_len = 5, generations = 20,
                                          scheduled_sampling = True)
@@ -651,8 +810,8 @@ class TrainerTest(unittest.TestCase):
         self.assertEqual(1, len(w_v))
 
     def test_test_set_small(self):
-        t = pwd_guess.Trainer(pwd_guess.Preprocessor([]),
-                              pwd_guess.ModelDefaults(train_test_ratio = 10))
+        config = pwd_guess.ModelDefaults(train_test_ratio = 10)
+        t = pwd_guess.Trainer(pwd_guess.Preprocessor(config), config)
         a = np.zeros((5, 1, 1), dtype = np.bool)
         b = np.zeros((5, 1, 1), dtype = np.bool)
         w = np.zeros((5, 1), dtype = np.bool)
@@ -1011,6 +1170,50 @@ class FiltererTest(unittest.TestCase):
         f = pwd_guess.Filterer(pwd_guess.ModelDefaults(max_len = 6))
         self.assertEqual([('pass', 1)],
                          list(f.filter([('pass', 1), ('passssss', 2)])))
+
+    def test_filter_tokens(self):
+        with tempfile.NamedTemporaryFile() as tf:
+            common_tokens = 3
+            config = pwd_guess.ModelDefaults(
+                rare_character_lowest_threshold = 2,
+                char_bag = (string.ascii_lowercase + string.ascii_uppercase
+                            + string.digits + '\n'),
+                intermediate_fname = tf.name,
+                rare_character_optimization = True,
+                tokenize_words = True,
+                most_common_token_count = common_tokens)
+            f = pwd_guess.Filterer(config)
+            self.assertEqual(f.most_common_token_count, common_tokens)
+            test_pwds = [('password123', 1), ('password45a', 1),
+                         ('Password123', 1), ('123asdf', 1),
+                         ('asdf456', 1), ('FE(CM$)', 1)]
+            self.assertEqual(test_pwds[:-1], list(f.filter(test_pwds)))
+            f.finish()
+            self.assertEqual(
+                set(config.get_intermediate_info('most_common_tokens')),
+                set(['123', 'password', 'asdf']))
+
+    def test_filter_tokens_no_singletons(self):
+        with tempfile.NamedTemporaryFile() as tf:
+            common_tokens = 3
+            config = pwd_guess.ModelDefaults(
+                rare_character_lowest_threshold = 2,
+                char_bag = (string.ascii_lowercase + string.ascii_uppercase
+                            + string.digits + '!\n'),
+                intermediate_fname = tf.name,
+                rare_character_optimization = True,
+                tokenize_words = True,
+                most_common_token_count = common_tokens)
+            f = pwd_guess.Filterer(config)
+            self.assertEqual(f.most_common_token_count, common_tokens)
+            test_pwds = [('password123!', 1), ('password45a!', 1),
+                         ('Password123!', 1), ('123asdf!', 1),
+                         ('asdf456', 1), ('FE(CM$)', 1)]
+            self.assertEqual(test_pwds[:-1], list(f.filter(test_pwds)))
+            f.finish()
+            self.assertEqual(
+                set(config.get_intermediate_info('most_common_tokens')),
+                set(['123', 'password', 'asdf']))
 
 class ModelSerializerTest(unittest.TestCase):
     def test_model_serializer(self):
@@ -2243,6 +2446,7 @@ class PasswordPolicyEnforcingSerializerTest(unittest.TestCase):
         mock_serializer.serialize.assert_called_once_with('A111*aajf', .1)
 
 class ScheduledSamplingTest(unittest.TestCase):
+    @unittest.skip('Not supported anymore')
     def test_set_sigma(self):
         mock_model = Mock()
         mock_model.predict = mock_predict_smart_parallel_skewed
@@ -2278,6 +2482,29 @@ class ScheduledSamplingTest(unittest.TestCase):
         self.assertEqual(20, testable.generation)
         self.assertTrue(testable.sigma > 0.9)
         testable.encode_many(['ba', 'ab'])
+
+class TokenizerTest(unittest.TestCase):
+    def test_tokenize(self):
+        t = pwd_guess.Tokenizer((string.ascii_lowercase + string.ascii_uppercase
+                                 + string.digits + ':!~'), False)
+        self.assertEqual(t.tokenize('password'), ['password'])
+        self.assertEqual(t.tokenize('password123'), ['password', '123'])
+        self.assertEqual(t.tokenize('password123!'), ['password', '123', '!'])
+        self.assertEqual(t.tokenize('Password123!'), [
+            'P', 'assword', '123', '!'])
+        self.assertEqual(t.tokenize('~iec84nl91:!'), [
+            '~', 'iec', '84', 'nl', '91', ':!'])
+
+    def test_tokenize_ignore_upper(self):
+        t = pwd_guess.Tokenizer((string.ascii_lowercase + string.ascii_uppercase
+                                 + string.digits + ':!~'), True)
+        self.assertEqual(t.tokenize('password'), ['password'])
+        self.assertEqual(t.tokenize('password123'), ['password', '123'])
+        self.assertEqual(t.tokenize('password123!'), ['password', '123', '!'])
+        self.assertEqual(t.tokenize('Password123!'), [
+            'password', '123', '!'])
+        self.assertEqual(t.tokenize('~iEc84nl91:!'), [
+            '~', 'iec', '84', 'nl', '91', ':!'])
 
 if __name__ == '__main__':
     unittest.main()
