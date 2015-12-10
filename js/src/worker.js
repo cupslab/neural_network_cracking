@@ -1,5 +1,8 @@
 'use strict';
 
+var jscache = require('js-cache');
+var bs = require('binarysearch');
+
 importScripts('neocortex.min.js');
 
 var ACTION_TOTAL_PROB = 'total_prob';
@@ -10,6 +13,7 @@ var UPPERCASE = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 var END_CHAR = '\n';
 var NEURAL_NETWORK_INTERMEDIATE = 'js_info_and_gn.json';
 var NEURAL_NETWORK_FILE = './js_model_small.json';
+var CACHE_SIZE = 100;
 
 var nn = new NeuralNet({
   modelFilePath: NEURAL_NETWORK_FILE,
@@ -18,8 +22,11 @@ var nn = new NeuralNet({
 });
 
 var ctable;
+var cached_table;
 var guess_numbers;
+var gn_cache = new jscache.Cache(CACHE_SIZE);
 var onLoadMsgs = [];
+
 onmessage = function(e) {
   onLoadMsgs.push(e);
 };
@@ -155,6 +162,26 @@ CharacterTable.prototype.probability_of_char = function(
   return answer;
 };
 
+function ProbCacher(size, nn, table) {
+  this.cached_probabilities = new jscache.Cache(size);
+  this.nn = nn;
+  this.table = table;
+}
+
+ProbCacher.prototype.probability_of_char = function(
+  prefix, next_char, beginning) {
+  var cached_value = this.cached_probabilities.get(prefix);
+  if (cached_value) {
+    return this.table.probability_of_char(cached_value, next_char, beginning);
+  } else {
+    var all_probs = this.table.cond_prob(prefix, this.nn);
+    var answer = this.table.probability_of_char(
+      all_probs, next_char, beginning);
+    this.cached_probabilities.set(prefix, all_probs);
+    return answer;
+  }
+};
+
 function predictNext(input_pwd) {
   return ctable.decode_probs(ctable.cond_prob(input_pwd, nn));
 }
@@ -166,48 +193,69 @@ function rawPredictNext(input_pwd) {
 function totalProb(input_pwd, prefix) {
   var accum = 1;
   for (var i = 0; i < input_pwd.length; i++) {
-    accum *= ctable.probability_of_char(
-      ctable.cond_prob(input_pwd.substring(0, i), nn),
-      input_pwd[i], i == 0);
+    accum *= cached_table.probability_of_char(
+      input_pwd.substring(0, i), input_pwd[i],
+      i == 0);
   }
   if (!prefix) {
-    accum *= ctable.probability_of_char(ctable.cond_prob(input_pwd, nn),
-                                        END_CHAR);
+    accum *= cached_table.probability_of_char(
+      input_pwd, END_CHAR, input_pwd == '');
   }
   return accum;
 }
 
 function lookupGuessNumber(input_pwd) {
+  var cached_value = gn_cache.get(input_pwd);
+  if (cached_value) {
+    return cached_value;
+  }
   var prob = totalProb(input_pwd, false);
   if (prob == 0) {
+    gn_cache.set(input_pwd, -1);
     return -1;
   }
-  for (var i = guess_numbers.length - 1; i >= 0; i--) {
-    var gn = guess_numbers[i];
-    if (gn[0] < prob) {
-      return Math.round(gn[1]);
-    }
+  var bs_search = bs.closest(guess_numbers, prob, function(value, find) {
+    if (value[0] > find) return 1;
+    else if (value[0] < find) return -1;
+    else return 0;
+  });
+  if (bs_search == 0) {
+    gn_cache.set(input_pwd, Infinity);
+    return Infinity;
   }
-  return Infinity;
+  var guess_number_answer;
+  if (bs_search > guess_numbers.length) {
+    guess_number_answer = guess_numbers[guess_numbers.length - 1];
+  } else {
+    guess_number_answer = guess_numbers[bs_search];
+  }
+  var answer = Math.round(guess_number_answer[1]);
+  gn_cache.set(input_pwd, answer);
+  return answer;
 }
 
 function handleMsg(e) {
   var message;
+  var pwd = e.data.inputData;
   if (e.data.action == ACTION_TOTAL_PROB) {
     message = {
-      prediction : totalProb(e.data.inputData, e.data.prefix)
+      prediction : totalProb(e.data.inputData, e.data.prefix),
+      password : pwd
     };
   } else if (e.data.action == ACTION_GUESS_NUMBER) {
     message = {
-      prediction : lookupGuessNumber(e.data.inputData)
+      prediction : lookupGuessNumber(e.data.inputData),
+      password : pwd
     };
   } else if (e.data.action == ACTION_PREDICT_NEXT) {
     message = {
-      prediction : predictNext(e.data.inputData)
+      prediction : predictNext(e.data.inputData),
+      password : pwd
     };
   } else if (e.data.action == ACTION_RAW_PREDICT_NEXT) {
     message = {
-      prediction : rawPredictNext(e.data.inputData)
+      prediction : rawPredictNext(e.data.inputData),
+      password : pwd
     };
   } else {
     console.error('Unknown message action', e.data.action);
@@ -221,6 +269,7 @@ request.addEventListener('load', function() {
   var info = JSON.parse(this.responseText)
   ctable = new CharacterTable(info);
   guess_numbers = info['guessing_table'];
+  cached_table = new ProbCacher(100, nn, ctable);
   nn.init().then(function() {
     console.log('Worker ready for passwords!');
     onLoadMsgs.forEach(handleMsg);

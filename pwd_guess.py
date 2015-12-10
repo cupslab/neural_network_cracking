@@ -1997,7 +1997,10 @@ class Guesser(object):
         self.relevel_not_matching_passwords = (
             config.relevel_not_matching_passwords)
         self.generated = 0
-        self.ctable = CharacterTable.fromConfig(self.config)
+        if self.config.tokenize_words:
+            self.ctable = TokenizingCharacterTable(self.config)
+        else:
+            self.ctable = CharacterTable.fromConfig(self.config)
         self.filterer = Filterer(self.config)
         self.chunk_size_guesser = self.config.chunk_size_guesser
         self.ostream = ostream
@@ -2029,7 +2032,8 @@ class Guesser(object):
         return self._calc_prob_cache
 
     def _should_make_guesses_rare_char_optimizer(self):
-        return (type(self.ctable) == OptimizingCharacterTable and
+        return ((self.config.uppercase_character_optimization or
+                 self.config.rare_character_optimization) and
                 self.config.rare_character_optimization_guessing)
 
     def make_serializer(self):

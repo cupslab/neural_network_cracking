@@ -20,7 +20,7 @@ PwdInput.prototype.onChangeTriggered = function(event) {
 function init() {
   console.log('Loading scripts');
   var display_next = $(DISPLAY_CLASS);
-  pwd_input = new PwdInput($(INPUT_CLASS), function(value) {
-    display_next.html(value);
+  pwd_input = new PwdInput($(INPUT_CLASS), function(prob, pwd) {
+    display_next.html(pwd + ': ' + prob);
   });
 }

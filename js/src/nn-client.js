@@ -1,4 +1,4 @@
-var NEURAL_NETWORK_SCRIPT = 'worker.js';
+var NEURAL_NETWORK_SCRIPT = 'worker.min.js';
 
 function NeuralNetworkClient(callback) {
   this.callback = callback;
@@ -7,7 +7,7 @@ function NeuralNetworkClient(callback) {
 }
 
 NeuralNetworkClient.prototype.onMessageTriggered = function(event) {
-  this.callback(event.data.prediction);
+  this.callback(event.data.prediction, event.data.password);
 };
 
 NeuralNetworkClient.prototype.query = function(pwd, prefix) {
@@ -46,3 +46,5 @@ NeuralNetworkClient.prototype.probability_char = function(pwd, next_char) {
     action : 'probability_char'
   });
 };
+
+global.NeuralNetworkClient = NeuralNetworkClient
