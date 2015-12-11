@@ -3,3 +3,12 @@ __pycache__
 build
 generator.so
 pwd_guess_ctypes.c
+js/examples/*.json
+js/node_modules
+js/examples/neocortex.min.js
+js/examples/worker.min.js
+js/examples/worker.js
+js/examples/nn-client.min.js
+js/examples/nn-client.js
+js/examples/test-suite.js
+js/examples/test_suite.html

@@ -116,6 +116,31 @@ class NodeTrie(BaseTrie):
             node = node.nodes[c]
         node.weight = value
 
+    def set_append(self, key, value):
+        node = self
+        for c in key:
+            node = node.nodes[c]
+        if type(node.weight) == list:
+            node.weight.append(value)
+        else:
+            node.weight = [value]
+
+    def get_completions(self, key):
+        answers = []
+        node = self
+        for c in key:
+            values = node.weight
+            if type(values) == list:
+                answers += values
+            if c in node.nodes:
+                node = node.nodes[c]
+            else:
+                return answers
+        values = node.weight
+        if type(values) == list:
+            answers += values
+        return answers
+
     def get_longest_prefix(self, key):
         node = self
         value, accum = 0, 0;
@@ -422,6 +447,7 @@ class CharacterTable(object):
         self.indices_char = dict((i, c) for i, c in enumerate(self.chars))
         self.maxlen = maxlen
         self.vocab_size = len(self.chars)
+        self.char_list = self.chars
 
     def pad_to_len(self, astring, maxlen = None):
         maxlen = maxlen if maxlen else self.maxlen
@@ -460,8 +486,10 @@ class CharacterTable(object):
         return astring
 
     @staticmethod
-    def fromConfig(config):
-        if (config.uppercase_character_optimization or
+    def fromConfig(config, tokenizer = True):
+        if tokenizer and config.tokenize_words:
+            return TokenizingCharacterTable(config)
+        elif (config.uppercase_character_optimization or
             config.rare_character_optimization):
             return OptimizingCharacterTable(
                 config.char_bag, config.context_length,
@@ -520,6 +548,7 @@ class DelegatingCharacterTable(object):
         self.real_ctable = ctable
         self.chars = self.real_ctable.chars
         self.vocab_size = len(self.chars)
+        self.char_list = self.chars
 
     def encode(self, ystr, maxlen = None):
         return self.real_ctable.encode(ystr, maxlen)
@@ -535,7 +564,7 @@ class DelegatingCharacterTable(object):
 
 class TokenizingCharacterTable(DelegatingCharacterTable):
     def __init__(self, config):
-        super().__init__(CharacterTable.fromConfig(config))
+        super().__init__(CharacterTable.fromConfig(config, False))
         self.token_list = list(map(
             self.real_ctable.translate,
             config.get_intermediate_info('most_common_tokens')))
@@ -548,7 +577,8 @@ class TokenizingCharacterTable(DelegatingCharacterTable):
                              'tokens. Size is %s but expected %s. '),
                             len(self.token_list),
                             config.most_common_token_count)
-        self.vocab_size = len(self.real_ctable.chars) + len(self.token_list)
+        self.char_list = self.token_list + list(self.chars)
+        self.vocab_size = len(self.char_list)
         self.indices_char = {}
         self.char_indices = {}
         for i, token in enumerate(self.token_list):
@@ -920,7 +950,7 @@ class Preprocessor(BasePreprocessor):
         self.resetable_pwd_list = None
         self.tokenize_words = config.tokenize_words
         if self.tokenize_words:
-            self.ctable = CharacterTable.fromConfig(config)
+            self.ctable = CharacterTable.fromConfig(config, False)
             self.tokenizer = SpecificTokenizer(list(map(
                 self.ctable.translate,
                 config.get_intermediate_info('most_common_tokens'))))
@@ -1148,9 +1178,6 @@ class Trainer(object):
         if config.scheduled_sampling:
             logging.info('Using scheduled sampling')
             self.ctable = ScheduledSamplingCharacterTable(self.config)
-        elif config.tokenize_words:
-            logging.info('Using word tokenizer')
-            self.ctable = TokenizingCharacterTable(self.config)
         else:
             self.ctable = CharacterTable.fromConfig(self.config)
         self.feature_layers = []
@@ -1975,6 +2002,25 @@ class SpecificTokenizer(object):
                 pwd = pwd[1:]
         return real_token_indexes
 
+class TokenCompleter(object):
+    def __init__(self, token_list):
+        self.token_completer = NodeTrie()
+        self.token_lengths = collections.defaultdict(list)
+        for token in token_list:
+            self.token_completer.set_append(token[:-1][::-1], token[-1])
+        for token in token_list:
+            for i in range(1, len(token) + 1):
+                self.token_lengths[i].append(token)
+
+    def longer_than(self, nchars):
+        if nchars in self.token_lengths:
+            return self.token_lengths[nchars]
+        else:
+            return []
+
+    def completions(self, pwd):
+        return self.token_completer.get_completions(pwd[::-1])
+
 class PasswordPolicyEnforcingSerializer(DelegatingSerializer):
     def __init__(self, policy, serializer):
         super().__init__(serializer)
@@ -1990,6 +2036,7 @@ class Guesser(object):
     def __init__(self, model, config, ostream, prob_cache = None):
         self.model = model
         self.config = config
+        self.tokenized_guessing = config.tokenize_words
         self.max_len = config.max_len
         self.char_bag = config.char_bag
         self.max_gpu_prediction_size = config.max_gpu_prediction_size
@@ -1998,13 +2045,13 @@ class Guesser(object):
             config.relevel_not_matching_passwords)
         self.generated = 0
         if self.config.tokenize_words:
-            self.ctable = TokenizingCharacterTable(self.config)
-        else:
-            self.ctable = CharacterTable.fromConfig(self.config)
+            self.token_completer = TokenCompleter(
+                self.config.get_intermediate_info('most_common_tokens'))
+        self.ctable = CharacterTable.fromConfig(self.config)
         self.filterer = Filterer(self.config)
         self.chunk_size_guesser = self.config.chunk_size_guesser
         self.ostream = ostream
-        self.chars_list = self.ctable.chars
+        self.chars_list = self.ctable.char_list
         self._calc_prob_cache = prob_cache
         self.should_make_guesses_rare_char_optimizer = (
             self._should_make_guesses_rare_char_optimizer())
@@ -2064,13 +2111,21 @@ class Guesser(object):
             multiply[pwd_end_idx] = 1
             preds[pwd_end_idx] = 1
             preds = np.multiply(preds, multiply, preds)
+        if self.tokenized_guessing:
+            # 0 out duplicating a token with letters and tokens that would be
+            # too long for the current string
+            for c in self.token_completer.completions(astring):
+                preds[self.ctable.get_char_index(c)] = 0
+            for c in self.token_completer.longer_than(
+                    self.max_len - len(astring) + 1):
+                preds[self.ctable.get_char_index(c)] = 0
         sum_per = sum(preds)
         for i, v in enumerate(preds):
             preds[i] = v / sum_per
 
     def relevel_prediction_many(self, pred_list, str_list):
         if (self.filterer.pwd_is_valid(str_list[0], quick = True) and
-            len(str_list[0]) != self.max_len):
+            len(str_list[0]) != self.max_len and not self.tokenized_guessing):
             return
         for i in range(len(pred_list)):
             self.relevel_prediction(pred_list[i][0], str_list[i])
@@ -2701,7 +2756,8 @@ def preprocessing(args, config):
     resetable = ResetablePwdList(args['pwd_file'], args['pwd_format'], config)
     # must be called before creating the preprocessor because it
     # initializes statistics needed for some preprocessors
-    resetable.initialize()
+    if 'no_initialize' not in args:
+        resetable.initialize()
     if args['stats_only']:
         logging.info('Only getting stats. Quitting...')
         return None
@@ -2735,6 +2791,7 @@ def train(args, config):
         fake_args = config.secondary_train_sets
         fake_args['stats_only'] = False
         fake_args['pre_processing_only'] = False
+        fake_args['no_initialize'] = True
         trainer.retrain_classification(preprocessing(fake_args, config),
                                        serializer)
     if args['enumerate_ofile']:
