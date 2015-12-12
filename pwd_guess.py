@@ -559,6 +559,9 @@ class DelegatingCharacterTable(object):
     def decode(self, X, argmax = True):
         return self.real_ctable.decode(X, argmax)
 
+    def translate(self, pwd):
+        return self.real_ctable.translate(pwd)
+
     def encode_many(self, xstrs):
         return self.real_ctable.encode_many(xstrs)
 
@@ -604,6 +607,7 @@ class TokenizingCharacterTable(DelegatingCharacterTable):
         return x_vec
 
     def get_char_index(self, char):
+        char = self.real_ctable.translate(char)
         if len(char) == 1:
             return self.real_ctable.get_char_index(char) + len(self.token_list)
         else:
@@ -617,6 +621,9 @@ class TokenizingCharacterTable(DelegatingCharacterTable):
         if len(C) < X.shape[0]:
             for j in range(len(C), self.maxlen):
                 X[j, self.get_char_index(PASSWORD_END)] = 1
+
+    def translate(self, pwd):
+        return self.real_ctable.translate(''.join(pwd))
 
     def encode(self, C, maxlen=None):
         maxlen = maxlen if maxlen else self.maxlen
@@ -975,8 +982,7 @@ class Preprocessor(BasePreprocessor):
         self.pwd_freqs = dict(pwd_tuples)
         pwds = list(map(lambda x: x[0], pwd_tuples))
         if self.tokenize_words:
-            pwds = list(map(tuple, map(self.tokenizer.tokenize,
-                                       map(self.ctable.translate, pwds))))
+            pwds = list(map(tuple, map(self.tokenizer.tokenize, pwds)))
         return (
             itertools.chain.from_iterable(map(self.all_prefixes, pwds)),
             itertools.chain.from_iterable(map(self.all_suffixes, pwds)),
@@ -1510,6 +1516,8 @@ class Filterer(object):
             adict[c] += 1
 
     def pwd_is_valid(self, pwd, quick = False):
+        if type(pwd) == tuple:
+            pwd = ''.join(pwd)
         pwd = pwd.strip(PASSWORD_END)
         answer = (all(map(lambda c: c in self.char_bag, pwd)) and
                   len(pwd) <= self.max_len and
@@ -1606,6 +1614,8 @@ class GuessSerializer(object):
         self.total_guessed = 0
 
     def serialize(self, password, prob):
+        if prob == 0:
+            return
         self.total_guessed += 1
         self.ostream.write('%s\t%s\n' % (password.strip(PASSWORD_END), prob))
 
@@ -1713,7 +1723,7 @@ class ProbabilityCalculator(object):
         self.preproc = Preprocessor(guesser.config)
         self.template_probs = False
         self.prefixes = prefixes
-        if type(self.ctable) == OptimizingCharacterTable:
+        if guesser._should_make_guesses_rare_char_optimizer():
             self.template_probs = True
             self.pts = PasswordTemplateSerializer(guesser.config)
 
@@ -1745,7 +1755,7 @@ class ProbabilityCalculator(object):
 class PasswordTemplateSerializer(DelegatingSerializer):
     def __init__(self, config, serializer = None, lower_prob_threshold = None):
         super().__init__(serializer)
-        ctable = CharacterTable.fromConfig(config)
+        ctable = CharacterTable.fromConfig(config, False)
         self.preimage = ctable.rare_character_preimage
         self.char_frequencies = config.get_intermediate_info(
             'character_frequencies')
@@ -1811,6 +1821,8 @@ class PasswordTemplateSerializer(DelegatingSerializer):
             self, probs, context, self.expander_cache)
 
     def find_real_pwd(self, template, pwd):
+        if type(pwd) == tuple:
+            pwd = ''.join(pwd)
         assert len(pwd) == len(template)
         prob = 1
         for i, char in enumerate(template):
@@ -2044,10 +2056,11 @@ class Guesser(object):
         self.relevel_not_matching_passwords = (
             config.relevel_not_matching_passwords)
         self.generated = 0
-        if self.config.tokenize_words:
-            self.token_completer = TokenCompleter(
-                self.config.get_intermediate_info('most_common_tokens'))
         self.ctable = CharacterTable.fromConfig(self.config)
+        if self.config.tokenize_words:
+            self.token_completer = TokenCompleter(list(map(
+                self.ctable.translate,
+                self.config.get_intermediate_info('most_common_tokens'))))
         self.filterer = Filterer(self.config)
         self.chunk_size_guesser = self.config.chunk_size_guesser
         self.ostream = ostream
@@ -2379,6 +2392,10 @@ class DelAmicoCalculator(GuessSerializer):
     def __init__(self, ostream, pwd_list, config):
         super().__init__(ostream)
         self.pwds, self.probs = zip(*sorted(pwd_list, key = lambda x: x[1]))
+        self.pwds = list(self.pwds)
+        for i, pwd in enumerate(self.pwds):
+            if type(pwd) == tuple:
+                self.pwds[i] = ''.join(pwd)
         self.guess_numbers = []
         for _ in range(len(self.pwds)):
             self.guess_numbers.append([])

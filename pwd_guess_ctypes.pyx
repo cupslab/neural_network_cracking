@@ -18,14 +18,14 @@ def next_nodes_random_walk(
     cdef np.ndarray[np.double_t, ndim = 1] total_preds = (
         conditional_predictions * prob)
     if len(astring) + 1 > self.max_len:
-        if (total_preds[self.pwd_end_idx] >=
+        if (total_preds[self.pwd_end_idx] >
             self.lower_probability_threshold):
             return [(astring + PASSWORD_END,
                      total_preds[self.pwd_end_idx],
                      conditional_predictions[self.pwd_end_idx])]
     cdef np.ndarray[np.int_t, ndim = 1] indexes = np.arange(len(total_preds))
     cdef np.ndarray above_cutoff = (
-        total_preds >= self.lower_probability_threshold)
+        total_preds > self.lower_probability_threshold)
     cdef np.ndarray[np.int_t, ndim = 1] above_indices = indexes[above_cutoff]
     cdef np.ndarray[np.double_t, ndim = 1] probs_above = (
         total_preds[above_cutoff])

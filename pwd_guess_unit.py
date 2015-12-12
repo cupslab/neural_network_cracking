@@ -1785,6 +1785,8 @@ class ProbabilityCalculatorTest(unittest.TestCase):
                           [[0, 0.5, 0.5]],
                           [[0, 0.5, 0.5]],
                           [[1, 0, 0]]])
+        mock_guesser._should_make_guesses_rare_char_optimizer = MagicMock(
+            return_value = False)
         p = pwd_guess.ProbabilityCalculator(mock_guesser)
         self.assertEqual(list(p.calc_probabilities([('aaa', 1)])),
                          [('aaa', 0.125)])
@@ -1794,6 +1796,8 @@ class ProbabilityCalculatorTest(unittest.TestCase):
         mock_guesser.config = pwd_guess.ModelDefaults(
             min_len = 3, max_len = 3, char_bag = 'ab\n',
             relevel_not_matching_passwords = False)
+        mock_guesser._should_make_guesses_rare_char_optimizer = MagicMock(
+            return_value = False)
         mock_guesser.batch_prob = MagicMock(
             return_value=[[[0, 0.5, 0.5]],
                           [[0, 0.5, 0.5]],
@@ -1812,6 +1816,8 @@ class ProbabilityCalculatorTest(unittest.TestCase):
         mock_guesser.config = pwd_guess.ModelDefaults(
             min_len = 3, max_len = 3, char_bag = 'ab\n',
             relevel_not_matching_passwords = False)
+        mock_guesser._should_make_guesses_rare_char_optimizer = MagicMock(
+            return_value = False)
         mock_guesser.batch_prob = MagicMock(
             return_value=[[[0, 0.5, 0.5]],
                           [[0, 0.4, 0.6]],
@@ -1845,6 +1851,8 @@ class ProbabilityCalculatorTest(unittest.TestCase):
                 'end_character_frequencies', freqs)
             mock_guesser = Mock()
             mock_guesser.config = config
+            mock_guesser._should_make_guesses_rare_char_optimizer = MagicMock(
+                return_value = True)
             mock_guesser.batch_prob = MagicMock(
                 return_value=[[[0, 0.5, 0.5]],
                               [[0, 0.5, 0.5]],
@@ -2262,6 +2270,12 @@ class DelAmicoRandomWalkTest(RandomWalkGuesserTest):
                         float(gn), 613 if pwd == 'aAaa' else 100, delta = 20)
 
     def test_guess_simulated_policy_tokens(self):
+        def mock_predict_smart_parallel_skewed_token(input_vec, **kwargs):
+            answer = []
+            for i in range(len(input_vec)):
+                answer.append([[0.25, 0.15, 0.3, 0.1, 0.2].copy()])
+            return answer
+
         with tempfile.NamedTemporaryFile(mode = 'w') as gf, \
              tempfile.NamedTemporaryFile() as intermediatef:
             gf.write('aAaa\nbbbBa\n')
@@ -2278,9 +2292,12 @@ class DelAmicoRandomWalkTest(RandomWalkGuesserTest):
                 intermediate_fname = intermediatef.name,
                 relevel_not_matching_passwords = True,
                 enforced_policy = 'one_uppercase',
+                tokenize_words = True,
+                most_common_token_count = 2,
                 guess_serialization_method = 'delamico_random_walk')
             config.set_intermediate_info(
                 'rare_character_bag', [])
+            config.set_intermediate_info('most_common_tokens', ['ab', 'BBB'])
             freqs = {
                 'a' : .4, 'b' : .4, 'A' : .1, 'B' : .1,
             }
@@ -2292,7 +2309,8 @@ class DelAmicoRandomWalkTest(RandomWalkGuesserTest):
             self.assertTrue(pwd_guess.Filterer(config).pwd_is_valid('aaa'))
             builder = self.make_builder(config)
             mock_model = Mock()
-            mock_model.predict = mock_predict_smart_parallel_skewed
+
+            mock_model.predict = mock_predict_smart_parallel_skewed_token
             builder.add_model(mock_model).add_file(self.tempf.name)
             guesser = builder.build()
             guesser.complete_guessing()
@@ -2304,9 +2322,9 @@ class DelAmicoRandomWalkTest(RandomWalkGuesserTest):
                     pwd, prob, gn, *_ = row
                     self.assertTrue(pwd == 'aAaa' or pwd == 'bbbBa')
                     self.assertEqual(
-                        prob, '4.096e-05' if pwd == 'aAaa' else '0.0016777216')
+                        prob, '0.000602825745683' if pwd == 'aAaa' else '0.00125387755102')
                     self.assertAlmostEqual(
-                        float(gn), 613 if pwd == 'aAaa' else 100, delta = 20)
+                        float(gn), 721 if pwd == 'aAaa' else 121, delta = 20)
 
 class ParallelRandomWalkGuesserTest(unittest.TestCase):
     def setUp(self):
