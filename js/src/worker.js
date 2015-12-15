@@ -269,7 +269,7 @@ request.addEventListener('load', function() {
   var info = JSON.parse(this.responseText)
   ctable = new CharacterTable(info);
   guess_numbers = info['guessing_table'];
-  cached_table = new ProbCacher(100, nn, ctable);
+  cached_table = new ProbCacher(CACHE_SIZE, nn, ctable);
   nn.init().then(function() {
     console.log('Worker ready for passwords!');
     onLoadMsgs.forEach(handleMsg);
