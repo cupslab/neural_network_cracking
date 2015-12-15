@@ -2322,7 +2322,7 @@ class DelAmicoRandomWalkTest(RandomWalkGuesserTest):
                     pwd, prob, gn, *_ = row
                     self.assertTrue(pwd == 'aAaa' or pwd == 'bbbBa')
                     self.assertEqual(
-                        prob, '0.000602825745683' if pwd == 'aAaa' else '0.00125387755102')
+                        prob, '6.75164835165e-05' if pwd == 'aAaa' else '0.00125387755102')
                     self.assertAlmostEqual(
                         float(gn), 721 if pwd == 'aAaa' else 121, delta = 20)
 

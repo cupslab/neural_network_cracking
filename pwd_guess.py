@@ -821,6 +821,7 @@ class ModelDefaults(object):
     secondary_train_sets = None
     training_main_memory_chunksize = 1000000
     tokenize_words = False
+    tokenize_guessing = True
     most_common_token_count = 2000
 
     def __init__(self, adict = None, **kwargs):
@@ -1723,6 +1724,7 @@ class ProbabilityCalculator(object):
         self.preproc = Preprocessor(guesser.config)
         self.template_probs = False
         self.prefixes = prefixes
+        self.config = guesser.config
         if guesser._should_make_guesses_rare_char_optimizer():
             self.template_probs = True
             self.pts = PasswordTemplateSerializer(guesser.config)
@@ -2048,7 +2050,8 @@ class Guesser(object):
     def __init__(self, model, config, ostream, prob_cache = None):
         self.model = model
         self.config = config
-        self.tokenized_guessing = config.tokenize_words
+        self.tokenized_guessing = (
+            config.tokenize_words and config.tokenize_guessing)
         self.max_len = config.max_len
         self.char_bag = config.char_bag
         self.max_gpu_prediction_size = config.max_gpu_prediction_size
