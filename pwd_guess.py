@@ -829,6 +829,7 @@ class ModelDefaults(object):
     tokenize_words = False
     tokenize_guessing = True
     most_common_token_count = 2000
+    probability_striation = False
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -2099,6 +2100,10 @@ class Guesser(object):
         return pwds
 
     def do_calculate_probs_from_file(self):
+        if self.config.probability_striation:
+            incrememnt = self.config.probability_striation
+            steps = 1 / increment
+            return [(str(i), increment * i) for i in range(steps)]
         pwds = self.read_test_passwords()
         logging.info('Calculating test set probabilities')
         return ProbabilityCalculator(self).calc_probabilities(pwds)
