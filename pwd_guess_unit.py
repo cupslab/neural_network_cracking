@@ -160,6 +160,16 @@ class NodeTrieTest(unittest.TestCase):
         self.assertEqual(trie.get_completions('as'), ['c'])
         self.assertEqual(set(trie.get_completions('asdf')), set(['c', 'b']))
 
+    def test_set_append_tuple(self):
+        trie = pwd_guess.NodeTrie()
+        trie.set_append('a', 'b')
+        trie.set_append('ba', 'b')
+        trie.set_append('bb', 'b')
+        self.assertEqual(trie.get_completions('a'), ['b'])
+        self.assertEqual(trie.get_completions('ba'), ['b'])
+        self.assertEqual(trie.get_completions(('ba', )), ['b'])
+        self.assertEqual(trie.get_completions(('bbb', )), [])
+
     def test_iterate(self):
         self.trie.increment('aaa', 1)
         self.assertEqual([('a', 1), ('aa', 1), ('aaa', 1)],
@@ -1350,6 +1360,40 @@ aaa	0.0625
         for row in actual:
             self.assertEqual(float(row[1]), expected[row[0]])
 
+    def test_guesser_larger_tokenized(self):
+        tokens = ['ab', 'bbb', 'abb']
+        config = Mock()
+        config.char_bag = 'ab\n'
+        config.most_common_token_count = len(tokens)
+        config.uppercase_character_optimization = False
+        config.rare_character_optimization = False
+        config.get_intermediate_info = MagicMock(return_value = tokens)
+        config.context_length = 3
+        config.min_len = 3
+        config.max_len = 5
+        config.relevel_not_match_passwords = True
+        config.chunk_size_guesser = 2
+        config.guess_serialization_method = 'human'
+        config.enforced_policy = 'basic'
+        config.max_gpu_prediction_size = 1
+        config.lower_probability_threshold = 1e-20
+        guesser, ostream = self.make(config, [0.25, 0.10, 0.05, 0.3, 0.1, 0.2])
+        guesser.guess()
+        expected = {
+            'abbbb': 0.005602241,
+            'bba': 0.007535322,
+            'bbbbb': 0.011204482
+        }
+        ostream.seek(0)
+        actual = list(csv.reader(ostream, delimiter = '\t'))
+        total_prob = 0
+        for row in actual:
+            if row[0] in expected:
+                self.assertAlmostEqual(float(row[1]), expected[row[0]])
+            total_prob += float(row[1])
+        self.assertAlmostEqual(1, total_prob)
+        self.assertEqual(len(actual), 8)
+
     def test_guesser_bigger_rare_c(self):
         with tempfile.NamedTemporaryFile() as intermediatef:
             config = pwd_guess.ModelDefaults(
@@ -2273,15 +2317,16 @@ class DelAmicoRandomWalkTest(RandomWalkGuesserTest):
         def mock_predict_smart_parallel_skewed_token(input_vec, **kwargs):
             answer = []
             for i in range(len(input_vec)):
-                answer.append([[0.25, 0.15, 0.3, 0.1, 0.2].copy()])
+                answer.append([[0.25, 0.10, 0.05, 0.3, 0.1, 0.2].copy()])
             return answer
 
         with tempfile.NamedTemporaryFile(mode = 'w') as gf, \
              tempfile.NamedTemporaryFile() as intermediatef:
-            gf.write('aAaa\nbbbBa\n')
+            gf.write('aAaa\nbbbBa\nabBBa\n')
             gf.flush()
             pw = pwd_guess.PwdList(gf.name)
-            self.assertEqual(list(pw.as_list()), [('aAaa', 1), ('bbbBa', 1)])
+            self.assertEqual(list(pw.as_list()), [
+                ('aAaa', 1), ('bbbBa', 1), ('abBBa', 1)])
             config = pwd_guess.ModelDefaults(
                 parallel_guessing = False, char_bag = 'abAB\n', min_len = 3,
                 max_len = 5, password_test_fname = gf.name,
@@ -2293,11 +2338,11 @@ class DelAmicoRandomWalkTest(RandomWalkGuesserTest):
                 relevel_not_matching_passwords = True,
                 enforced_policy = 'one_uppercase',
                 tokenize_words = True,
-                most_common_token_count = 2,
+                most_common_token_count = 3,
                 guess_serialization_method = 'delamico_random_walk')
             config.set_intermediate_info(
                 'rare_character_bag', [])
-            config.set_intermediate_info('most_common_tokens', ['ab', 'BBB'])
+            config.set_intermediate_info('most_common_tokens', ['ab', 'BBB', 'abb'])
             freqs = {
                 'a' : .4, 'b' : .4, 'A' : .1, 'B' : .1,
             }
@@ -2317,14 +2362,18 @@ class DelAmicoRandomWalkTest(RandomWalkGuesserTest):
             with open(self.tempf.name, 'r') as output:
                 reader = list(csv.reader(
                     output, delimiter = '\t', quotechar = None))
-                self.assertEqual(len(reader), 2)
+                self.assertEqual(len(reader), 3)
+                expected = {
+                    'aAaa' : ['6.75164835165e-05', '708'],
+                    'bbbBa' : ['0.000458936', '171'],
+                    'abBBa' : ['0.000146285714286', '520']
+                }
                 for row in reader:
                     pwd, prob, gn, *_ = row
-                    self.assertTrue(pwd == 'aAaa' or pwd == 'bbbBa')
-                    self.assertEqual(
-                        prob, '6.75164835165e-05' if pwd == 'aAaa' else '0.00125387755102')
+                    self.assertTrue(pwd in expected)
+                    self.assertAlmostEqual(float(prob), float(expected[pwd][0]))
                     self.assertAlmostEqual(
-                        float(gn), 721 if pwd == 'aAaa' else 121, delta = 20)
+                        float(gn), float(expected[pwd][1]), delta = 20)
 
 class ParallelRandomWalkGuesserTest(unittest.TestCase):
     def setUp(self):
@@ -2630,6 +2679,17 @@ class TokenCompleterTest(unittest.TestCase):
         self.assertEqual(set(t.completions('asdfasdf')), set([]))
         self.assertEqual(set(t.longer_than(3)),
                          set(['123', 'boy', 'boa', 'rta', 'qwerty', 'none']))
+
+    def test_completion_tuple(self):
+        t = pwd_guess.TokenCompleter(['123', 'boy', 'boa',
+                                      '12', 'qwerty', 'rta', 'none'])
+        self.assertEqual(set(t.completions(('12', ))), set(['3']))
+
+    def test_completion_tuple_prefix(self):
+        t = pwd_guess.TokenCompleter(['ab', 'bbb', 'abbb', 'bb'])
+        self.assertEqual(set(t.completions(('a', ))), set(['b', 'bbb']))
+        t = pwd_guess.TokenCompleter(['ab', 'abb', 'bbb'])
+        self.assertEqual(set(t.completions(('ab', ))), set(['b', 'bbb']))
 
     def test_create_many(self):
         rand_strings = ['asdfasdfasdf' for n in range(2000)]

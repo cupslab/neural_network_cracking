@@ -134,6 +134,12 @@ class NodeTrie(BaseTrie):
                 answers += values
             if c in node.nodes:
                 node = node.nodes[c]
+            elif len(c) != 1:
+                for k in c:
+                    if k in node.nodes:
+                        node = node.nodes[k]
+                    else:
+                        return answers
             else:
                 return answers
         values = node.weight
@@ -1617,8 +1623,10 @@ class GuessSerializer(object):
     def serialize(self, password, prob):
         if prob == 0:
             return
+        if type(password) == tuple:
+            password = ''.join(password)
         self.total_guessed += 1
-        self.ostream.write('%s\t%s\n' % (password.strip(PASSWORD_END), prob))
+        self.ostream.write('%s\t%s\n' % (password, prob))
 
     def get_total_guessed(self):
         return self.total_guessed
@@ -2018,6 +2026,7 @@ class SpecificTokenizer(object):
 
 class TokenCompleter(object):
     def __init__(self, token_list):
+        self.tokenizer = SpecificTokenizer(token_list)
         self.token_completer = NodeTrie()
         self.token_lengths = collections.defaultdict(list)
         for token in token_list:
@@ -2033,7 +2042,13 @@ class TokenCompleter(object):
             return []
 
     def completions(self, pwd):
-        return self.token_completer.get_completions(pwd[::-1])
+        def rev_item(item):
+            return item[::-1]
+        if type(pwd) == tuple:
+            return self.token_completer.get_completions(
+                map(rev_item, pwd[::-1]))
+        else:
+            return self.token_completer.get_completions(pwd[::-1])
 
 class PasswordPolicyEnforcingSerializer(DelegatingSerializer):
     def __init__(self, policy, serializer):
@@ -2119,9 +2134,14 @@ class Guesser(object):
         return answer
 
     def relevel_prediction(self, preds, astring):
+        if type(astring) == tuple:
+            astring_joined_len = sum(map(len, astring))
+        else:
+            astring_joined_len = 0
         if not self.filterer.pwd_is_valid(astring, quick = True):
             preds[self.ctable.get_char_index(PASSWORD_END)] = 0
-        elif len(astring) == self.max_len:
+        elif len(astring) == self.max_len or (
+                type(astring) == tuple and astring_joined_len == self.max_len):
             multiply = np.zeros(len(preds))
             pwd_end_idx = self.ctable.get_char_index(PASSWORD_END)
             multiply[pwd_end_idx] = 1
@@ -2133,7 +2153,7 @@ class Guesser(object):
             for c in self.token_completer.completions(astring):
                 preds[self.ctable.get_char_index(c)] = 0
             for c in self.token_completer.longer_than(
-                    self.max_len - len(astring) + 1):
+                    self.max_len - astring_joined_len + 1):
                 preds[self.ctable.get_char_index(c)] = 0
         sum_per = sum(preds)
         for i, v in enumerate(preds):
@@ -2163,8 +2183,7 @@ class Guesser(object):
         if len(astring) + 1 > self.max_len:
             prob_end = total_preds[self.pwd_end_idx]
             if prob_end >= self.lower_probability_threshold:
-                self.output_serializer.serialize(astring + PASSWORD_END,
-                                                 prob_end)
+                self.output_serializer.serialize(astring, prob_end)
                 self.generated += 1
             return []
         indexes = np.arange(len(total_preds))
@@ -2173,14 +2192,16 @@ class Guesser(object):
         probs_above = total_preds[above_cutoff]
         answer = []
         for i in range(len(probs_above)):
-            index = above_indices[i]
-            char = self.chars_list[index]
+            char = self.chars_list[above_indices[i]]
             chain_prob = probs_above[i]
-            chain_pass = astring + char
             if char == PASSWORD_END:
-                self.output_serializer.serialize(chain_pass, chain_prob)
+                self.output_serializer.serialize(astring, chain_prob)
                 self.generated += 1
             else:
+                if self.tokenized_guessing:
+                    chain_pass = astring + (char,)
+                else:
+                    chain_pass = astring + char
                 answer.append((chain_pass, chain_prob))
         return answer
 
@@ -2222,8 +2243,17 @@ class Guesser(object):
     def recur(self, astring = '', prob = 1):
         self.super_node_recur([(astring, prob)])
 
+    def starting_node(self, default_value):
+        if self.tokenized_guessing:
+            if default_value == '':
+                return tuple()
+            else:
+                return default_value
+        else:
+            return default_value
+
     def guess(self, astring = '', prob = 1):
-        self.recur(astring, prob)
+        self.recur(self.starting_node(astring), prob)
 
     def complete_guessing(self, start = '', start_prob = 1):
         logging.info('Enumerating guesses starting at %s, %s...',
@@ -2566,7 +2596,7 @@ class ParallelGuesser(Guesser):
         super().super_node_recur(continue_nodes)
 
     def guess(self, astring = '', prob = 1):
-        self.recur(astring, prob)
+        self.recur(self.starting_node(astring), prob)
         self.do_forking()
 
     def arg_list(self):
@@ -2740,7 +2770,7 @@ serializer_type_list = {
 }
 
 def get_version_string():
-    p = subp.Popen(['git', 'describe'],
+    p = subp.Popen(['git', 'log', '--pretty=format:%H', '-n', '1'],
                    cwd = os.path.dirname(os.path.realpath(__file__)),
                    stdin=subp.PIPE, stdout=subp.PIPE, stderr=subp.PIPE)
     output, err = p.communicate()

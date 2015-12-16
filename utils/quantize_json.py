@@ -5,13 +5,26 @@ import argparse
 import json
 import decimal as decimal
 
+max_value = -1
+min_value = 1
+previous = 0
+
 def quantize(bits):
     size = '1.' + ('0' * bits)
-    return lambda x: float(decimal.Decimal(x).quantize(decimal.Decimal(size)))
+    def quantize(x):
+        global max_value, min_value, previous
+        answer = decimal.Decimal(x)
+        max_value = max(answer, max_value)
+        min_value = min(answer, min_value)
+        temp = answer # - previous
+        previous = answer
+        return float(temp.quantize(decimal.Decimal(size)))
+    return quantize
 
 def main(args):
     json.dump(json.load(
         args.ifile, parse_float=quantize(args.bits)), args.ofile)
+    sys.stderr.write(str(max_value) + ', ' + str(min_value) + '\n')
 
 if __name__=='__main__':
     parser = argparse.ArgumentParser(description='')
