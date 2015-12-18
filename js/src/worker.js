@@ -12,7 +12,7 @@ var ACTION_GUESS_NUMBER = 'guess_number';
 var UPPERCASE = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 var END_CHAR = '\n';
 var NEURAL_NETWORK_INTERMEDIATE = 'js_info_and_gn2.json';
-var NEURAL_NETWORK_FILE = 'js_model_v10.quantized.json';
+var NEURAL_NETWORK_FILE = 'js_model_v10.json';
 var CACHE_SIZE = 100;
 
 var nn = new NeuralNet({
@@ -47,8 +47,8 @@ function CharacterTable(intermediate_info) {
   this.backwards = intermediate_info.train_backwards;
   var rare_char_list = intermediate_info.rare_char_bag.join('')
   this.real_characters = intermediate_info.char_bag_real.join('');
-  for (var i = 0; i < rare_char_list; i++) {
-    this.real_characters = this.real_characters.replace(rare_char[i], '');
+  for (var i = 1; i < rare_char_list.length; i++) {
+    this.real_characters = this.real_characters.replace(rare_char_list[i], '');
     this.rare_chars[rare_char_list[i]] = rare_char_list[0];
     add_to_rco(rare_char_list[0], rare_char_list[i]);
   }
@@ -143,7 +143,7 @@ CharacterTable.prototype.decode_probs = function(prob_list) {
 
 CharacterTable.prototype.probability_of_char = function(
   prob_list, next_char, beginning) {
-  var value = ctable.decode_probs(prob_list);
+  var value = this.decode_probs(prob_list);
   var answer;
   if (next_char in value) {
     answer = value[next_char];
@@ -152,7 +152,7 @@ CharacterTable.prototype.probability_of_char = function(
   }
   var prev = answer;
   if (next_char in this.rare_chars) {
-    var template_char = this.rare_chars[next_char]
+    var template_char = this.rare_chars[next_char];
     if (!beginning) {
       answer *= this.rare_character_calc[template_char][next_char];
     } else {
