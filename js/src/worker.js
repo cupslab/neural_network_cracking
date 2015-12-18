@@ -11,8 +11,8 @@ var ACTION_RAW_PREDICT_NEXT = 'raw_predict_next';
 var ACTION_GUESS_NUMBER = 'guess_number';
 var UPPERCASE = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 var END_CHAR = '\n';
-var NEURAL_NETWORK_INTERMEDIATE = 'js_info_and_gn.json';
-var NEURAL_NETWORK_FILE = './js_model_small.json';
+var NEURAL_NETWORK_INTERMEDIATE = 'js_info_and_gn2.json';
+var NEURAL_NETWORK_FILE = 'js_model_v10.quantized.json';
 var CACHE_SIZE = 100;
 
 var nn = new NeuralNet({
@@ -224,10 +224,10 @@ function lookupGuessNumber(input_pwd) {
     return Infinity;
   }
   var guess_number_answer;
-  if (bs_search > guess_numbers.length) {
+  if (bs_search + 1 > guess_numbers.length) {
     guess_number_answer = guess_numbers[guess_numbers.length - 1];
   } else {
-    guess_number_answer = guess_numbers[bs_search];
+    guess_number_answer = guess_numbers[bs_search + 1];
   }
   var answer = Math.round(guess_number_answer[1]);
   gn_cache.set(input_pwd, answer);
@@ -266,7 +266,7 @@ function handleMsg(e) {
 var request = new XMLHttpRequest();
 request.addEventListener('load', function() {
   console.log('Network loaded')
-  var info = JSON.parse(this.responseText)
+  var info = JSON.parse(this.responseText);
   ctable = new CharacterTable(info);
   guess_numbers = info['guessing_table'];
   cached_table = new ProbCacher(CACHE_SIZE, nn, ctable);

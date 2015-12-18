@@ -18,6 +18,8 @@ class PgsFile(object):
                 return str(round(value))
             except ValueError:
                 return value
+            except OverflowError:
+                return -1
         answer = [(row[0], get_value(row)) for row in csv.reader(
             self.ifile, delimiter = '\t', quotechar=None)]
         self.ifile.close()
@@ -33,7 +35,10 @@ class PgsFile(object):
             try:
                 return int(value)
             except ValueError:
-                return round(float(value))
+                try:
+                    return round(float(value))
+                except OverflowError:
+                    return -1
         return max(map(try_int, adict))
 
 USER_COLUMN = 'no_user'
