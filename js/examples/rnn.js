@@ -5,7 +5,7 @@ var pwd_input;
 function PwdInput(elem, callback) {
   this.elem = elem;
   this.client = new NeuralNetworkClient(callback);
-  var onchange = this.onChangeTriggered.bind(this)
+  var onchange = this.onChangeTriggered.bind(this);
   this.elem.change(onchange);
   this.elem.keydown(onchange);
   this.elem.keyup(onchange);

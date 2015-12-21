@@ -1,0 +1,121 @@
+INTRO
+
+This is the javascript code for a browser implementation of a neural network
+password cracker.
+
+SETUP
+
+You will need to download and install node.js and the npm package manager and
+the jq utility. You will also need a copy of a modified version of the neocortex
+javascript library. If you don't have it, ask me. This should be a file called
+"neocortex.min.js". For some steps you may need the whole library.
+
+Compiling
+
+    Run from this directory:
+    npm install
+    npm run build
+
+Testing
+
+    Make sure that the neocortex.min.js file is copied into the examples directory.
+    Run from this directory (After compiling):
+    npm run test
+
+    There are two tests: test_suite.{html,js} and guessing_curve.{html,js}
+
+Creating a model
+
+    This section assumes you have a trained model (weight file and architecture
+    file) and configuration file from the pwd_guess.py step, and have prepared a
+    guessing file.
+
+    Make sure that the string in src/worker.js points to the correct files.
+
+    General steps:
+
+    1. Serialize a model.
+
+    In the utilities directory of this project, there is a utility to create
+    a model from an architecture file and a weight file. You need to make sure
+    that the utilities folder of the modified neocortex library is in your
+    PYTHONPATH. See the serializer_for_js.py file for more information about
+    supported options.
+
+    serializer_for_js.py model_file weight_file ofile
+
+    Make sure that the ofile matches the file name in worker.js and when
+    deployed is in the same directory as the worker.min.js file.
+
+    2. Create a guess number and model information file.
+
+    This extracts information about the post processing of the neural network
+    and how probabilities match guess numbers. See utils/extract_js_info.py for
+    more info. This needs to be done in the training directory.
+
+    extract_js_info.py model_config_file output_info_file.json
+
+    extract_prob_to_gn.py ifile --ofile output_guess_number_file.json
+
+    Combine these two files into one json file:
+
+    jq --slurp '.[0] * .[1]' output_info_file.json output_guess_number_file.json > info_file_and_gn.json
+
+    Make sure that "info_file_and_gn.json" is stored in the same directory as
+    the worker.{min.}js file and matches the filename in the worker.js source
+    file.
+
+    3. [Optional for testing] Generate test cases
+
+    This step is if you want to run test cases in the test_suite.js file. See
+    generate_js_test_cases.py for more information. Make sure that pwd_guess.py
+    is in your PYTHONPATH.
+
+    utils/generate_js_test_cases.py model_file weight_file config_file --output out_file
+
+    This will create a JSON file that should be saved to the same location as
+    the file name referenced from the test_suite.js file.
+
+    Test cases in test_suite.js may fail, especially if you are using a
+    quantized model, but should succeed for a non-quantized model.
+
+    If you want to use the guessing_curve.{html,js} code, then you must also
+    create a list of test passwords. This can be any list of passwords with one
+    password per line. Use the utils/to_json.py file to convert a list of
+    passwords to JSON format. Make sure that the output matches the filename in
+    the guessing_curve.js file.
+
+    4. [Optional but recommended for deployment]
+
+    Make sure that your web server compresses the model file. Gzip or deflate
+    compression are both fine and should work transparently. How to do this
+    depends on the web server that is being used.
+
+    5. [Optional but recommended for deployment]
+
+    Quantize the javascript model so that it takes less space. See the
+    quantize_json.py script for more details. This requires the json file from
+    step 1.
+
+    utils/quantize_json.py --ifile input_file_from_step1.json --ofile output_model_file.json [--bits #]
+
+USAGE
+
+First set up a neural network client by calling the constructor. This will
+create a new thread that downloads a model and can respond to requests for guess
+numbers. The argument in the constructor is a callback. This callback will be
+given two arguments: a guess number and the password that the guess number
+corresponds to.
+
+To get a guess number, call the query_guess_number function on the client. This
+is an asynchronous call. The guess number is returned via the callback given in
+the constructor.
+
+Minimal example of usage in javascript code:
+
+    var client = new NeuralNetworkClient(function(guess_number, pwd) {
+      // Do something with the password and guess number
+      console.log(pwd + ': ' + guess_number);
+    });
+    // Request a guess number for a password
+    client.query_guess_number('ASDF123;!a');
