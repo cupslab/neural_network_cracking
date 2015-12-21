@@ -27,7 +27,7 @@ var guess_numbers;
 var gn_cache = new jscache.Cache(CACHE_SIZE);
 var onLoadMsgs = [];
 
-onmessage = function(e) {
+self.onmessage = function(e) {
   onLoadMsgs.push(e);
 };
 
@@ -40,14 +40,17 @@ function CharacterTable(intermediate_info) {
   this.rare_chars_opposite = {};
   var add_to_rco = (function(from, to) {
     if (!(from in this.rare_chars_opposite)) {
-      this.rare_chars_opposite[from] = []
+      this.rare_chars_opposite[from] = [];
     }
     this.rare_chars_opposite[from].push(to);
   }).bind(this);
   this.backwards = intermediate_info.train_backwards;
-  var rare_char_list = intermediate_info.rare_char_bag.join('')
+  var rare_char_list = intermediate_info.rare_char_bag.join('');
   this.real_characters = intermediate_info.char_bag_real.join('');
   for (var i = 1; i < rare_char_list.length; i++) {
+    if (UPPERCASE.indexOf(rare_char_list[i]) != -1) {
+      continue;
+    }
     this.real_characters = this.real_characters.replace(rare_char_list[i], '');
     this.rare_chars[rare_char_list[i]] = rare_char_list[0];
     add_to_rco(rare_char_list[0], rare_char_list[i]);
@@ -125,7 +128,7 @@ CharacterTable.prototype.cond_prob = function(pwd, nn) {
   var answer = nn.predict(this.encode_pwd(pwd));
   if (pwd.length < this.min_len) {
     answer[this.ctable_idx[END_CHAR]] = 0;
-    var sum = answer.reduce( function(prev, cur) { return prev + cur } );
+    var sum = answer.reduce(function(prev, cur) { return prev + cur; });
     for (var j = 0; j < answer.length; j++) {
       answer[j] = answer[j] / sum;
     }
@@ -265,7 +268,7 @@ function handleMsg(e) {
 
 var request = new XMLHttpRequest();
 request.addEventListener('load', function() {
-  console.log('Network loaded')
+  console.log('Network loaded');
   var info = JSON.parse(this.responseText);
   ctable = new CharacterTable(info);
   guess_numbers = info['guessing_table'];
