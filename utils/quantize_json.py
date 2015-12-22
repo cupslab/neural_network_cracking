@@ -5,44 +5,44 @@ import argparse
 import json
 import decimal as decimal
 
-max_value = -1
-min_value = 1
-min_non_zero = 1
-previous = 0
+class DeltaCoder(object):
+    def __init__(self):
+        self.prev = 0
 
-fp_max = 5
-fp_min = -5
+    def __call__(self, x):
+        answer = x - self.prev
+        self.prev = x
+        return answer
 
-def quantize(bits, fixed_point):
+    def curry(self, fn):
+        return lambda y: self(fn(y))
+
+def quantize(bits, fixed_point, delta):
     size = '1.' + ('0' * bits)
-    fp_bits = 2**bits
-    fp_domain = (fp_max + abs(fp_min))
-    fp_offset = 0 # fp_domain / 2
-    fp_factor = fp_bits / fp_domain
     def quantize(x):
-        global max_value, min_value, previous, min_non_zero
-        answer = decimal.Decimal(x)
-        max_value = max(answer, max_value)
-        min_value = min(answer, min_value)
-        if answer != 0:
-            min_non_zero = min(min_non_zero, abs(answer))
-        if fixed_point:
-            temp = int((float(answer) + fp_offset) * fp_factor)
-        else:
-            temp = float(answer.quantize(decimal.Decimal(size)))
-        previous = temp
-        return temp
-    return quantize
+        return float(decimal.Decimal(x).quantize(decimal.Decimal(size)))
+    def fixed_point_q(x):
+        return int(float(x) * fixed_point)
+    if fixed_point == -1:
+        answer_fn = quantize
+    else:
+        answer_fn = fixed_point_q
+    if delta:
+        return DeltaCoder().curry(answer_fn)
+    return answer_fn
 
 def main(args):
-    json.dump(json.load(
-        args.ifile, parse_float=quantize(args.bits, args.fixed_point)),
-              args.ofile)
-    sys.stderr.write(', '.join(map(str, [
-        max_value, min_value, min_non_zero])) + '\n')
+    oobj = json.load(args.ifile, parse_float=quantize(
+        args.bits, args.fixed_point, args.delta_coding))
+    if args.remove_spaces:
+        str_value = json.dumps(oobj)
+        args.ofile.write(str_value.replace(' ', ''))
+    else:
+        json.dump(oobj, args.ofile)
 
 if __name__=='__main__':
-    parser = argparse.ArgumentParser(description='')
+    parser = argparse.ArgumentParser(
+        description='Compress json data by quantizing floats')
     parser.add_argument('-i', '--ifile', type=argparse.FileType('r'),
                         help='Input file. Default is stdin. ',
                         default=sys.stdin)
@@ -50,5 +50,8 @@ if __name__=='__main__':
                         help='Output file. Default is stdout. ',
                         default=sys.stdout)
     parser.add_argument('-b', '--bits', default=4, type=int)
-    parser.add_argument('-f', '--fixed-point', action='store_true')
+    parser.add_argument('-f', '--fixed-point', type=int, default=-1,
+                        help='Factor to multiply data by')
+    parser.add_argument('-d', '--delta-coding', action='store_true')
+    parser.add_argument('-r', '--remove-spaces', action='store_true')
     main(parser.parse_args())

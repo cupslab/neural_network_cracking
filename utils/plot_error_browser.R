@@ -6,6 +6,7 @@ args <- commandArgs(trailingOnly = TRUE)
 ifname = args[1]
 ifname.exact = args[2]
 ofname = args[3]
+ofname_histogram = args[4]
 
 OBSERVED_ERROR_Y_LABEL = "Observed percent error"
 PERCENT_ERROR_X_LABEL = "Guess number"
@@ -30,3 +31,14 @@ p <- p + theme_bw()
 p <- p + scale_y_continuous(labels = percent)
 p <- p + ylab(OBSERVED_ERROR_Y_LABEL)
 ggsave(filename = ofname, plot = p)
+
+if (!is.na(ofname_histogram)) {
+    p <- ggplot(both.values, aes(x = percent.error))
+    p <- p + geom_histogram()
+    p <- p + theme_bw()
+    p <- p + scale_y_continuous()
+    p <- p + scale_x_continuous(labels = percent)
+    p <- p + ylab("Number of passwords")
+    p <- p + xlab("Percent error")
+    ggsave(filename = ofname_histogram, plot = p)
+}

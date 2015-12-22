@@ -1,8 +1,11 @@
 'use strict';
 
+// Change these
+var NEURAL_NETWORK_INTERMEDIATE = 'js_info_and_gn3.json';
+var NEURAL_NETWORK_FILE = 'js_model_v10.msgpacked.json';
+
 var jscache = require('js-cache');
 var bs = require('binarysearch');
-
 importScripts('neocortex.min.js');
 
 var ACTION_TOTAL_PROB = 'total_prob';
@@ -11,16 +14,9 @@ var ACTION_RAW_PREDICT_NEXT = 'raw_predict_next';
 var ACTION_GUESS_NUMBER = 'guess_number';
 var UPPERCASE = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 var END_CHAR = '\n';
-var NEURAL_NETWORK_INTERMEDIATE = 'js_info_and_gn2.json';
-var NEURAL_NETWORK_FILE = 'js_model_v10.json';
 var CACHE_SIZE = 100;
 
-var nn = new NeuralNet({
-  modelFilePath: NEURAL_NETWORK_FILE,
-  arrayType: 'float32',
-  useGPU: true
-});
-
+var nn;
 var ctable;
 var cached_table;
 var guess_numbers;
@@ -272,13 +268,17 @@ request.addEventListener('load', function() {
   var info = JSON.parse(this.responseText);
   ctable = new CharacterTable(info);
   guess_numbers = info['guessing_table'];
+  nn = new NeuralNet({
+    modelFilePath: NEURAL_NETWORK_FILE,
+    arrayType: 'float32',
+    useGPU: true,
+    msgPackFmt: info['fixed_point_scale']
+  });
   cached_table = new ProbCacher(CACHE_SIZE, nn, ctable);
-  nn.init().then(function() {
+  nn.init(function() {
     console.log('Worker ready for passwords!');
     onLoadMsgs.forEach(handleMsg);
     self.onmessage = handleMsg;
-  }).catch(function(error) {
-    console.error(error);
   });
 });
 request.open('GET', NEURAL_NETWORK_INTERMEDIATE);
