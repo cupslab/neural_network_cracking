@@ -832,6 +832,7 @@ class ModelDefaults(object):
     most_common_token_count = 2000
     probability_striation = False
     prob_striation_step = 0.05
+    freeze_feature_layers_during_secondary_training = True
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -1336,7 +1337,10 @@ class Trainer(object):
     def retrain_classification(self, preprocessor, serializer):
         assert self.model is not None
         assert len(self.feature_layers) != 0
-        self.freeze_feature_layers()
+        if self.config.freeze_feature_layers_during_secondary_training:
+            logging.info('Freezing feature layers...')
+            self.freeze_feature_layers()
+        logging.info('Retraining...')
         self.pwd_list = preprocessor
         self.train(serializer)
 
