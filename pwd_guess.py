@@ -1828,7 +1828,7 @@ class PasswordTemplateSerializer(DelegatingSerializer):
                     i, after_image_char, self.post_image[after_image_char]))
 
     def expand_conditional_probs(self, probs, context):
-        return generator.expand_conditional_probs(
+        return pwd_guess_gen.expand_conditional_probs(
             self, probs, len(context) == 0, self.expander_cache)
 
     def find_real_pwd(self, template, pwd):

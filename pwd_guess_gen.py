@@ -29,3 +29,9 @@ def next_nodes_random_walk_tuple(self, astring, prob, prediction):
         answer[i] = (astring + (self._chars_list[index],), probs_above[i],
                      conditional_predictions[index])
     return answer
+
+def expand_conditional_probs(self, probs, context, expander_cache):
+    answer = probs[expander_cache]
+    for i, after_image_char, post_image in self.post_image_idx:
+        answer[i] *= self.calc(post_image, after_image_char, context)
+    return answer
