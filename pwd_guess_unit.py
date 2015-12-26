@@ -1342,6 +1342,7 @@ aaa	0.0625
         config.enforced_policy = 'basic'
         config.max_gpu_prediction_size = 1
         config.lower_probability_threshold = 1e-20
+        config.tokenize_words = True
         guesser, ostream = self.make(config, [0.3, 0.2, 0.1, 0.4])
         guesser.guess()
         expected = {
@@ -1377,6 +1378,7 @@ aaa	0.0625
         config.enforced_policy = 'basic'
         config.max_gpu_prediction_size = 1
         config.lower_probability_threshold = 1e-20
+        config.tokenize_words = True
         guesser, ostream = self.make(config, [0.25, 0.10, 0.05, 0.3, 0.1, 0.2])
         guesser.guess()
         expected = {
@@ -1391,8 +1393,7 @@ aaa	0.0625
             if row[0] in expected:
                 self.assertAlmostEqual(float(row[1]), expected[row[0]])
             total_prob += float(row[1])
-        self.assertAlmostEqual(1, total_prob)
-        self.assertEqual(len(actual), 8)
+        self.assertEqual(len(actual), 56)
 
     def test_guesser_bigger_rare_c(self):
         with tempfile.NamedTemporaryFile() as intermediatef:
@@ -2319,7 +2320,6 @@ class DelAmicoRandomWalkTest(RandomWalkGuesserTest):
             for i in range(len(input_vec)):
                 answer.append([[0.25, 0.10, 0.05, 0.3, 0.1, 0.2].copy()])
             return answer
-
         with tempfile.NamedTemporaryFile(mode = 'w') as gf, \
              tempfile.NamedTemporaryFile() as intermediatef:
             gf.write('aAaa\nbbbBa\nabBBa\n')
@@ -2342,7 +2342,8 @@ class DelAmicoRandomWalkTest(RandomWalkGuesserTest):
                 guess_serialization_method = 'delamico_random_walk')
             config.set_intermediate_info(
                 'rare_character_bag', [])
-            config.set_intermediate_info('most_common_tokens', ['ab', 'BBB', 'abb'])
+            config.set_intermediate_info(
+                'most_common_tokens', ['ab', 'BBB', 'abb'])
             freqs = {
                 'a' : .4, 'b' : .4, 'A' : .1, 'B' : .1,
             }
@@ -2354,7 +2355,6 @@ class DelAmicoRandomWalkTest(RandomWalkGuesserTest):
             self.assertTrue(pwd_guess.Filterer(config).pwd_is_valid('aaa'))
             builder = self.make_builder(config)
             mock_model = Mock()
-
             mock_model.predict = mock_predict_smart_parallel_skewed_token
             builder.add_model(mock_model).add_file(self.tempf.name)
             guesser = builder.build()
@@ -2364,9 +2364,9 @@ class DelAmicoRandomWalkTest(RandomWalkGuesserTest):
                     output, delimiter = '\t', quotechar = None))
                 self.assertEqual(len(reader), 3)
                 expected = {
-                    'aAaa' : ['6.75164835165e-05', '708'],
-                    'bbbBa' : ['0.000458936', '171'],
-                    'abBBa' : ['0.000146285714286', '520']
+                    'aAaa' : ['6.75164835165e-05', '721'],
+                    'bbbBa' : ['0.00125387755102', '121'],
+                    'abBBa' : ['0.000219428571429', '431']
                 }
                 for row in reader:
                     pwd, prob, gn, *_ = row
@@ -2685,15 +2685,22 @@ class TokenCompleterTest(unittest.TestCase):
                                       '12', 'qwerty', 'rta', 'none'])
         self.assertEqual(set(t.completions(('12', ))), set(['3']))
 
-    def test_completion_tuple_prefix(self):
-        t = pwd_guess.TokenCompleter(['ab', 'bbb', 'abbb', 'bb'])
-        self.assertEqual(set(t.completions(('a', ))), set(['b', 'bbb']))
-        t = pwd_guess.TokenCompleter(['ab', 'abb', 'bbb'])
-        self.assertEqual(set(t.completions(('ab', ))), set(['b', 'bbb']))
-
     def test_create_many(self):
         rand_strings = ['asdfasdfasdf' for n in range(2000)]
         t = pwd_guess.TokenCompleter(rand_strings)
+
+class TokenizingSerializer(unittest.TestCase):
+    def test_serialize(self):
+        mock_tokenizer = Mock()
+        mock_serializer = Mock()
+        mock_serializer.serialize = MagicMock()
+        t = pwd_guess.TokenizingSerializer(mock_tokenizer, mock_serializer)
+        mock_tokenizer.tokenize = MagicMock(return_value=['pass', '123'])
+        t.serialize(('pass', '123'), .1)
+        mock_serializer.serialize.assert_called_with('pass123', .1)
+        mock_tokenizer.tokenize = MagicMock(return_value=['pass', '123'])
+        t.serialize(('pass', '1', '23'), .1)
+        mock_serializer.serialize.assert_called_with('pass123', 0)
 
 if __name__ == '__main__':
     unittest.main()

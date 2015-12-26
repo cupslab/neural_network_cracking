@@ -992,10 +992,9 @@ class Preprocessor(BasePreprocessor):
         pwds = list(map(lambda x: x[0], pwd_tuples))
         if self.tokenize_words:
             pwds = list(map(tuple, map(self.tokenizer.tokenize, pwds)))
-        return (
-            itertools.chain.from_iterable(map(self.all_prefixes, pwds)),
-            itertools.chain.from_iterable(map(self.all_suffixes, pwds)),
-            itertools.chain.from_iterable(map(self.repeat_weight, pwds)))
+        return (itertools.chain.from_iterable(map(self.all_prefixes, pwds)),
+                itertools.chain.from_iterable(map(self.all_suffixes, pwds)),
+                itertools.chain.from_iterable(map(self.repeat_weight, pwds)))
 
     def next_chunk(self):
         if self.chunk * self.config.training_chunk >= len(self.pwd_whole_list):
@@ -1021,8 +1020,7 @@ class Preprocessor(BasePreprocessor):
             pwd = ''.join(pwd)
         if pwd in self.pwd_freqs:
             return self.pwd_freqs[pwd]
-        logging.warning('Cannot find frequency for password %s', pwd)
-        return 1
+        assert False, 'Cannot find frequency for password'
 
     def reset(self):
         if self.resetable_pwd_list is None:
@@ -1830,7 +1828,7 @@ class PasswordTemplateSerializer(DelegatingSerializer):
 
     def expand_conditional_probs(self, probs, context):
         return generator.expand_conditional_probs(
-            self, probs, context, self.expander_cache)
+            self, probs, len(context) == 0, self.expander_cache)
 
     def find_real_pwd(self, template, pwd):
         if type(pwd) == tuple:
@@ -2063,6 +2061,19 @@ class PasswordPolicyEnforcingSerializer(DelegatingSerializer):
         else:
             self.serializer.serialize(pwd, 0)
 
+class TokenizingSerializer(DelegatingSerializer):
+    def __init__(self, tokenizer, serializer):
+        super().__init__(serializer)
+        self.tokenizer = tokenizer
+
+    def serialize(self, pwd, prob):
+        assert type(pwd) == tuple
+        real_pwd = ''.join(pwd)
+        if tuple(self.tokenizer.tokenize(real_pwd)) == pwd:
+            self.serializer.serialize(real_pwd, prob)
+        else:
+            self.serializer.serialize(real_pwd, 0)
+
 class Guesser(object):
     def __init__(self, model, config, ostream, prob_cache = None):
         self.model = model
@@ -2078,9 +2089,7 @@ class Guesser(object):
         self.generated = 0
         self.ctable = CharacterTable.fromConfig(self.config)
         if self.config.tokenize_words:
-            self.token_completer = TokenCompleter(list(map(
-                self.ctable.translate,
-                self.config.get_intermediate_info('most_common_tokens'))))
+            self.token_completer = TokenCompleter(self.common_tokens())
         self.filterer = Filterer(self.config)
         self.chunk_size_guesser = self.config.chunk_size_guesser
         self.ostream = ostream
@@ -2090,6 +2099,11 @@ class Guesser(object):
             self._should_make_guesses_rare_char_optimizer())
         self.output_serializer = self.make_serializer()
         self.pwd_end_idx = self.chars_list.index(PASSWORD_END)
+
+    def common_tokens(self):
+        return list(map(
+            self.ctable.translate,
+            self.config.get_intermediate_info('most_common_tokens')))
 
     def read_test_passwords(self):
         logging.info('Reading password calculator test set...')
@@ -2136,6 +2150,9 @@ class Guesser(object):
         if self.should_make_guesses_rare_char_optimizer:
             logging.info('Using template converting password serializer')
             answer = PasswordTemplateSerializer(self.config, answer)
+        if self.tokenized_guessing:
+            answer = TokenizingSerializer(
+                SpecificTokenizer(self.common_tokens()), answer)
         return answer
 
     def relevel_prediction(self, preds, astring):
@@ -2296,6 +2313,9 @@ class RandomWalkGuesser(Guesser):
         if self.enforced_policy:
             self.policy = BasePasswordPolicy.fromConfig(self.config)
         self.expander = self.output_serializer
+        self.next_node_fn = generator.next_nodes_random_walk
+        if self.tokenized_guessing:
+            self.next_node_fn = generator.next_nodes_random_walk_tuple
 
     def spinoff_node(self, node):
         pwd, _, d_accum, cost_fn = node
@@ -2323,7 +2343,7 @@ class RandomWalkGuesser(Guesser):
         next_nodes = []
         for i, cur_node in enumerate(real_node_list):
             astring, prob, *_ = cur_node
-            poss_next = generator.next_nodes_random_walk(
+            poss_next = self.next_node_fn(
                 self, astring, prob, predictions[i][0])
             if len(poss_next) == 0:
                 self.spinoff_node(cur_node)
@@ -2355,7 +2375,7 @@ class RandomWalkGuesser(Guesser):
 
     def seed_data(self):
         for _ in range(self.config.random_walk_seed_num):
-            yield '', 1, 1, 0
+            yield self.starting_node(''), 1, 1, 0
 
     def calc_error(self):
         return self.config.random_walk_confidence_bound_z_value * (
