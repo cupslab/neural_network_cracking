@@ -1,21 +1,31 @@
 {
-  "name" : "pwd_nn",
-  "version" : "0.0.1",
-  "description" : "Run password guessing neural network in browser",
-  "main" : "dist/index.js",
-  "devDependencies" : {
+  "name": "pwd_nn",
+  "version": "0.0.1",
+  "description": "Run password guessing neural network in browser",
+  "main": "dist/index.js",
+  "devDependencies": {
+    "babel-preset-es2015": "^6.3.13",
+    "babelify": "^7.0.2",
     "browserify": "^12.0.1",
-    "minifyify": "^7.1.0",
-    "express": "^4.13.3"
+    "express": "^4.13.3",
+    "minifyify": "^7.1.0"
   },
-  "dependencies" : {
-    "js-cache" : "^1.0.2",
-    "binarysearch" : "^0.2.4"
+  "dependencies": {
+    "js-cache": "^1.0.2",
+    "binarysearch": "^0.2.4",
+    "msgpack-lite" : "^0.1.14",
+    "neocortex-rnn": "git+ssh://wmeliche@grey4.andrew.cmu.edu/home/wmeliche/nn/neocortex"
   },
-  "scripts" : {
-    "build-browser" : "mkdir -p build && browserify src/worker.js -p [minifyify --no-map] -o build/worker.min.js && browserify src/nn-client.js -p [minifyify --no-map] -o build/nn-client.min.js",
-    "build-browser-debug" : "mkdir -p build && browserify src/nn-client.js -o build/nn-client.js && browserify src/worker.js -o build/worker.js",
-    "build" : "npm run build-browser",
-    "test" : "npm run build-browser-debug && cp build/*.js examples/ && cp tests/* examples/ && node examples/server.js"
+  "scripts": {
+    "build-cl" : "npm run build-browser-debug && java -jar compiler/compiler.jar --js build/worker.js --js_output_file build/worker.min.js",
+    "build-browser": "mkdir -p build && browserify src/model-loader.js src/worker.js -p [minifyify --no-map] -o build/worker.min.js && browserify -p [minifyify --no-map] src/nn-client.js -o build/nn-client.min.js",
+    "build-browser-debug": "mkdir -p build && browserify src/nn-client.js -o build/nn-client.js && browserify src/worker.js -o build/worker.js",
+    "build": "npm run build-browser",
+    "test": "cp build/*.js examples/ && cp tests/* examples/ && node examples/server.js"
+  },
+  "browserify": {
+    "transform": [
+      "babelify"
+    ]
   }
 }

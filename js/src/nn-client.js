@@ -1,8 +1,6 @@
-var NEURAL_NETWORK_SCRIPT = 'worker.min.js';
-
 function NeuralNetworkClient(callback) {
   this.callback = callback;
-  this.worker = new Worker(NEURAL_NETWORK_SCRIPT);
+  this.worker = new Worker('worker.min.js');
   this.worker.onmessage = this.onMessageTriggered.bind(this);
 }
 
@@ -46,4 +44,4 @@ NeuralNetworkClient.prototype.probability_char = function(pwd, next_char) {
   });
 };
 
-global.NeuralNetworkClient = NeuralNetworkClient
+global.NeuralNetworkClient = NeuralNetworkClient;

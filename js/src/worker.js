@@ -2,11 +2,11 @@
 
 // Change these
 var NEURAL_NETWORK_INTERMEDIATE = 'js_info_and_gn3.json';
-var NEURAL_NETWORK_FILE = 'js_model_v10.msgpacked.json';
+var NEURAL_NETWORK_FILE = 'js_model_v10.msgpacked.zigzag.json';
 
 var jscache = require('js-cache');
 var bs = require('binarysearch');
-importScripts('neocortex.min.js');
+import NeuralNet from 'neocortex-rnn';
 
 var ACTION_TOTAL_PROB = 'total_prob';
 var ACTION_PREDICT_NEXT = 'predict_next';
@@ -53,16 +53,16 @@ function CharacterTable(intermediate_info) {
   }
   add_to_rco(rare_char_list[0], rare_char_list[0]);
   this.rare_chars[rare_char_list[0]] = rare_char_list[0];
-  for (var i = 0; i < UPPERCASE.length; i++) {
-    this.real_characters = this.real_characters.replace(UPPERCASE[i], '');
-    var lowercase = UPPERCASE[i].toLowerCase();
-    this.rare_chars[UPPERCASE[i]] = lowercase;
+  for (var j = 0; j < UPPERCASE.length; j++) {
+    this.real_characters = this.real_characters.replace(UPPERCASE[j], '');
+    var lowercase = UPPERCASE[j].toLowerCase();
+    this.rare_chars[UPPERCASE[j]] = lowercase;
     this.rare_chars[lowercase] = lowercase;
     add_to_rco(lowercase, lowercase);
-    add_to_rco(lowercase, UPPERCASE[i]);
+    add_to_rco(lowercase, UPPERCASE[j]);
   }
-  for (var i = 0; i < this.real_characters.length; i++) {
-    this.ctable_idx[this.real_characters[i]] = i;
+  for (var k = 0; k < this.real_characters.length; k++) {
+    this.ctable_idx[this.real_characters[k]] = k;
   }
   this.rare_character_calc = this.calc_cache(
     intermediate_info.character_frequencies);
@@ -79,8 +79,8 @@ CharacterTable.prototype.calc_cache = function(freqs) {
     for (var i = 0; i < toKeys.length; i++) {
       sum_prob += freqs[toKeys[i]];
     }
-    for (var i = 0; i < toKeys.length; i++) {
-      answer[fromKey][toKeys[i]] = freqs[toKeys[i]] / sum_prob;
+    for (var j = 0; j < toKeys.length; j++) {
+      answer[fromKey][toKeys[j]] = freqs[toKeys[j]] / sum_prob;
     }
   }
   return answer;
@@ -231,6 +231,28 @@ function lookupGuessNumber(input_pwd) {
   var answer = Math.round(guess_number_answer[1]);
   gn_cache.set(input_pwd, answer);
   return answer;
+};
+
+function predictNext(input_pwd) {
+  return ctable.decode_probs(ctable.cond_prob(input_pwd, nn));
+}
+
+function rawPredictNext(input_pwd) {
+  return ctable.cond_prob(input_pwd, nn);
+}
+
+function totalProb(input_pwd, prefix) {
+  var accum = 1;
+  for (var i = 0; i < input_pwd.length; i++) {
+    accum *= cached_table.probability_of_char(
+      input_pwd.substring(0, i), input_pwd[i],
+      i == 0);
+  }
+  if (!prefix) {
+    accum *= cached_table.probability_of_char(
+      input_pwd, END_CHAR, input_pwd == '');
+  }
+  return accum;
 }
 
 function handleMsg(e) {
@@ -272,7 +294,8 @@ request.addEventListener('load', function() {
     modelFilePath: NEURAL_NETWORK_FILE,
     arrayType: 'float32',
     useGPU: true,
-    msgPackFmt: info['fixed_point_scale']
+    msgPackFmt: info['fixed_point_scale'],
+    zigzagEncoding: true
   });
   cached_table = new ProbCacher(CACHE_SIZE, nn, ctable);
   nn.init(function() {

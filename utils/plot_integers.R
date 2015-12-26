@@ -1,0 +1,7 @@
+library(ggplot2)
+args <- commandArgs(trailingOnly=TRUE)
+data <- read.delim(args[1], header=FALSE)
+data$fft <- fft(data$V1)
+print(head(data))
+ggplot(data, aes(x = fft)) + geom_histogram(binwidth=1)
+ggsave(args[2])

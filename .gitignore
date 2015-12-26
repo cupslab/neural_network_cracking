@@ -12,3 +12,5 @@ js/examples/nn-client.min.js
 js/examples/nn-client.js
 js/examples/test-suite.js
 js/examples/test_suite.html
+js/examples
+test_data
