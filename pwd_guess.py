@@ -37,6 +37,7 @@ import re
 import io
 
 import generator
+import pwd_guess_gen
 
 PASSWORD_END = '\n'
 
@@ -2315,7 +2316,7 @@ class RandomWalkGuesser(Guesser):
         self.expander = self.output_serializer
         self.next_node_fn = generator.next_nodes_random_walk
         if self.tokenized_guessing:
-            self.next_node_fn = generator.next_nodes_random_walk_tuple
+            self.next_node_fn = pwd_guess_gen.next_nodes_random_walk_tuple
 
     def spinoff_node(self, node):
         pwd, _, d_accum, cost_fn = node
