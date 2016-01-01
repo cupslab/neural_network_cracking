@@ -24,7 +24,7 @@ add_scales <- function (p) {
     p
 }
 
-estimates <- read.table(ifname, sep = "\t", quote = "\"")
+estimates <- read.delim(ifname, sep = "\t", quote = "")
 estimates[7] <- (estimates[6] / estimates[3])
 colnames(estimates) <- COLNAMES
 p <- ggplot(estimates, aes(guess.number, percent.std.error))
@@ -34,7 +34,7 @@ p <- p + scale_y_continuous(labels = percent, limits = c(0, .5))
 p <- p + ylab(PERCENT_ERROR_Y_LABEL)
 ggsave(filename = OFNAME_ESTIMATE, plot = p)
 
-actual <- read.table(ifname.exact, sep = "\t", quote = "\"")
+actual <- read.delim(ifname.exact, sep = "\t", quote = "")
 colnames(actual) <- COLNAMES_EXACT
 total <- merge(estimates, actual, by = "pwd")
 

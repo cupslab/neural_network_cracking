@@ -1,12 +1,11 @@
 var TEST_SET_PWDS_FILE = 'test_set_pwds.json';
 var TEST_SET_PWDS;
 var i = 0;
-var output_text = "";
-
-var client = new NeuralNetworkClient(callback);
+var output_string_builder = [];
+var client;
 
 function output(data, pwd) {
-  output_text += pwd + '\t' + data + '\n';
+  output_string_builder.push(pwd, '\t', data);
 }
 
 function callback(prob, pwd) {
@@ -19,10 +18,12 @@ function callback(prob, pwd) {
     i += 1;
     $('#output').html('working... ' + i + '/' + TEST_SET_PWDS.length);
   } else {
-    $('#output').text(output_text);
+    $('#output').text(output_string_builder.join('\n'));
     console.log('done');
   }
 }
+
+client = factory(callback);
 
 function init() {
   $.getJSON(TEST_SET_PWDS_FILE, function(data){
