@@ -5,7 +5,7 @@ var output_string_builder = [];
 var client;
 
 function output(data, pwd) {
-  output_string_builder.push(pwd, '\t', data);
+  output_string_builder.push(pwd + '\t' + data);
 }
 
 function callback(prob, pwd) {

@@ -19,7 +19,7 @@
   "scripts": {
     "do-browserify" : "browserify src/nn-client.js -o build/nn-client.js && browserify src/worker.js -o build/worker.js",
     "build": "sh build.sh",
-    "test": "cp build/*.js examples/ && cp tests/* examples/ && node examples/server.js"
+    "test": "cp build/* examples/ && cp tests/* examples/ && node examples/server.js"
   },
   "browserify": {
     "transform": [

@@ -181,10 +181,6 @@ ProbCacher.prototype.probability_of_char = function(
   }
 };
 
-function predictNext(input_pwd) {
-  return ctable.decode_probs(ctable.cond_prob(input_pwd, nn));
-}
-
 function rawPredictNext(input_pwd) {
   return ctable.cond_prob(input_pwd, nn);
 }
@@ -237,24 +233,6 @@ function predictNext(input_pwd) {
   return ctable.decode_probs(ctable.cond_prob(input_pwd, nn));
 }
 
-function rawPredictNext(input_pwd) {
-  return ctable.cond_prob(input_pwd, nn);
-}
-
-function totalProb(input_pwd, prefix) {
-  var accum = 1;
-  for (var i = 0; i < input_pwd.length; i++) {
-    accum *= cached_table.probability_of_char(
-      input_pwd.substring(0, i), input_pwd[i],
-      i == 0);
-  }
-  if (!prefix) {
-    accum *= cached_table.probability_of_char(
-      input_pwd, END_CHAR, input_pwd == '');
-  }
-  return accum;
-}
-
 function handleMsg(e) {
   var message;
   var pwd = e.data.inputData;
@@ -286,7 +264,6 @@ function handleMsg(e) {
 
 var request = new XMLHttpRequest();
 request.addEventListener('load', function() {
-  console.log('Network loaded');
   var info = JSON.parse(this.responseText);
   ctable = new CharacterTable(info);
   guess_numbers = info['guessing_table'];
@@ -299,7 +276,6 @@ request.addEventListener('load', function() {
   });
   cached_table = new ProbCacher(CACHE_SIZE, nn, ctable);
   nn.init(function() {
-    console.log('Worker ready for passwords!');
     onLoadMsgs.forEach(handleMsg);
     self.onmessage = handleMsg;
   });
