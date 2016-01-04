@@ -2465,7 +2465,7 @@ class RandomGenerator(RandomWalkDelAmico):
     def make_serializer(self):
         return super().make_serializer(method = 'human')
 
-    def generate_random_passwords(self):
+    def guess(self, astring = '', prob = 1):
         self.setup()
         self.super_node_recur(list(self.seed_data()))
 

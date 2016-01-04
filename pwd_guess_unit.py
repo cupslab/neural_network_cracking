@@ -2225,7 +2225,7 @@ class RandomGeneratorTest(unittest.TestCase):
         builder.add_stream(ostream)
         guesser = builder.build()
         self.assertEqual(pwd_guess.RandomGenerator, type(guesser))
-        guesser.generate_random_passwords()
+        guesser.guess()
         self.assertEqual(ostream.getvalue().count('\n'), num_passwords)
         for line in ostream:
             pwd, prob = line.split('\t')
@@ -2268,7 +2268,7 @@ class RandomGeneratorTest(unittest.TestCase):
             config.set_intermediate_info('rare_character_bag', [])
             guesser = builder.build()
             self.assertEqual(pwd_guess.RandomGenerator, type(guesser))
-            guesser.generate_random_passwords()
+            guesser.guess()
             self.assertEqual(ostream.getvalue().count('\n'), num_passwords)
             for line in ostream:
                 pwd, prob = line.split('\t')
