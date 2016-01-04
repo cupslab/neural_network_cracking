@@ -6,8 +6,14 @@ import decimal as decimal
 import logging
 
 class Filter(object):
+    def __init__(self, fn = None):
+        self.fn = fn
+
+    def __call__(self, x):
+        return self.fn(x)
+
     def curry(self, fn):
-        return lambda y: self(fn(y))
+        return Filter(lambda y: self(fn(y)))
 
     def done(self):
         pass

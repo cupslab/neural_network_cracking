@@ -2207,6 +2207,82 @@ class RandomWalkGuesserTest(unittest.TestCase):
                     self.assertAlmostEqual(
                         float(gn), 397 if pwd == 'aaaa' else 137, delta = 20)
 
+class RandomGeneratorTest(unittest.TestCase):
+    def test_generate(self):
+        num_passwords = 100
+        config = pwd_guess.ModelDefaults(
+            char_bag = 'ab\n', min_len = 3,
+            max_len = 5,
+            random_walk_seed_num = num_passwords,
+            random_walk_upper_bound = 0,
+            relevel_not_matching_passwords = True,
+            guess_serialization_method = 'generate_random')
+        mock_model = Mock()
+        mock_model.predict = mock_predict_smart_parallel_skewed
+        ostream = io.StringIO()
+        builder = pwd_guess.GuesserBuilder(config)
+        builder.add_model(mock_model)
+        builder.add_stream(ostream)
+        guesser = builder.build()
+        self.assertEqual(pwd_guess.RandomGenerator, type(guesser))
+        guesser.generate_random_passwords()
+        self.assertEqual(ostream.getvalue().count('\n'), num_passwords)
+        for line in ostream:
+            pwd, prob = line.split('\t')
+            self.assertGreaterEqual(len(pwd), 3)
+            expected_prob = 1
+            for c in pwd[:3]:
+                self.assertTrue(c in ['a', 'b'])
+                expected_prob *= .2 if c == 'a' else .8
+            for c in pwd[3:]:
+                expected_prob *= .1 if c == 'a' else .4
+            if len(pwd) != 5:
+                expected_prob *= .5
+            self.assertAlmostEqual(expected_prob, float(prob))
+
+    def test_rare(self):
+        num_passwords = 100
+        with tempfile.NamedTemporaryFile(mode = 'w') as gf:
+            config = pwd_guess.ModelDefaults(
+                char_bag = 'abAB\n', min_len = 3, max_len = 5,
+                random_walk_seed_num = num_passwords,
+                uppercase_character_optimization = True,
+                intermediate_fname = gf.name,
+                random_walk_upper_bound = 0,
+                relevel_not_matching_passwords = True,
+                guess_serialization_method = 'generate_random')
+            mock_model = Mock()
+            mock_model.predict = mock_predict_smart_parallel_skewed
+            ostream = io.StringIO()
+            builder = pwd_guess.GuesserBuilder(config)
+            builder.add_model(mock_model)
+            builder.add_stream(ostream)
+            freqs = {
+                'a' : .4, 'b' : .4, 'A' : .1, 'B' : .1,
+            }
+            config.set_intermediate_info('character_frequencies', freqs)
+            config.set_intermediate_info(
+                'beginning_character_frequencies', freqs)
+            config.set_intermediate_info(
+                'end_character_frequencies', freqs)
+            config.set_intermediate_info('rare_character_bag', [])
+            guesser = builder.build()
+            self.assertEqual(pwd_guess.RandomGenerator, type(guesser))
+            guesser.generate_random_passwords()
+            self.assertEqual(ostream.getvalue().count('\n'), num_passwords)
+            for line in ostream:
+                pwd, prob = line.split('\t')
+                self.assertGreaterEqual(len(pwd), 3)
+                expected_prob = 1
+                for c in pwd[:3]:
+                    self.assertTrue(c in ['a', 'b'])
+                    expected_prob *= .2 if c == 'a' else .8
+                for c in pwd[3:]:
+                    expected_prob *= .1 if c == 'a' else .4
+                if len(pwd) != 5:
+                    expected_prob *= .5
+                self.assertAlmostEqual(expected_prob, float(prob))
+
 class DelAmicoRandomWalkTest(RandomWalkGuesserTest):
     expected_class = pwd_guess.RandomWalkDelAmico
 

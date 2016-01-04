@@ -2138,13 +2138,16 @@ class Guesser(object):
                  self.config.rare_character_optimization) and
                 self.config.rare_character_optimization_guessing)
 
-    def make_serializer(self):
-        serializer_factory = serializer_type_list[
-            self.config.guess_serialization_method]
-        if self.config.guess_serialization_method == 'calculator':
+    def make_serializer(self, method = None, make_rare = None):
+        if method is None:
+            method = self.config.guess_serialization_method
+        if make_rare is None:
+            make_rare = self.should_make_guesses_rare_char_optimizer
+        serializer_factory = serializer_type_list[method]
+        if method == 'calculator':
             answer = serializer_factory(
                 self.ostream, self.calculate_probs_from_file())
-        elif self.config.guess_serialization_method == 'delamico_random_walk':
+        elif method == 'delamico_random_walk':
             answer = serializer_factory(
                 self.ostream, self.calculate_probs_from_file(), self.config)
         else:
@@ -2152,7 +2155,7 @@ class Guesser(object):
         if self.config.enforced_policy != 'basic':
             answer = PasswordPolicyEnforcingSerializer(
                 BasePasswordPolicy.fromConfig(self.config), answer)
-        if self.should_make_guesses_rare_char_optimizer:
+        if make_rare:
             logging.info('Using template converting password serializer')
             answer = PasswordTemplateSerializer(self.config, answer)
         if self.tokenized_guessing:
@@ -2336,7 +2339,7 @@ class RandomWalkGuesser(Guesser):
     def super_node_recur(self, node_list):
         real_node_list = []
         for node in node_list:
-            pwd, rest = node[0], node[1:]
+            pwd, *_ = node
             if len(pwd) <= self.max_len:
                 real_node_list.append(node)
             elif len(pwd) > self.max_len and pwd[-1] == PASSWORD_END:
@@ -2423,13 +2426,13 @@ class RandomWalkDelAmico(RandomWalkGuesser):
         pwd, prob = node
         self.output_serializer.serialize(pwd, prob)
 
-    def make_serializer(self):
+    def make_serializer(self, method = None, make_rare = None):
         self.config.lower_probability_threshold = 0
-        temp = self.should_make_guesses_rare_char_optimizer
-        self.should_make_guesses_rare_char_optimizer = False
-        answer = super().make_serializer()
-        self.should_make_guesses_rare_char_optimizer = temp
-        return answer
+        if make_rare is None:
+            return super().make_serializer(method = method, make_rare = False)
+        else:
+            return super().make_serializer(
+                method = method, make_rare = make_rare)
 
     def add_to_next_node(self, cur_node, next_node):
         return next_node[0], next_node[1]
@@ -2441,15 +2444,30 @@ class RandomWalkDelAmico(RandomWalkGuesser):
                 return True
         return False
 
-    def random_walk(self, probs):
-        num = 0
+    def setup(self):
         if self.should_make_guesses_rare_char_optimizer:
             self.expander = PasswordTemplateSerializer(self.config)
         self.lower_probability_threshold = 0
+
+    def random_walk(self, probs):
+        self.setup()
+        num = 0
         self.super_node_recur(list(self.seed_data()))
         while self.keep_going() and num < self.config.random_walk_upper_bound:
             self.super_node_recur(list(self.seed_data()))
             num += 1
+
+class RandomGenerator(RandomWalkDelAmico):
+    def spinoff_node(self, node):
+        pwd, prob, *_ = node
+        self.output_serializer.serialize(pwd.rstrip('\n'), prob)
+
+    def make_serializer(self):
+        return super().make_serializer(method = 'human')
+
+    def generate_random_passwords(self):
+        self.setup()
+        self.super_node_recur(list(self.seed_data()))
 
 class DelAmicoCalculator(GuessSerializer):
     def __init__(self, ostream, pwd_list, config):
@@ -2566,11 +2584,15 @@ class GuesserBuilder(object):
         assert self.config is not None
         class_builder = ParallelGuesser if self.parallel else Guesser
         if (self.config.guess_serialization_method == 'random_walk' or
-            self.config.guess_serialization_method == 'delamico_random_walk'):
+            self.config.guess_serialization_method == 'delamico_random_walk' or
+            self.config.guess_serialization_method == 'generate_random'):
             if self.config.guess_serialization_method == 'random_walk':
                 class_builder = RandomWalkGuesser
-            else:
+            elif (self.config.guess_serialization_method ==
+                  'delamico_random_walk'):
                 class_builder = RandomWalkDelAmico
+            else:
+                class_builder = RandomGenerator
             if self.parallel:
                 class_builder = ParallelRandomWalker
         if self.seed_probs is not None:
@@ -2796,7 +2818,8 @@ serializer_type_list = {
     'human' : GuessSerializer,
     'calculator' : GuessNumberGenerator,
     'random_walk' : RandomWalkSerializer,
-    'delamico_random_walk' : DelAmicoCalculator
+    'delamico_random_walk' : DelAmicoCalculator,
+    'generate_random' : DelAmicoCalculator
 }
 
 def get_version_string():
