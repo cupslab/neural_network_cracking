@@ -2336,7 +2336,7 @@ class RandomWalkGuesser(Guesser):
     def super_node_recur(self, node_list):
         real_node_list = []
         for node in node_list:
-            pwd, *_ = node
+            pwd, rest = node[0], node[1:]
             if len(pwd) <= self.max_len:
                 real_node_list.append(node)
             elif len(pwd) > self.max_len and pwd[-1] == PASSWORD_END:
