@@ -2467,7 +2467,8 @@ class RandomGenerator(RandomWalkDelAmico):
 
     def guess(self, astring = '', prob = 1):
         self.setup()
-        self.super_node_recur(list(self.seed_data()))
+        for _ in range(self.config.random_walk_seed_iterations):
+            self.super_node_recur(list(self.seed_data()))
 
 class DelAmicoCalculator(GuessSerializer):
     def __init__(self, ostream, pwd_list, config):
