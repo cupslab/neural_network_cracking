@@ -833,6 +833,8 @@ class ModelDefaults(object):
     probability_striation = False
     prob_striation_step = 0.05
     freeze_feature_layers_during_secondary_training = True
+    secondary_training_save_freqs = False
+    guessing_secondary_training = False
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -887,6 +889,9 @@ class ModelDefaults(object):
         assert self.context_length <= self.max_len
         assert self.model_type in model_type_dict
         assert self.training_main_memory_chunksize > self.training_chunk
+        if self.guessing_secondary_training:
+            assert self.secondary_training
+            assert self.secondary_training_save_freqs
 
     def as_dict(self):
         answer = dict(vars(ModelDefaults).copy())
@@ -1565,7 +1570,7 @@ class Filterer(object):
         return lowest[:min(self.config.rare_character_lowest_threshold,
                            len(lowest))]
 
-    def finish(self, save_stats = True):
+    def finish(self, save_stats = True, save_freqs = True):
         logging.info('Filtered %s of %s passwords',
                      self.filtered_out, self.total)
         char_freqs = {}
@@ -1577,17 +1582,18 @@ class Filterer(object):
             logging.info('Rare characters: %s', self.rare_characters())
             logging.info('Longest pwd is : %s characters long',
                          self.longest_pwd)
+            if self.count_tokens:
+                self.config.set_intermediate_info(
+                    'most_common_tokens',
+                    [x[0] for x in self.token_counter.most_common(
+                        self.most_common_token_count)])
+        if save_freqs:
             self.config.set_intermediate_info(
                 'character_frequencies', self.frequencies)
             self.config.set_intermediate_info(
                 'beginning_character_frequencies', self.beg_frequencies)
             self.config.set_intermediate_info(
                 'end_character_frequencies', self.end_frequencies)
-            if self.count_tokens:
-                self.config.set_intermediate_info(
-                    'most_common_tokens',
-                    [x[0] for x in self.token_counter.most_common(
-                        self.most_common_token_count)])
 
     def filter(self, alist):
         return filter(lambda x: self.pwd_is_valid(x[0]), alist)
@@ -1603,14 +1609,14 @@ class ResetablePwdList(object):
             PwdList.getFactory(
                 self.pwd_format, self.config)(self.pwd_file).as_list())
 
-    def initialize(self):
+    def initialize(self, save_stats = True, save_freqs = True):
         input_factory = PwdList.getFactory(self.pwd_format, self.config)
         filt = Filterer(self.config)
         logging.info('Reading training set...')
         input_list = input_factory(self.pwd_file)
         for item in filt.filter(input_list.as_list()):
             pass
-        filt.finish()
+        filt.finish(save_stats=save_stats, save_freqs=save_freqs)
         input_list.finish()
         logging.info('Done reading passwords...')
 
@@ -2116,7 +2122,7 @@ class Guesser(object):
         pwd_lister = PwdList(self.config.password_test_fname)
         pwd_input = list(pwd_lister.as_list())
         pwds = list(filterer.filter(pwd_input))
-        filterer.finish(save_stats=False)
+        filterer.finish(save_stats=False, save_freqs=False)
         return pwds
 
     def do_calculate_probs_from_file(self):
@@ -2467,7 +2473,7 @@ class RandomGenerator(RandomWalkDelAmico):
 
     def guess(self, astring = '', prob = 1):
         self.setup()
-        for _ in range(self.config.random_walk_seed_iterations):
+        for _ in range(self.config.random_walk_upper_bound):
             self.super_node_recur(list(self.seed_data()))
 
 class DelAmicoCalculator(GuessSerializer):
@@ -2862,6 +2868,8 @@ def preprocessing(args, config):
     # initializes statistics needed for some preprocessors
     if 'no_initialize' not in args:
         resetable.initialize()
+    else:
+        resetable.initialize(*args['no_initialize'])
     if args['stats_only']:
         logging.info('Only getting stats. Quitting...')
         return None
@@ -2873,6 +2881,15 @@ def preprocessing(args, config):
             preprocessor.stats()
         return None
     return preprocessor
+
+def prepare_secondary_training(args, config):
+    logging.info('Secondary training')
+    fake_args = config.secondary_train_sets
+    fake_args['stats_only'] = False
+    fake_args['pre_processing_only'] = False
+    fake_args['no_initialize'] = [
+        False, config.secondary_training_save_freqs]
+    return preprocessing(fake_args, config)
 
 def train(args, config):
     preprocessor = preprocessing(args, config)
@@ -2891,12 +2908,7 @@ def train(args, config):
     else:
         logging.info('Not training model with primary data')
     if config.secondary_training:
-        logging.info('Secondary training')
-        fake_args = config.secondary_train_sets
-        fake_args['stats_only'] = False
-        fake_args['pre_processing_only'] = False
-        fake_args['no_initialize'] = True
-        trainer.retrain_classification(preprocessing(fake_args, config),
+        trainer.retrain_classification(prepare_secondary_training(args, config),
                                        serializer)
     if args['enumerate_ofile']:
         (GuesserBuilder(config).add_serializer(serializer)
@@ -2908,6 +2920,8 @@ def guess(args, config):
     if args['arch_file'] is None or args['weight_file'] is None:
         logging.error('Architecture file or weight file not found. Quiting...')
         sys.exit(1)
+    if config.guessing_secondary_training:
+        prepare_secondary_training(args, config)
     guesser = (GuesserBuilder(config).add_serializer(
         ModelSerializer(args['arch_file'], args['weight_file']))
                .add_file(args['enumerate_ofile'])).build()

@@ -2128,6 +2128,7 @@ class RandomWalkGuesserTest(unittest.TestCase):
     TEST_GUESS_WIDE_EXPECTED_AAAA = 50
     TEST_GUESS_WIDE_EXPECTED_BBBBA = 15
 
+    @unittest.skip('Not supported anymore')
     def test_guess_wide(self):
         with tempfile.NamedTemporaryFile(mode = 'w') as gf:
             gf.write('aaaa\nbbbba\n')
@@ -2214,7 +2215,7 @@ class RandomGeneratorTest(unittest.TestCase):
             char_bag = 'ab\n', min_len = 3,
             max_len = 5,
             random_walk_seed_num = num_passwords,
-            random_walk_upper_bound = 0,
+            random_walk_upper_bound = 1,
             relevel_not_matching_passwords = True,
             guess_serialization_method = 'generate_random')
         mock_model = Mock()
@@ -2248,7 +2249,7 @@ class RandomGeneratorTest(unittest.TestCase):
                 random_walk_seed_num = num_passwords,
                 uppercase_character_optimization = True,
                 intermediate_fname = gf.name,
-                random_walk_upper_bound = 0,
+                random_walk_upper_bound = 1,
                 relevel_not_matching_passwords = True,
                 guess_serialization_method = 'generate_random')
             mock_model = Mock()
@@ -2390,6 +2391,7 @@ class DelAmicoRandomWalkTest(RandomWalkGuesserTest):
                     self.assertAlmostEqual(
                         float(gn), 613 if pwd == 'aAaa' else 100, delta = 20)
 
+    @unittest.skip('Not supported anymore')
     def test_guess_simulated_policy_tokens(self):
         def mock_predict_smart_parallel_skewed_token(input_vec, **kwargs):
             answer = []
