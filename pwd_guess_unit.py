@@ -339,10 +339,10 @@ class OptimizingTableTest(unittest.TestCase):
         ctable = pwd_guess.CharacterTable('abc\n', 2)
         np.testing.assert_array_equal(
             ctable.encode_many(['', 'a', 'ab', 'abc']),
-            [[[True, False, False, False],
-              [True, False, False, False]],
+            [[[False, False, False, False],
+              [False, False, False, False]],
              [[False, True, False, False],
-              [True, False, False, False]],
+              [False, False, False, False]],
              [[False, True, False, False],
               [False, False, True, False]],
              [[False, False, True, False],

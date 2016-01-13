@@ -2,7 +2,7 @@
 # author: William Melicher
 from __future__ import print_function
 from keras.models import Sequential, slice_X, model_from_json
-from keras.layers.core import Activation, Dense, RepeatVector, TimeDistributedDense, Dropout
+from keras.layers.core import Activation, Dense, RepeatVector, TimeDistributedDense, Dropout, Masking
 from keras.layers import recurrent
 import keras.utils.layer_utils as layer_utils
 from keras.optimizers import SGD
@@ -37,7 +37,6 @@ import re
 import io
 
 import generator
-import pwd_guess_gen
 
 PASSWORD_END = '\n'
 
@@ -460,7 +459,7 @@ class CharacterTable(object):
         maxlen = maxlen if maxlen else self.maxlen
         if len(astring) > maxlen:
             return astring[len(astring) - maxlen:]
-        return astring + (PASSWORD_END * (maxlen - len(astring)))
+        return astring
 
     def encode_many(self, string_list, maxlen = None):
         maxlen = maxlen if maxlen else self.maxlen
@@ -1227,7 +1226,7 @@ class Trainer(object):
         model_type = self.config.model_type_exec()
         self.feature_layers.append(model_type(
             self.config.hidden_size,
-            input_shape=(self.config.context_length, self.ctable.vocab_size),
+            input_shape=(None, self.ctable.vocab_size),
             truncate_gradient=self.config.model_truncate_gradient,
             go_backwards=self.config.train_backwards))
         self.feature_layers.append(RepeatVector(1))
@@ -1838,8 +1837,14 @@ class PasswordTemplateSerializer(DelegatingSerializer):
                     i, after_image_char, self.post_image[after_image_char]))
 
     def expand_conditional_probs(self, probs, context):
-        return pwd_guess_gen.expand_conditional_probs(
-            self, probs, len(context) == 0, self.expander_cache)
+        return self.expand_conditional_probs_cache(
+            probs, len(context) == 0, self.expander_cache)
+
+    def expand_conditional_probs_cache(self, probs, context, expander_cache):
+        answer = probs[expander_cache]
+        for i, after_image_char, post_image in self.post_image_idx:
+            answer[i] *= self.calc(post_image, after_image_char, context)
+        return answer
 
     def find_real_pwd(self, template, pwd):
         if type(pwd) == tuple:
@@ -2329,7 +2334,35 @@ class RandomWalkGuesser(Guesser):
         self.expander = self.output_serializer
         self.next_node_fn = generator.next_nodes_random_walk
         if self.tokenized_guessing:
-            self.next_node_fn = pwd_guess_gen.next_nodes_random_walk_tuple
+            self.next_node_fn = RandomWalkGuesser.next_nodes_random_walk_tuple
+
+    def next_nodes_random_walk_tuple(self, astring, prob, prediction):
+        if len(astring) > 0 and astring[-1] == PASSWORD_END:
+            return []
+        astring_len = sum(map(len, astring))
+        if self.should_make_guesses_rare_char_optimizer:
+            conditional_predictions = (
+                self.expander.expand_conditional_probs(
+                    prediction, astring))
+        else:
+            conditional_predictions = prediction
+        total_preds = conditional_predictions * prob
+        if astring_len + 1 > self.max_len:
+            if (total_preds[self.pwd_end_idx] >
+                self.lower_probability_threshold):
+                return [(astring + (PASSWORD_END,),
+                         total_preds[self.pwd_end_idx],
+                         conditional_predictions[self.pwd_end_idx])]
+        indexes = np.arange(len(total_preds))
+        above_cutoff = total_preds > self.lower_probability_threshold
+        above_indices = indexes[above_cutoff]
+        probs_above = total_preds[above_cutoff]
+        answer = [0] * len(probs_above)
+        for i in range(len(probs_above)):
+            index = above_indices[i]
+            answer[i] = (astring + (self._chars_list[index],), probs_above[i],
+                         conditional_predictions[index])
+        return answer
 
     def spinoff_node(self, node):
         pwd, _, d_accum, cost_fn = node
