@@ -752,12 +752,14 @@ class ModelSerializer(object):
 serializer_type_list = {}
 
 model_type_dict = {
-    'JZS1' : recurrent.JZS1,
-    'JZS2' : recurrent.JZS2,
-    'JZS3' : recurrent.JZS3,
     'GRU' : recurrent.GRU,
     'LSTM' : recurrent.LSTM
 }
+
+if hasattr(recurrent, 'JZS1'):
+    model_type_dict['JZS1'] = recurrent.JZS1
+    model_type_dict['JZS2'] = recurrent.JZS2
+    model_type_dict['JZS3'] = recurrent.JZS3
 
 class ModelDefaults(object):
     char_bag = (string.ascii_lowercase + string.ascii_uppercase +
@@ -795,7 +797,6 @@ class ModelDefaults(object):
     save_model_versioned = False
     randomize_training_order = True
     toc_chunk_size = 1000
-    model_truncate_gradient = -1
     model_optimizer = 'adam'
     guesser_intermediate_directory = 'guesser_files'
     cleanup_guesser_files = True
@@ -834,6 +835,7 @@ class ModelDefaults(object):
     freeze_feature_layers_during_secondary_training = True
     secondary_training_save_freqs = False
     guessing_secondary_training = False
+    deep_model = False
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -903,7 +905,11 @@ class ModelDefaults(object):
         try:
             return model_type_dict[self.model_type]
         except KeyError as e:
-            logging.error('Cannot find model type %s', self.model_type)
+            logging.warning('Cannot find model type %s', self.model_type)
+            logging.warning('Defaulting to LSTM model')
+            if self.model_type == 'JZS1':
+                self.model_type = 'LSTM'
+            return self.model_type_exec()
 
     def set_intermediate_info(self, key, value):
         with SqliteDict(self.intermediate_fname) as info:
@@ -1226,21 +1232,20 @@ class Trainer(object):
         model_type = self.config.model_type_exec()
         self.feature_layers.append(model_type(
             self.config.hidden_size,
-            input_shape=(None, self.ctable.vocab_size),
-            truncate_gradient=self.config.model_truncate_gradient,
+            input_shape=(self.config.context_length, self.ctable.vocab_size),
+            return_sequences=self.config.deep_model,
             go_backwards=self.config.train_backwards))
-        self.feature_layers.append(RepeatVector(1))
+        if not self.config.deep_model:
+            self.feature_layers.append(RepeatVector(1))
         for _ in range(self.config.layers):
             if self.config.dropouts:
                 self.feature_layers.append(Dropout(self.config.dropout_ratio))
             actual_layer = lambda: model_type(
                 self.config.hidden_size, return_sequences=True,
-                truncate_gradient=self.config.model_truncate_gradient,
                 go_backwards=self.config.train_backwards)
             if self.config.bidirectional_rnn:
                 self.feature_layers.append(Bidirectional(
-                    actual_layer(), actual_layer(), return_sequences=True,
-                    truncate_gradient=self.config.model_truncate_gradient))
+                    actual_layer(), actual_layer(), return_sequences=True))
             else:
                 self.feature_layers.append(actual_layer())
         for _ in range(self.config.dense_layers):

@@ -803,6 +803,18 @@ class TrainerTest(unittest.TestCase):
         t.build_model()
         self.assertNotEqual(None, t.model)
 
+    def test_build_model_deep(self):
+        t = pwd_guess.Trainer(['pass'], pwd_guess.ModelDefaults(
+            hidden_size = 12, layers = 1, deep_model = True))
+        t.build_model()
+        self.assertNotEqual(None, t.model)
+
+    def test_build_model_deep_no_layers(self):
+        t = pwd_guess.Trainer(['pass'], pwd_guess.ModelDefaults(
+            hidden_size = 12, layers = 0, deep_model = True))
+        t.build_model()
+        self.assertNotEqual(None, t.model)
+
     def test_build_model_bidirectional(self):
         t = pwd_guess.Trainer(['pass'], pwd_guess.ModelDefaults(
             hidden_size = 12, layers = 1,
