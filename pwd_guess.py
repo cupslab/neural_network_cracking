@@ -1237,11 +1237,13 @@ class Trainer(object):
             go_backwards=self.config.train_backwards))
         if not self.config.deep_model:
             self.feature_layers.append(RepeatVector(1))
-        for _ in range(self.config.layers):
+        for i in range(self.config.layers):
             if self.config.dropouts:
                 self.feature_layers.append(Dropout(self.config.dropout_ratio))
             actual_layer = lambda: model_type(
-                self.config.hidden_size, return_sequences=True,
+                self.config.hidden_size,
+                return_sequences=not (
+                    i == self.config.layers - 1 and self.config.deep_model),
                 go_backwards=self.config.train_backwards)
             if self.config.bidirectional_rnn:
                 self.feature_layers.append(Bidirectional(
