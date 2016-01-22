@@ -1,18 +1,35 @@
 # -*- coding: utf-8 -*-
 # author: William Melicher
 from __future__ import print_function
+
+import os
+import sys
+
+# This is a hack to support multiple versions of the keras library.
+# It would be better to use a solution like virtualenv.
+if 'KERAS_PATH' in os.environ:
+    sys.path.insert(0, os.environ['KERAS_PATH'])
+import keras
+sys.stderr.write('Using keras version %s\n' % (keras.__version__))
+
+
 from keras.models import Sequential, slice_X, model_from_json
 from keras.layers.core import Activation, Dense, RepeatVector, TimeDistributedDense, Dropout, Masking
 from keras.layers import recurrent
 import keras.utils.layer_utils as layer_utils
 from keras.optimizers import SGD
-from seya.layers.recurrent import Bidirectional
+
+try:
+    from seya.layers.recurrent import Bidirectional
+except ImportError as e:
+    sys.stderr.write('Warning, cannot import Bidirectional model\nYou may need '
+                     'to install or use a different version of keras\n')
+
 from sklearn.utils import shuffle
 import numpy as np
 from sqlitedict import SqliteDict
 import theano
 
-import sys
 import argparse
 import itertools
 import string
@@ -1221,42 +1238,53 @@ class Trainer(object):
         return self.ctable.encode_many(x_strs)
 
     def prepare_y_data(self, y_str_list):
-        y_vec = np.zeros((len(y_str_list), 1, self.ctable.vocab_size),
-                         dtype = np.bool)
-        for i, ystr in enumerate(y_str_list):
-            y_vec[i] = self.ctable.encode(ystr, maxlen = 1)
+        # The version of keras introduced non-backward compatible changes...
+        if keras.__version__ == '0.2.0':
+            y_vec = np.zeros((len(y_str_list), 1, self.ctable.vocab_size),
+                             dtype = np.bool)
+            for i, ystr in enumerate(y_str_list):
+                y_vec[i] = self.ctable.encode(ystr, maxlen = 1)
+        else:
+            y_vec = np.zeros((len(y_str_list), self.ctable.vocab_size),
+                             dtype = np.bool)
+            self.ctable._encode_into(y_vec, y_str_list)
         return y_vec
 
     def build_model(self):
         model = Sequential()
+        deep_model = self.config.deep_model
         model_type = self.config.model_type_exec()
         self.feature_layers.append(model_type(
             self.config.hidden_size,
             input_shape=(self.config.context_length, self.ctable.vocab_size),
-            return_sequences=self.config.deep_model,
+            return_sequences=deep_model and self.config.layers > 0,
             go_backwards=self.config.train_backwards))
         if not self.config.deep_model:
             self.feature_layers.append(RepeatVector(1))
         for i in range(self.config.layers):
             if self.config.dropouts:
                 self.feature_layers.append(Dropout(self.config.dropout_ratio))
+            last_layer = (i == (self.config.layers - 1))
+            ret_sequences = (not (deep_model and last_layer))
             actual_layer = lambda: model_type(
                 self.config.hidden_size,
-                return_sequences=not (
-                    i == self.config.layers - 1 and self.config.deep_model),
+                return_sequences=ret_sequences,
                 go_backwards=self.config.train_backwards)
             if self.config.bidirectional_rnn:
                 self.feature_layers.append(Bidirectional(
-                    actual_layer(), actual_layer(), return_sequences=True))
+                    actual_layer(), actual_layer(),
+                    return_sequences=ret_sequences))
             else:
                 self.feature_layers.append(actual_layer())
+        if deep_model:
+            dense_layer = lambda x: Dense(x)
+        else:
+            dense_layer = lambda x: TimeDistributedDense(x)
         for _ in range(self.config.dense_layers):
-            self.classification_layers.append(
-                TimeDistributedDense(self.config.dense_hidden_size))
-        self.classification_layers.append(
-            TimeDistributedDense(self.ctable.vocab_size))
-        self.classification_layers.append(
-            Activation('softmax'))
+            self.classification_layers.append(dense_layer(
+                self.config.dense_hidden_size))
+        self.classification_layers.append(dense_layer(self.ctable.vocab_size))
+        self.classification_layers.append(Activation('softmax'))
         for layer in self.feature_layers + self.classification_layers:
             model.add(layer)
         model.compile(loss='categorical_crossentropy',
