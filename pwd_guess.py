@@ -22,8 +22,9 @@ from keras.optimizers import SGD
 try:
     from seya.layers.recurrent import Bidirectional
 except ImportError as e:
-    sys.stderr.write('Warning, cannot import Bidirectional model\nYou may need '
+    sys.stderr.write('Warning, cannot import Bidirectional model. You may need '
                      'to install or use a different version of keras\n')
+    Bidirectional = None
 
 from sklearn.utils import shuffle
 import numpy as np
@@ -741,7 +742,10 @@ class ModelSerializer(object):
 
     def load_model(self):
         # To be able to load models
-        layer_utils.Bidirectional = Bidirectional
+
+        # In case bidirectional model cannot be loaded
+        if Bidirectional is not None:
+            layer_utils.Bidirectional = Bidirectional
 
         # This is for unittesting
         def mock_predict_smart_parallel(distribution, input_vec, **kwargs):
