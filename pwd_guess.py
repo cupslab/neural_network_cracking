@@ -858,6 +858,7 @@ class ModelDefaults(object):
     guessing_secondary_training = False
     deep_model = False
     guesser_class = None
+    freq_format = 'hex'
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -1458,37 +1459,52 @@ class PwdList(object):
         assert len(file_formats) > 0
         if file_formats[0] == 'tsv':
             if config.simulated_frequency_optimization:
-                return lambda flist: TsvSimulatedList(flist[0])
+                return lambda flist: TsvSimulatedList(
+                    flist[0], freq_format_hex = (config.freq_format == 'hex'))
             else:
                 return lambda flist: TsvList(flist[0])
         elif file_formats[0] == 'list':
             return lambda flist: PwdList(flist[0])
         logging.error('Cannot find factory for format of %s', file_formats)
 
-class TsvList(PwdList):
-    def as_list_iter(self, agen):
-        for row in csv.reader(iter(agen), delimiter = '\t', quotechar = None):
-            pwd, freq = row[:2]
-            for _ in range(int(float.fromhex(freq))):
-                yield (sys.intern(pwd), 1)
+class TsvListParent(PwdList):
+    def __init__(self, fname, freq_format_hex = True):
+        self.freq_format_hex = freq_format_hex
+        self.ctr = 0
+        super().__init__(fname)
 
-class TsvSimulatedList(PwdList):
-    def as_list_iter(self, agen):
-        ctr = 0
-        for row in csv.reader(iter(agen), delimiter = '\t', quotechar = None):
-            ctr += 1
-            if len(row) < 2:
-                logging.error('Invalid number of tabs on line %d, expected 2 but was %d',
-                              ctr, len(row))
-                continue
-            try:
+    def interpret_row(self, row):
+        self.ctr += 1
+        if len(row) < 2:
+            logging.error(('Invalid number of tabs on line %d, expected 2 '
+                          'but was %d'), self.ctr, len(row))
+            return None, None
+        try:
+            if self.freq_format_hex:
                 value = float.fromhex(row[1])
-            except ValueError as e:
-                logging.error(
-                    '%s invalid input format of string "%s" on line %d pwd "%s"',
-                    str(e), row[1], ctr, row[0])
-                continue
-            yield (row[0], int(value))
+            else:
+                value = int(row[1])
+        except ValueError as e:
+            logging.error(
+                '%s invalid input format of string "%s" on line %d pwd "%s"',
+                str(e), row[1], self.ctr, row[0])
+            return None, None
+        return row[0], int(value)
+
+class TsvList(TsvListParent):
+    def as_list_iter(self, agen):
+        for row in csv.reader(iter(agen), delimiter = '\t', quotechar = None):
+            pwd, freq = self.interpret_row(row)
+            if pwd is not None:
+                for _ in range(freq):
+                    yield (sys.intern(pwd), 1)
+
+class TsvSimulatedList(TsvListParent):
+    def as_list_iter(self, agen):
+        for row in csv.reader(iter(agen), delimiter = '\t', quotechar = None):
+            pwd, value = self.interpret_row(row)
+            if pwd is not None:
+                yield (pwd, value)
 
 class ConcatenatingList(object):
     CONFIG_IM_KEY = 'empirical_weighting'
@@ -2268,7 +2284,7 @@ class Guesser(object):
                                     verbose = 0,
                                     batch_size = self.chunk_size_guesser)
         answer = np.array(answer)
-        assert answer.shape == (len(astring_list, 1, self.ctable.vocab_size))
+        assert answer.shape == (len(astring_list), 1, self.ctable.vocab_size)
         if self.relevel_not_matching_passwords:
             self.relevel_prediction_many(answer, astring_list)
         return answer
