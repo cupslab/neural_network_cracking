@@ -857,6 +857,7 @@ class ModelDefaults(object):
     secondary_training_save_freqs = False
     guessing_secondary_training = False
     deep_model = False
+    guesser_class = None
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -1473,8 +1474,21 @@ class TsvList(PwdList):
 
 class TsvSimulatedList(PwdList):
     def as_list_iter(self, agen):
+        ctr = 0
         for row in csv.reader(iter(agen), delimiter = '\t', quotechar = None):
-            yield (row[0], int(float.fromhex(row[1])))
+            ctr += 1
+            if len(row) < 2:
+                logging.error('Invalid number of tabs on line %d, expected 2 but was %d',
+                              ctr, len(row))
+                continue
+            try:
+                value = float.fromhex(row[1])
+            except ValueError as e:
+                logging.error(
+                    '%s invalid input format of string "%s" on line %d pwd "%s"',
+                    str(e), row[1], ctr, row[0])
+                continue
+            yield (row[0], int(value))
 
 class ConcatenatingList(object):
     CONFIG_IM_KEY = 'empirical_weighting'
@@ -2254,6 +2268,7 @@ class Guesser(object):
                                     verbose = 0,
                                     batch_size = self.chunk_size_guesser)
         answer = np.array(answer)
+        assert answer.shape == (len(astring_list, 1, self.ctable.vocab_size))
         if self.relevel_not_matching_passwords:
             self.relevel_prediction_many(answer, astring_list)
         return answer
@@ -2609,6 +2624,14 @@ class DelAmicoCalculator(GuessSerializer):
 class GuesserBuilderError(Exception): pass
 
 class GuesserBuilder(object):
+    special_class_builder_map = {
+        'random_walk' : RandomWalkGuesser,
+        'delamico_random_walk' : RandomWalkDelAmico,
+        'generate_random' : RandomGenerator,
+    }
+
+    other_class_builders = {}
+
     def __init__(self, config):
         self.config = config
         self.model = None
@@ -2662,18 +2685,14 @@ class GuesserBuilder(object):
             raise GuesserBuilderError('Cannot build without ostream')
         assert self.config is not None
         class_builder = ParallelGuesser if self.parallel else Guesser
-        if (self.config.guess_serialization_method == 'random_walk' or
-            self.config.guess_serialization_method == 'delamico_random_walk' or
-            self.config.guess_serialization_method == 'generate_random'):
-            if self.config.guess_serialization_method == 'random_walk':
-                class_builder = RandomWalkGuesser
-            elif (self.config.guess_serialization_method ==
-                  'delamico_random_walk'):
-                class_builder = RandomWalkDelAmico
-            else:
-                class_builder = RandomGenerator
+        if (self.config.guess_serialization_method in
+            self.special_class_builder_map):
+            class_builder = self.special_class_builder_map[
+                self.config.guess_serialization_method]
             if self.parallel:
                 class_builder = ParallelRandomWalker
+        if self.config.guesser_class in self.other_class_builders:
+            class_builder = self.other_class_builders[self.config.guesser_class]
         if self.seed_probs is not None:
             answer = class_builder(
                 model_or_serializer, self.config, self.ostream, self.seed_probs)
