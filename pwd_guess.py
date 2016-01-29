@@ -2284,6 +2284,10 @@ class Guesser(object):
                                     verbose = 0,
                                     batch_size = self.chunk_size_guesser)
         answer = np.array(answer)
+        # Versions of the Keras library after about 0.2.0 return a different
+        # shape than the library before 0.3.1
+        if len(answer.shape) == 2:
+            answer = np.expand_dims(answer, axis=1)
         assert answer.shape == (len(astring_list), 1, self.ctable.vocab_size)
         if self.relevel_not_matching_passwords:
             self.relevel_prediction_many(answer, astring_list)
