@@ -225,6 +225,7 @@ def read_config(fname):
         if key not in answer.adict:
             answer.adict[key] = DEFAULT_CONFIG[key]
     answer.validate()
+    logging.info('Using config: %s', json.dumps(answer.as_dict(), indent=4))
     return answer
 
 def train(args):
@@ -290,8 +291,9 @@ if __name__=='__main__':
     parser.add_argument('-s', '--smoothing', default = 'none',
                         help='Type of smoothing. Default is no smoothing. ',
                         choices=sorted(MarkovModel.SMOOTHING_MAP.keys()))
-    parser.add_argument('-f', '--train-format', help='Can be list or tsv',
-                        choices=['list', 'tsv'])
+    parser.add_argument('-f', '--train-format',
+                        help='Can be list or tsv. Default is tsv',
+                        choices=['list', 'tsv'], default='tsv')
     parser.add_argument('-l', '--log-file')
     parser.add_argument('--log-level', default='info', choices=pg.log_level_map)
     main(parser.parse_args())
