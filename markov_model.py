@@ -212,7 +212,8 @@ MARKOV_GUESSER_MAP = {
     'markov_generate_random' : MarkovRandomGenerator,
 }
 
-def read_config(fname):
+def read_config(args):
+    fname = args.config
     if fname is not None:
         logging.info('Reading config from %s', fname)
         answer = pg.ModelDefaults.fromFile(fname)
@@ -220,17 +221,25 @@ def read_config(fname):
         logging.info('Using default config')
         # Default should be to use simulated frequency optimization
         answer = pg.ModelDefaults(guesser_class='markov_human',
+                                  model_type='LSTM',
                                   simulated_frequency_optimization=True)
     for key in DEFAULT_CONFIG:
         if key not in answer.adict:
             answer.adict[key] = DEFAULT_CONFIG[key]
+    if args.config_values is not None:
+        for cv in args.config_values.split(';'):
+            name, value = cv.split('=')
+            answer.adict[name] = eval(value)
     answer.validate()
     logging.info('Using config: %s', json.dumps(answer.as_dict(), indent=4))
     return answer
 
 def train(args):
+    if args.ofile is None:
+        logging.critical('Must provide --ofile argument! Exiting...')
+        sys.exit(1)
     logging.info('Beginning training of %s-gram model...', args.k_order)
-    config = read_config(args.config)
+    config = read_config(args)
     model = MarkovModelBuilder(
         config, order = args.k_order, smoothing = args.smoothing).build()
     model.train(pg.ResetablePwdList(
@@ -238,7 +247,7 @@ def train(args):
     model.saveModel(args.ofile)
 
 def make_guesser_builder(args):
-    config = read_config(args.config)
+    config = read_config(args)
     if config.guesser_class not in MARKOV_GUESSER_MAP:
         logging.critical(('Configuration option guesser_class is %s must be '
                           'one of: %s'), config.guesser_class,
@@ -294,6 +303,9 @@ if __name__=='__main__':
     parser.add_argument('-f', '--train-format',
                         help='Can be list or tsv. Default is tsv',
                         choices=['list', 'tsv'], default='tsv')
+    parser.add_argument('--cv', '--config-values', dest='config_values',
+                        help=('Provide configuration values in format: '
+                              'NAME=VALUE;NAME2=VALUE'))
     parser.add_argument('-l', '--log-file')
     parser.add_argument('--log-level', default='info', choices=pg.log_level_map)
     main(parser.parse_args())
