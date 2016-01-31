@@ -13,6 +13,7 @@ except ImportError as e:
 def main(args):
     input_probs = []
     prob_fmt = float.fromhex if args.hex else float
+    policy = pwd_guess.policy_list[args.policy]
     for pwd, prob in csv.reader(args.testfile, delimiter='\t', quotechar=None):
         prob_v = prob_fmt(prob)
         if prob_v < 1 and prob_v >= 0:
@@ -21,14 +22,25 @@ def main(args):
         args.ofile, input_probs,
         pwd_guess.ModelDefaults(
             random_walk_confidence_bound_z_value=args.confidence_interval))
+    filtered_policy_num, filtered_not_prob_num, ctr = 0, 0, 0
     for row in csv.reader(args.randomfile, delimiter='\t', quotechar=None):
-        prob_str, pwd = row
+        pwd, prob_str = row
         prob = prob_fmt(prob_str)
-        if prob >= 0:
-            calculator.serialize(pwd, prob)
-        if prob >= 1:
+        ctr += 1
+        if not policy.pwd_complies(pwd):
             calculator.serialize(pwd, 0)
+            filtered_policy_num += 1
+        elif prob >= 0:
+            calculator.serialize(pwd, prob)
+        elif prob >= 1:
+            calculator.serialize(pwd, 0)
+            filtered_not_prob_num += 1
     calculator.finish()
+    sys.stderr.write('Analyzed %d randomly generated passwords\n', ctr)
+    sys.stderr.write(('Filtered %d passwords for not satisfying '
+                      'the %s policy\n'), filtered_policy_num, args.policy)
+    sys.stderr.write('Filtered %d passwords for out of bounds probability\n',
+                     filtered_not_prob_num)
 
 if __name__=='__main__':
     parser = argparse.ArgumentParser(
@@ -52,4 +64,7 @@ if __name__=='__main__':
                               'interval. '))
     parser.add_argument('--hex', action='store_true',
                         help='Probabilities are in hex format. ')
+    parser.add_argument('-p', '--policy', choices=sorted(policy_list.keys()),
+                        help='Password policy. Default is no policy. ',
+                        default='basic')
     main(parser.parse_args())
