@@ -2041,6 +2041,7 @@ class OneUppercasePolicy(ComplexPasswordPolicy):
 policy_list = {
     'complex' : ComplexPasswordPolicy(),
     'basic' : BasicPolicy(),
+    '1class8' : PasswordPolicy('.{8,}'),
     'basic_long' : PasswordPolicy('.{16,}'),
     'complex_lowercase' : ComplexPasswordPolicyLowercase(),
     'complex_long' : ComplexPasswordPolicy(16),
