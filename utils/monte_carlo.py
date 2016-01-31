@@ -64,7 +64,7 @@ if __name__=='__main__':
                               'interval. '))
     parser.add_argument('--hex', action='store_true',
                         help='Probabilities are in hex format. ')
-    parser.add_argument('-p', '--policy', choices=sorted(policy_list.keys()),
-                        help='Password policy. Default is no policy. ',
-                        default='basic')
+    parser.add_argument('-p', '--policy', default='basic',
+                        choices=sorted(pwd_guess.policy_list.keys()),
+                        help='Password policy. Default is no policy. ')
     main(parser.parse_args())
