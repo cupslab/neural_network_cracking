@@ -36,10 +36,10 @@ def main(args):
             calculator.serialize(pwd, 0)
             filtered_not_prob_num += 1
     calculator.finish()
-    sys.stderr.write('Analyzed %d randomly generated passwords\n', ctr)
+    sys.stderr.write('Analyzed %d randomly generated passwords\n' % ctr)
     sys.stderr.write(('Filtered %d passwords for not satisfying '
-                      'the %s policy\n'), filtered_policy_num, args.policy)
-    sys.stderr.write('Filtered %d passwords for out of bounds probability\n',
+                      'the %s policy\n') % (filtered_policy_num, args.policy))
+    sys.stderr.write('Filtered %d passwords for out of bounds probability\n' %
                      filtered_not_prob_num)
 
 if __name__=='__main__':
