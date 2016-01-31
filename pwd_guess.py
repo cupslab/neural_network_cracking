@@ -50,7 +50,6 @@ import mmap
 import bisect
 import unittest
 import math
-from unittest.mock import Mock
 import re
 import io
 
@@ -741,6 +740,8 @@ class ModelSerializer(object):
         logging.info('Done saving model')
 
     def load_model(self):
+        from unittest.mock import Mock
+
         # To be able to load models
 
         # In case bidirectional model cannot be loaded
@@ -1663,8 +1664,8 @@ class Filterer(object):
             self.config.set_intermediate_info(
                 'end_character_frequencies', self.end_frequencies)
 
-    def filter(self, alist):
-        return filter(lambda x: self.pwd_is_valid(x[0]), alist)
+    def filter(self, alist, quick=False):
+        return filter(lambda x: self.pwd_is_valid(x[0], quick=quick), alist)
 
 class ResetablePwdList(object):
     def __init__(self, pwd_file, pwd_format, config):
@@ -1672,10 +1673,11 @@ class ResetablePwdList(object):
         self.pwd_format = pwd_format
         self.config = config
 
-    def create_new(self):
+    def create_new(self, quick = False):
         return Filterer(self.config).filter(
             PwdList.getFactory(
-                self.pwd_format, self.config)(self.pwd_file).as_list())
+                self.pwd_format, self.config)(self.pwd_file).as_list(),
+            quick=quick)
 
     def initialize(self, save_stats = True, save_freqs = True):
         input_factory = PwdList.getFactory(self.pwd_format, self.config)
@@ -1688,8 +1690,8 @@ class ResetablePwdList(object):
         input_list.finish()
         logging.info('Done reading passwords...')
 
-    def as_iterator(self):
-        return (pwd for pwd in self.create_new())
+    def as_iterator(self, quick=False):
+        return (pwd for pwd in self.create_new(quick))
 
 class GuessSerializer(object):
     TOTAL_COUNT_RE = re.compile('Total count: (\d*)\n')
@@ -2452,7 +2454,7 @@ class RandomWalkGuesser(Guesser):
     def super_node_recur(self, node_list):
         real_node_list = []
         for node in node_list:
-            pwd, *_ = node
+            pwd = node[0]
             if len(pwd) <= self.max_len:
                 real_node_list.append(node)
             elif len(pwd) > self.max_len and pwd[-1] == PASSWORD_END:
@@ -2463,7 +2465,7 @@ class RandomWalkGuesser(Guesser):
         predictions = self.batch_prob(pwd_list)
         next_nodes = []
         for i, cur_node in enumerate(real_node_list):
-            astring, prob, *_ = cur_node
+            astring, prob = cur_node[0], cur_node[1]
             poss_next = self.next_node_fn(
                 self, astring, prob, predictions[i][0])
             if len(poss_next) == 0:
@@ -2572,7 +2574,7 @@ class RandomWalkDelAmico(RandomWalkGuesser):
 
 class RandomGenerator(RandomWalkDelAmico):
     def spinoff_node(self, node):
-        pwd, prob, *_ = node
+        pwd, prob = node[0], node[1]
         self.output_serializer.serialize(pwd.rstrip('\n'), prob)
 
     def make_serializer(self):
