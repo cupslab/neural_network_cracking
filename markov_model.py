@@ -171,7 +171,7 @@ class MarkovModelBuilder(object):
         self.config = config
         self.smoothing = smoothing
         self.order = order
-        self.model_file = None
+        self.model_file = model_file
 
     def build(self):
         cls = MarkovModel
