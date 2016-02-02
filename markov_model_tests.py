@@ -172,6 +172,7 @@ class BackoffMarkovModelTest(unittest.TestCase):
         config = Mock()
         config.char_bag = ('abc' + pg.PASSWORD_END)
         config.backoff_smoothing_threshold = 0
+        config.additive_smoothing_amount = 0
         m = mm.BackoffMarkovModel(config, order=2)
         m.train([('abc', 1)])
         answer = np.zeros((len(config.char_bag), ), dtype=np.float64)
@@ -187,6 +188,7 @@ class BackoffMarkovModelTest(unittest.TestCase):
         config = Mock()
         config.char_bag = ('abc' + pg.PASSWORD_END)
         config.backoff_smoothing_threshold = 0
+        config.additive_smoothing_amount = 0
         m = mm.BackoffMarkovModel(config, order=3)
         m.train([('abc', 1), ('aaa', 1)])
         answer = np.zeros((len(config.char_bag), ), dtype=np.float64)

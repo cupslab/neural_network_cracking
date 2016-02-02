@@ -11,7 +11,7 @@ import logging
 PASSWORD_START = '\t';
 
 DEFAULT_CONFIG = {
-    'additive_smoothing_amount' : 1,
+    'additive_smoothing_amount' : 0,
     'backoff_smoothing_threshold' : 10
 }
 
@@ -22,17 +22,23 @@ class NoSmoothingSmoother(object):
         self.config = config
 
     def predict(self, ctx_arg, answer):
-        assert answer.shape == (len(self.alphabet), )
-        # TODO: memoize computation here
+        assert answer.shape == (len(self.alphabet),)
         return self._predict(ctx_arg, answer)
 
-    def _predict(self, ctx_arg, answer):
+    def freq(self, ngram):
+        return self.freq_dict[ngram] if ngram in self.freq_dict else 0
+
+    def sum_elems(self, ctx_arg, answer):
         total_sum = 0
         for i, next_char in enumerate(self.alphabet):
             ngram = ctx_arg + next_char
-            freq = self.freq_dict[ngram] if ngram in self.freq_dict else 0
+            freq = self.freq(ngram)
             answer[i] += freq
             total_sum += freq
+        return total_sum
+
+    def _predict(self, ctx_arg, answer):
+        total_sum = self.sum_elems(ctx_arg, answer)
         for i in range(len(self.alphabet)):
             answer[i] /= total_sum
 
@@ -41,31 +47,25 @@ class AdditiveSmoothingSmoother(NoSmoothingSmoother):
         super().__init__(freq_dict, config)
         self.amount = self.config.additive_smoothing_amount
 
-    def _predict(self, ctx_arg, answer):
-        total_sum = 0
-        for i, next_char in enumerate(self.alphabet):
-            ngram = ctx_arg + next_char
-            freq = (self.freq_dict[ngram] + self.amount
-                    if ngram in self.freq_dict else self.amount)
-            answer[i] += freq
-            total_sum += freq
-        for i in range(len(self.alphabet)):
-            answer[i] /= total_sum
+    def freq(self, ngram):
+        return (self.freq_dict[ngram] + self.amount
+                if ngram in self.freq_dict else self.amount)
 
 class BackoffSmoother(NoSmoothingSmoother):
     def __init__(self, freq_dict, config):
         super().__init__(freq_dict, config)
         self.threshold = self.config.backoff_smoothing_threshold
+        self.amount = self.config.additive_smoothing_amount
+
+    def freq(self, ngram):
+        answer = (self.freq_dict[ngram] + self.amount
+                  if ngram in self.freq_dict else self.amount)
+        if answer < self.threshold:
+            return 0
+        return answer
 
     def _predict(self, ctx_arg, answer):
-        total_sum = 0
-        for i, next_char in enumerate(self.alphabet):
-            ngram = ctx_arg + next_char
-            freq = self.freq_dict[ngram] if ngram in self.freq_dict else 0
-            if freq < self.threshold:
-                freq = 0
-            answer[i] += freq
-            total_sum += freq
+        total_sum = self.sum_elems(ctx_arg, answer)
         if total_sum == 0:
             answer.fill(0)
             assert len(ctx_arg) != 0, 'Backing off on 0 character string!?!'
