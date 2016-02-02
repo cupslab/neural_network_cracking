@@ -15,9 +15,10 @@ def main(args):
             ctr += 1
         else:
             if ctr != 0:
-                args.ofile.write('%s\t%s\n' % (pwd, fn(ctr)))
+                args.ofile.write('%s\t%s\n' % (prev, fn(ctr)))
             prev = pwd
             ctr = 1
+    args.ofile.write('%s\t%s\n' % (pwd, fn(ctr)))
 
 if __name__=='__main__':
     parser = argparse.ArgumentParser(
