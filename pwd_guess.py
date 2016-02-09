@@ -2038,6 +2038,34 @@ class OneUppercasePolicy(ComplexPasswordPolicy):
             return False
         return self.passes_blacklist(pwd)
 
+class SemiComplexPolicyLowercase(ComplexPasswordPolicy):
+    def pwd_complies(self, pwd):
+        pwd = pwd.strip(PASSWORD_END)
+        count = 0
+        if len(pwd) < self.required_length:
+            return False
+        if self.has_group(pwd, self.digits):
+            count += 1
+        if self.has_group(pwd, self.upper_and_lowercase):
+            count += 1
+        if self.all_from_group(pwd, self.non_symbols):
+            count += 1
+        return self.passes_blacklist(pwd) and count >= 2
+
+class SemiComplexPolicyLowercase(ComplexPasswordPolicy):
+    def pwd_complies(self, pwd):
+        pwd = pwd.strip(PASSWORD_END)
+        count = 0
+        if len(pwd) < self.required_length:
+            return False
+        if self.has_group(pwd, self.digits):
+            count += 1
+        if self.has_group(pwd, self.upper_and_lowercase):
+            count += 1
+        if self.all_from_group(pwd, self.non_symbols):
+            count += 1
+        return self.passes_blacklist(pwd) and count >= 2
+
 policy_list = {
     'complex' : ComplexPasswordPolicy(),
     'basic' : BasicPolicy(),
@@ -2046,6 +2074,10 @@ policy_list = {
     'complex_lowercase' : ComplexPasswordPolicyLowercase(),
     'complex_long' : ComplexPasswordPolicy(16),
     'complex_long_lowercase' : ComplexPasswordPolicyLowercase(16),
+    'semi_complex' : SemiComplexPolicy(12),
+    'semi_complex_lowercase' : SemiComplexPolicyLowercase(12),
+    '3class12' : SemiComplexPolicy(12),
+    '2class12_all_lowercase' : SemiComplexPolicyLowercase(12),
     'one_uppercase' : OneUppercasePolicy(3)
 }
 
