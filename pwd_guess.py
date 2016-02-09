@@ -2052,7 +2052,7 @@ class SemiComplexPolicyLowercase(ComplexPasswordPolicy):
             count += 1
         return self.passes_blacklist(pwd) and count >= 2
 
-class SemiComplexPolicy(pg.ComplexPasswordPolicy):
+class SemiComplexPolicy(ComplexPasswordPolicy):
     def pwd_complies(self, pwd):
         pwd = pwd.strip(PASSWORD_END)
         count = 0
