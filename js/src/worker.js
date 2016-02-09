@@ -1,8 +1,14 @@
 'use strict';
 
 // Change these
-var NEURAL_NETWORK_INTERMEDIATE = 'js_info_and_gn3.json';
-var NEURAL_NETWORK_FILE = 'js_model_v10.msgpacked.zigzag.json';
+var NEURAL_NETWORK_INTERMEDIATE =
+      'basic_3M.info_and_guess_numbers.json';
+
+// For testing quantizing
+var NEURAL_NETWORK_FILE =
+      'basic_3M.weight_arch.quantized.fixed_point1000.zigzag.nospace.json';
+// For no quantization
+// var NEURAL_NETWORK_FILE = 'basic_3M.weight_arch.json';
 
 var jscache = require('js-cache');
 var bs = require('binarysearch');
@@ -271,7 +277,8 @@ request.addEventListener('load', function() {
     modelFilePath: NEURAL_NETWORK_FILE,
     arrayType: 'float32',
     useGPU: true,
-    msgPackFmt: info['fixed_point_scale'],
+    scaleFactor: info['fixed_point_scale'],
+    msgPackFmt: false,
     zigzagEncoding: true
   });
   cached_table = new ProbCacher(CACHE_SIZE, nn, ctable);
