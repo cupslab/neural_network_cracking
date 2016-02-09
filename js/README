@@ -99,6 +99,10 @@ Creating a model
 
     utils/quantize_json.py --ifile input_file_from_step1.json --ofile output_model_file.json [--bits #]
 
+    There are other options and piping configurations to use here that can
+    help. If you use a fixed point scale factor, you must edit the file from
+    step 2 by hand to add the 'fixed_point_scale' key to the json object.
+
 USAGE
 
 First set up a neural network client by calling the constructor. This will
