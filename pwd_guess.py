@@ -2052,7 +2052,7 @@ class SemiComplexPolicyLowercase(ComplexPasswordPolicy):
             count += 1
         return self.passes_blacklist(pwd) and count >= 2
 
-class SemiComplexPolicyLowercase(ComplexPasswordPolicy):
+class SemiComplexPolicy(pg.ComplexPasswordPolicy):
     def pwd_complies(self, pwd):
         pwd = pwd.strip(PASSWORD_END)
         count = 0
@@ -2060,11 +2060,13 @@ class SemiComplexPolicyLowercase(ComplexPasswordPolicy):
             return False
         if self.has_group(pwd, self.digits):
             count += 1
-        if self.has_group(pwd, self.upper_and_lowercase):
+        if self.has_group(pwd, self.uppercase):
+            count += 1
+        if self.has_group(pwd, self.lowercase):
             count += 1
         if self.all_from_group(pwd, self.non_symbols):
             count += 1
-        return self.passes_blacklist(pwd) and count >= 2
+        return self.passes_blacklist(pwd) and count >= 3
 
 policy_list = {
     'complex' : ComplexPasswordPolicy(),
