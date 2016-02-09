@@ -26,8 +26,15 @@ function callback(prob, pwd) {
 client = factory(callback);
 
 function init() {
-  $.getJSON(TEST_SET_PWDS_FILE, function(data){
-    TEST_SET_PWDS = data;
-    callback();
-  });
+  // For use with NN
+  // $.getJSON(TEST_SET_PWDS_FILE, function(data){
+  //   TEST_SET_PWDS = data;
+  //   callback();
+  // });
+
+  // For use in zxcvbn
+  TEST_SET_PWDS = TEST_PASSWORDS;
+  TEST_SET_PWDS.sort();         // to take advantage of cache effects for
+                                // quicker tests
+  callback();
 }

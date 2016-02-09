@@ -1,4 +1,4 @@
-var TEST_CASES = 'test_cases.json';
+var TEST_CASES = 'generated_js_test_cases_basic3M.json';
 var TEST_SET_DATA = 'test_data';
 
 var test_cases;
