@@ -1137,7 +1137,11 @@ if (length(cargs) > 1) {
                                    ## graph.equalizecutoff = T,
                                    continuecurvestocutoff = T,
                                    truncate.to.min.cutoff = T,
-                                   config=config)
+                                   config=config,
+                                   ## Billy: added for paper
+                                   logxbreaks = 10^seq(1, 25, 2),
+                                   xlimits = c(1, 10^25)
+                                   )
 
   }
 }
