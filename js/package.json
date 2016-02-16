@@ -19,7 +19,7 @@
     "base64-js" : "^1.0.2"
   },
   "scripts": {
-    "do-browserify" : "browserify src/nn-client.js -o build/nn-client.js && browserify src/worker.js -o build/worker.js",
+    "do-browserify" : "browserify src/nn-client.js -o build/nn-client.js && browserify src/worker.js -o build/worker.js && browserify src/pcfg.js -o build/pcfg.js",
     "build": "sh build.sh",
     "test": "cp build/* examples/ && cp tests/* examples/ && node examples/server.js"
   },

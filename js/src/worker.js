@@ -1,7 +1,9 @@
 'use strict';
 
-var USE_BLOOM_FILTER = false;
-var TO_LOWERCASE = false;
+var PERFORMANCE_TIMING = true;
+var USE_BLOOM_FILTER = true;
+var USE_PCFG = false;
+var TO_LOWERCASE = true;
 
 // Change these
 var NEURAL_NETWORK_INTERMEDIATE =
@@ -9,7 +11,7 @@ var NEURAL_NETWORK_INTERMEDIATE =
 var NEURAL_NETWORK_FILE =
       'basic_3M.weight_arch.quantized.fixed_point1000.zigzag.nospace.json';
 var ZIGZAG = true;
-var SCALE_FACTOR = 1;
+var SCALE_FACTOR = 200;
 
 
 
@@ -31,6 +33,7 @@ var SCALE_FACTOR = 1;
 var jscache = require('js-cache');
 var bs = require('binarysearch');
 var bloom_filter = require('./bloom_filter');
+var pcfg = require('./pcfg');
 import NeuralNet from 'neocortex-rnn';
 
 var ACTION_TOTAL_PROB = 'total_prob';
@@ -39,10 +42,11 @@ var ACTION_RAW_PREDICT_NEXT = 'raw_predict_next';
 var ACTION_GUESS_NUMBER = 'guess_number';
 var UPPERCASE = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 var END_CHAR = '\n';
-var CACHE_SIZE = 100;
+var CACHE_SIZE = 1000;
 
 
 var bf;
+var pc;
 var nn;
 var ctable;
 var cached_table;
@@ -256,16 +260,29 @@ function lookupGuessNumber(input_pwd) {
   return answer;
 }
 
-function lookupGuessNumberWithBloomFilter(input_pwd) {
-  var nn_guess = lookupGuessNumber(
+function lookupGuessNumberComplete(input_pwd) {
+  var start_time;
+  if (PERFORMANCE_TIMING) {
+    start_time = performance.now();
+  }
+  var min_guess = lookupGuessNumber(
     TO_LOWERCASE ? input_pwd.toLowerCase() : input_pwd) / SCALE_FACTOR;
   if (bf !== undefined) {
     var bf_guess = bf.check_pwd(input_pwd);
     if (bf_guess !== false) {
-      return Math.min(nn_guess, Math.pow(10, bf_guess));
+      min_guess = Math.min(min_guess, Math.pow(10, bf_guess));
     }
   }
-  return nn_guess;
+  if (pc !== undefined) {
+    var pc_guess = pc.guess(input_pwd);
+    if (pc_guess !== false) {
+      min_guess = Math.min(min_guess, pc_guess);
+    }
+  }
+  if (PERFORMANCE_TIMING) {
+    console.log('Total time', performance.now() - start_time);
+  }
+  return min_guess;
 };
 
 function predictNext(input_pwd) {
@@ -282,7 +299,7 @@ function handleMsg(e) {
     };
   } else if (e.data.action == ACTION_GUESS_NUMBER) {
     message = {
-      prediction : lookupGuessNumberWithBloomFilter(e.data.inputData),
+      prediction : lookupGuessNumberComplete(e.data.inputData),
       password : pwd
     };
   } else if (e.data.action == ACTION_PREDICT_NEXT) {
@@ -308,6 +325,9 @@ request.addEventListener('load', function() {
   guess_numbers = info['guessing_table'];
   if (info['bloom_filter'] && USE_BLOOM_FILTER) {
     bf = new bloom_filter.BloomFilter(info['bloom_filter']);
+  }
+  if (info['pcfg'] && USE_PCFG) {
+    pc = new pcfg.PCFG(info['pcfg']);
   }
   nn = new NeuralNet({
     modelFilePath: NEURAL_NETWORK_FILE,

@@ -6,8 +6,12 @@ import collections
 
 def guess_numbers(ifname):
     with open(ifname, 'r') as ifile:
-        return dict([(row[2], int(row[5])) for row in csv.reader(
-            ifile, delimiter='\t', quotechar=None)])
+        try:
+            return dict([(row[2], int(row[5])) for row in csv.reader(
+                ifile, delimiter='\t', quotechar=None)])
+        except ValueError as e:
+            sys.stderr.write('ERROR!!! %s %s\n' % (ifname, str(e)))
+            sys.exit(1)
 
 def main(args):
     gns = guess_numbers(args.files[0])

@@ -87,13 +87,15 @@ if (!exists("kLabelSmidgeFactor")) {
 
 if (!exists("kLabelVerticalDistance")) {
   # Start with Dark2 from Brewer palette and add color-blind palette so there are more entries -- note that names are not used in the code
-  kLabelVerticalDistance <- 0.03
 }
+  kLabelVerticalDistance <- .05
+
 
 if (!exists("kPlotMarginRight")) {
   # Start with Dark2 from Brewer palette and add color-blind palette so there are more entries -- note that names are not used in the code
-  kPlotMarginRight <- 0.2
 }
+  kPlotMarginRight <- 0.17
+
 
 
 #####
@@ -527,7 +529,6 @@ PlotGuessingCurves <- function(lookup.results,
                                     levels = unique(as.character(cond.order)))
 
   # Make the graph!
-  print(head(guessing.data))
   baseplot <- ggplot(guessing.data,
                      aes_string(x = "guess.number",
                                 y = "proportion",
@@ -551,6 +552,7 @@ PlotGuessingCurves <- function(lookup.results,
       data.linetypes[i] <- configed$linetype[1]
     }
   }
+
 
   plot.plus.curves <- baseplot +
     geom_step(## size = 1.3
@@ -655,11 +657,20 @@ PlotGuessingCurves <- function(lookup.results,
 
   # Finally, add labels to curves if needed, using code from:
   #   http://learnr.wordpress.com/2009/04/29/ggplot2-labelling-data-series-and-adding-a-data-table/
+  data.labels <- maxproportion.data$condition
+  for(i in 1:nrow(maxproportion.data)){
+    configed <- config[ config$name == maxproportion.data$condition[i], ]
+    if(length(rownames(configed)) > 0){
+      data.labels[i] <- configed$displayname[1]
+    }
+  }
+  maxproportion.data$labelnames <- data.labels
+
   if (labelsoncurves) {
     plot.plus.axes <- plot.plus.axes +
       geom_text(data = maxproportion.data,
-                aes_string(x = "LabelX", y = "LabelY", label = "condition"),
-                hjust = 0, vjust = 0.5,
+                aes_string(x = "LabelX", y = "LabelY", label = "labelnames"),
+                hjust = 0, vjust = 0.5, size = 6,
                 family = safe.ifelse(kExtraFonts, "Helvetica Neue", "Helvetica"))
   }
   plot.plus.axes <- plot.plus.axes + theme(panel.grid.major = element_line(color="grey"))
@@ -1088,6 +1099,8 @@ MakePlotFromCurrentDirectory <-
   if (!is.na(pdf.filename)) {
     pdf(pdf.filename, width = 8, height = 5)
   }
+  lookup.results$guess.number <- ifelse(lookup.results$guess.number > 10**25,
+                                        -1, lookup.results$guess.number)
   if (truncate.to.min.cutoff) {
     guesscutoff <- min(unlist(values(results.list$guesscutoffs)))
     PlotGuessingCurves(lookup.results = lookup.results,

@@ -90,15 +90,21 @@ def quantize(args):
         answer_fn = Debugger(args.debug).curry(answer_fn)
     return answer_fn
 
+counter = 0
 def main(args):
     logging.basicConfig(level=logging.INFO)
     fn = quantize(args)
-    oobj = json.load(args.ifile, parse_float=fn)
+    def increment(x):
+        global counter
+        counter += 1
+        return fn(x)
+    oobj = json.load(args.ifile, parse_float=increment)
     fn.done()
     if args.remove_spaces:
         args.ofile.write(json.dumps(oobj).replace(' ', ''))
     else:
         json.dump(oobj, args.ofile)
+    sys.stderr.write('Transformed: %d weights\n' % counter)
 
 if __name__=='__main__':
     parser = argparse.ArgumentParser(

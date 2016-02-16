@@ -19,8 +19,8 @@ def main(args):
             pwd, guess_number = row
             prob_str, var, num, confidence = '0.1337', 0, 1, 0
         else:
-            sys.stderr.write('Error, expected 2 or 6 rows and found %d\n' %
-                             len(row))
+            sys.stderr.write('Error, expected 2 or 6 rows and found %d %s\n' %
+                             (len(row), str(row)))
             continue
         if pwd not in pwds:
             continue

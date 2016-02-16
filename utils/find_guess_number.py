@@ -6,7 +6,11 @@ def main(args):
     seen = set()
     ctr = 0
     for ctr, line in enumerate(args.ifile):
-        pwd, prob = line.strip('\n').split('\t')
+        lines = line.strip('\n')
+        try:
+            pwd, prob = lines.split('\t')
+        except ValueError as e:
+            pwd, prob = lines, -1
         ctr += 1
         if pwd in seen:
             ctr -= 1

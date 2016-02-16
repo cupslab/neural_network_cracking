@@ -33,7 +33,7 @@ class BloomFilter:
         output = []
         for i in range(4):
             output.append(int(digest[i * 8:(i+ 1) * 8], 16))
-        return [output[-1] % (self.num_bins)]
+        return [output[3 - i] % (self.num_bins) for i in range(self.num_probes)]
 
     def update(self, keys):
         for key in keys:
@@ -61,14 +61,18 @@ def main(args):
         words = dict([(line.strip(os.linesep), rank + 1)
                       for rank, line in enumerate(args.ifile)])
     log_ten_words = collections.defaultdict(list)
+    max_gn = max(words.values())
     for word in words:
         logten = int(math.log(words[word] + 1, 10))
-        for i in range(logten, int(math.log(len(words), 10)) + 1):
+        for i in range(logten, int(math.log(max_gn, 10)) + 1):
             log_ten_words[i].append(word)
+    print('total words:', len(words))
+    print('logten', sum(map(len, log_ten_words.values())))
     output = {}
     for logten in log_ten_words:
         in_this_bloom = log_ten_words[logten]
-        b = BloomFilter(int(len(in_this_bloom) * 1.5) + 1, 1, in_this_bloom)
+        b = BloomFilter(int(len(in_this_bloom) * args.ratio) + 1,
+                        args.probes, in_this_bloom)
         print('Size:', len(in_this_bloom), '|', 'Error:', b.error())
         output[str(logten)] = bytes(b.array)
         if args.json:
@@ -90,4 +94,7 @@ if __name__=='__main__':
                         default=sys.stdin)
     parser.add_argument('-o', '--ofile', required=True)
     parser.add_argument('-j', '--json', action='store_true')
+    parser.add_argument('-r', '--ratio', type=float, default=1.5)
+    parser.add_argument('-p', '--probes', type=int, default=1)
+    parser.add_argument('-s', '--suffix', type=int, default=0)
     main(parser.parse_args())

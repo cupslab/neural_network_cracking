@@ -34,7 +34,7 @@ function init() {
 
   // For use in zxcvbn
   TEST_SET_PWDS = TEST_PASSWORDS;
-  TEST_SET_PWDS.sort();         // to take advantage of cache effects for
-                                // quicker tests
+  // TEST_SET_PWDS.sort();         // to take advantage of cache effects for
+  //                               // quicker tests
   callback();
 }
