@@ -19,7 +19,8 @@ def main(args):
     with open(args.pwd_file, 'r') as pwds:
         counts = collections.Counter([line.strip(os.linesep) for line in pwds])
     with open(os.path.join(args.odir, 'totalcounts.' + args.name), 'w') as tot:
-        tot.write('%s:Total count\t%d\n' % (args.name, max(gns.values())))
+        tot.write('%s:Total count\t%d\n' % (args.name, max(
+            filter(lambda x: x != float('inf'), gns.values()))))
     with open(os.path.join(args.odir, 'lookupresults.' + args.name), 'w') as lr:
         writer = csv.writer(lr, delimiter='\t', quotechar=None)
         for pwd, value in gns.items():

@@ -1,17 +1,36 @@
 'use strict';
 
+var USE_BLOOM_FILTER = false;
+var TO_LOWERCASE = false;
+
 // Change these
 var NEURAL_NETWORK_INTERMEDIATE =
       'basic_3M.info_and_guess_numbers.json';
-
-// For testing quantizing
 var NEURAL_NETWORK_FILE =
       'basic_3M.weight_arch.quantized.fixed_point1000.zigzag.nospace.json';
+var ZIGZAG = true;
+var SCALE_FACTOR = 1;
+
+
+
+// For testing quantizing
 // For no quantization
 // var NEURAL_NETWORK_FILE = 'basic_3M.weight_arch.json';
 
+
+
+// For complex
+// var NEURAL_NETWORK_FILE =
+//       'complex_3M.weight_arch.quantized2digits.fixedpoint.json';
+// var NEURAL_NETWORK_INTERMEDIATE = 'complex_3M_info_and_gn.json';
+// var ZIGZAG = false;
+// var SCALE_FACTOR = 100;
+
+
+
 var jscache = require('js-cache');
 var bs = require('binarysearch');
+var bloom_filter = require('./bloom_filter');
 import NeuralNet from 'neocortex-rnn';
 
 var ACTION_TOTAL_PROB = 'total_prob';
@@ -22,6 +41,8 @@ var UPPERCASE = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 var END_CHAR = '\n';
 var CACHE_SIZE = 100;
 
+
+var bf;
 var nn;
 var ctable;
 var cached_table;
@@ -233,6 +254,18 @@ function lookupGuessNumber(input_pwd) {
   var answer = Math.round(guess_number_answer[1]);
   gn_cache.set(input_pwd, answer);
   return answer;
+}
+
+function lookupGuessNumberWithBloomFilter(input_pwd) {
+  var nn_guess = lookupGuessNumber(
+    TO_LOWERCASE ? input_pwd.toLowerCase() : input_pwd) / SCALE_FACTOR;
+  if (bf !== undefined) {
+    var bf_guess = bf.check_pwd(input_pwd);
+    if (bf_guess !== false) {
+      return Math.min(nn_guess, Math.pow(10, bf_guess));
+    }
+  }
+  return nn_guess;
 };
 
 function predictNext(input_pwd) {
@@ -249,7 +282,7 @@ function handleMsg(e) {
     };
   } else if (e.data.action == ACTION_GUESS_NUMBER) {
     message = {
-      prediction : lookupGuessNumber(e.data.inputData),
+      prediction : lookupGuessNumberWithBloomFilter(e.data.inputData),
       password : pwd
     };
   } else if (e.data.action == ACTION_PREDICT_NEXT) {
@@ -273,14 +306,18 @@ request.addEventListener('load', function() {
   var info = JSON.parse(this.responseText);
   ctable = new CharacterTable(info);
   guess_numbers = info['guessing_table'];
+  if (info['bloom_filter'] && USE_BLOOM_FILTER) {
+    bf = new bloom_filter.BloomFilter(info['bloom_filter']);
+  }
   nn = new NeuralNet({
     modelFilePath: NEURAL_NETWORK_FILE,
     arrayType: 'float32',
     useGPU: true,
     scaleFactor: info['fixed_point_scale'],
     msgPackFmt: false,
-    zigzagEncoding: true
+    zigzagEncoding: ZIGZAG
   });
+  console.log(nn, info);
   cached_table = new ProbCacher(CACHE_SIZE, nn, ctable);
   nn.init(function() {
     onLoadMsgs.forEach(handleMsg);

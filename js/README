@@ -103,6 +103,43 @@ Creating a model
     help. If you use a fixed point scale factor, you must edit the file from
     step 2 by hand to add the 'fixed_point_scale' key to the json object.
 
+    6. [Optional bu recommended for deployment]
+
+    Create a bloom filter blacklist.
+
+    Take a list of strings to blacklist in relation to their rank in the
+    blacklist. Ideally this should be a small number of passwords.
+
+    First take the number of passwords that you want. You should use ideally
+    <10^6 passwords here.
+
+    head -n 1000000 [training data sorted by descending frequency] > first_n_passwords.txt
+
+    Remove non-guessable passwords for the policy. E.g., for basic8:
+
+    grep ".\{8,\}" first_n_passwords.txt > first_basic8_passwords.txt
+
+    (Optional) Filter out passwords that the neural network will already guess
+    soon. filter_probable_pwds.py is in the utils directory. You will need to
+    put the first_basic8_passwords into the server side guesser before this
+    step. For this step, I recommend using a tolerance of 10^3. Lower is more
+    conservative but includes more passwords.
+
+    python3 filter_probable_pwds.py first_basic8_passwords.txt [monte carlo guess numbers] --tolerance 3 > first_basic8_passwords_filtered.txt
+
+    Create a bloom filter.
+
+    python3 create_log_bloom_filter_list.py --ifile first_basic8_passwords_filtered.txt --ofile bloom_filter.json --json
+
+    This will create the file [bloom_filter.json] which is a bloom filter
+    containing all of the passwords in first_basic8_passwords_filtered.txt.
+
+    This json file must be included with the info file from step 2:
+
+    jq --slurp '.[0] * .[1]' output_from_step2.json bloom_filter.json > info_file.json
+
+    info_file.json should match the filename in the worker.js source.
+
 USAGE
 
 First set up a neural network client by calling the constructor. This will

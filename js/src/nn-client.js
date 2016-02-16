@@ -40,7 +40,7 @@ NeuralNetworkClient.prototype.raw_predict_next = function(pwd) {
 NeuralNetworkClient.prototype.probability_char = function(pwd, next_char) {
   this.worker.postMessage({
     inputData : pwd,
-    action : 'probability_char'
+    action : 'predict_next'
   });
 };
 

@@ -24,7 +24,10 @@ def main(args):
             random_walk_confidence_bound_z_value=args.confidence_interval))
     filtered_policy_num, filtered_not_prob_num, ctr = 0, 0, 0
     for row in csv.reader(args.randomfile, delimiter='\t', quotechar=None):
-        pwd, prob_str = row
+        if not args.flip_random_input_columns:
+            pwd, prob_str = row
+        else:
+            prob_str, pwd = row
         prob = prob_fmt(prob_str)
         ctr += 1
         if not policy.pwd_complies(pwd):
@@ -67,4 +70,6 @@ if __name__=='__main__':
     parser.add_argument('-p', '--policy', default='basic',
                         choices=sorted(pwd_guess.policy_list.keys()),
                         help='Password policy. Default is no policy. ')
+    parser.add_argument('-f', '--flip-random-input-columns',
+                        action='store_true')
     main(parser.parse_args())

@@ -438,7 +438,7 @@ PlotGuessingCurves <- function(lookup.results,
   maxproportion.data <- ddply(guessing.data,
                               "condition",
                               summarize,
-                              MaxGN = max(guess.number),
+                              MaxGN = max(unlist(guess.number)),
                               MaxProp = max(proportion))
 
   if (graph.equalizecutoff) {
@@ -473,7 +473,7 @@ PlotGuessingCurves <- function(lookup.results,
 		  maxproportion.data <- ddply(guessing.data,
 		                              "condition",
 		                              summarize,
-		                              MaxGN = max(guess.number),
+		                              MaxGN = max(unlist(guess.number)),
 		                              MaxProp = max(proportion))
 	  }
 
@@ -1136,7 +1136,7 @@ if (length(cargs) > 1) {
       MakePlotFromCurrentDirectory(pdf.filename = cargs[2],
                                    ## graph.equalizecutoff = T,
                                    continuecurvestocutoff = T,
-                                   truncate.to.min.cutoff = T,
+                                   truncate.to.min.cutoff = F,
                                    config=config,
                                    ## Billy: added for paper
                                    logxbreaks = 10^seq(1, 25, 2),
