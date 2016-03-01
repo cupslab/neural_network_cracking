@@ -73,6 +73,7 @@ if(!exists("defaultybreaks")){
 if(!exists("defaultylimits")){
     defaultylimits <- c()
 }
+defaultylimits <- c()
 
 if (!exists("kPalette")) {
   # Start with Dark2 from Brewer palette and add color-blind palette so there are more entries -- note that names are not used in the code
@@ -88,13 +89,13 @@ if (!exists("kLabelSmidgeFactor")) {
 if (!exists("kLabelVerticalDistance")) {
   # Start with Dark2 from Brewer palette and add color-blind palette so there are more entries -- note that names are not used in the code
 }
-  kLabelVerticalDistance <- .05
+  kLabelVerticalDistance <- .06
 
 
 if (!exists("kPlotMarginRight")) {
   # Start with Dark2 from Brewer palette and add color-blind palette so there are more entries -- note that names are not used in the code
 }
-  kPlotMarginRight <- 0.17
+  kPlotMarginRight <- 0.22
 
 
 
@@ -527,7 +528,9 @@ PlotGuessingCurves <- function(lookup.results,
                         )$condition
   guessing.data$condition <- factor(guessing.data$condition,
                                     levels = unique(as.character(cond.order)))
-
+    print('hi')
+    b <- guessing.data[guessing.data$guess.number > 10**9, ]
+    print(head(b[with(b, order(guess.number)),]))
   # Make the graph!
   baseplot <- ggplot(guessing.data,
                      aes_string(x = "guess.number",
@@ -633,10 +636,10 @@ PlotGuessingCurves <- function(lookup.results,
   }
 
   # Increase the size of the axis labels
-  plot.plus.axes <- plot.plus.axes + theme(axis.title.x = element_text(size=16))
-  plot.plus.axes <- plot.plus.axes + theme(axis.title.y = element_text(size=16))
-  plot.plus.axes <- plot.plus.axes + theme(axis.text.x = element_text(size=16))
-  plot.plus.axes <- plot.plus.axes + theme(axis.text.y = element_text(size=16))
+  plot.plus.axes <- plot.plus.axes + theme(axis.title.x = element_text(size=24))
+  plot.plus.axes <- plot.plus.axes + theme(axis.title.y = element_text(size=24))
+  plot.plus.axes <- plot.plus.axes + theme(axis.text.x = element_text(size=24))
+  plot.plus.axes <- plot.plus.axes + theme(axis.text.y = element_text(size=24))
 
   # The minor gridlines don't align to log-scale, so turn them off
   if (xlog || ylog) {
@@ -670,7 +673,7 @@ PlotGuessingCurves <- function(lookup.results,
     plot.plus.axes <- plot.plus.axes +
       geom_text(data = maxproportion.data,
                 aes_string(x = "LabelX", y = "LabelY", label = "labelnames"),
-                hjust = 0, vjust = 0.5, size = 6,
+                hjust = 0, vjust = 0.5, size = 7,
                 family = safe.ifelse(kExtraFonts, "Helvetica Neue", "Helvetica"))
   }
   plot.plus.axes <- plot.plus.axes + theme(panel.grid.major = element_line(color="grey"))
