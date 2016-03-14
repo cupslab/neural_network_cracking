@@ -115,6 +115,50 @@ optional arguments:
                         Only train on secondary data.
 
 
+Pretrained Network Usage
+------------------------
+
+You must use revision 275 for the pre-built neural network. You can check if
+you are using the correct version with:
+
+md5sum pwd_guess.py
+546c53989f017aa78a399c5af851ed87  pwd_guess.py
+
+New trained networks should use the most recent version.
+
+
+Enumerating passwords
+
+Edit guess_len8_config.json to replace "g1_len8.tsv" in the "enumerate_ofile"
+key with the output file you would like.
+
+If you want to guess more passwords, you should change the value of
+"lower_probability_threshold" to something lower, e.g. 1e-8.
+
+Passwords are not sorted, so if you want in order guessing, then sort the
+output file by descending probability:
+
+sort -gr -k2 -t$'\t' [OUTPUT_FILE] -o [SORTED_OUTPUT_FILE]
+
+
+Monte Carlo Simulation
+
+Edit guess_len8_config.json to replace "g1_len8.tsv" in the "enumerate_ofile"
+key with the output file you would like. Edit "<input_file>" in the
+"password_test_fname" key to set the password input file. This file should
+point to a line-delimited password file where each line is one password.
+
+
+Command:
+
+python3 <path_to_root>/pwd_guess.py --config-args <config_file.json>
+
+e.g.:
+
+python3 ../pwd_guess.py --config-args guess_len8_config.json
+
+
+
 Version
 -------
 
@@ -357,9 +401,9 @@ enforced_policy - Will not generate guesses that do not match the policy.
     'one_uppercase' - Requires at least one uppercase character
 
   *_lowercase policies mean that they are insensitve to case and case is
-   ignored. These are useful when preparing a train set using the
-   policyfilterer.py utility, but not useful for training or guessing with a
-   neural network.
+  ignored. These are useful when preparing a train set using the
+  policyfilterer.py utility, but not useful for training or guessing with a
+  neural network.
 
 
 
@@ -615,33 +659,3 @@ Example guessing configuration for a complex policy
         "save_model_versioned" : true
     }
 }
-
-
-Pretrained Usage
-----------------
-
-
-Enumerating passwords
-
-Edit guess_len8_config.json to replace "g1_len8.tsv" in the "enumerate_ofile"
-key with the output file you would like.
-
-If you want to guess more passwords, you should change the value of
-"lower_probability_threshold" to something lower, e.g. 1e-8.
-
-
-Monte Carlo Simulation
-
-Edit guess_len8_config.json to replace "g1_len8.tsv" in the "enumerate_ofile"
-key with the output file you would like. Edit "<input_file>" in the
-"password_test_fname" key to set the password input file. This file should
-point to a line-delimited password file where each line is one password.
-
-
-Command:
-
-python3 <path_to_root>/pwd_guess.py --config-args <config_file.json>
-
-e.g.:
-
-python3 ../pwd_guess.py --config-args guess_len8_config.json

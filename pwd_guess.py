@@ -466,18 +466,21 @@ class TrieFuzzySerializer(BinaryTrieSerializer):
         return record
 
 class CharacterTable(object):
-    def __init__(self, chars, maxlen):
+    def __init__(self, chars, maxlen, padding_character = None):
         self.chars = sorted(set(chars))
         self.char_indices = dict((c, i) for i, c in enumerate(self.chars))
         self.indices_char = dict((i, c) for i, c in enumerate(self.chars))
         self.maxlen = maxlen
         self.vocab_size = len(self.chars)
         self.char_list = self.chars
+        self.padding_character = padding_character
 
     def pad_to_len(self, astring, maxlen = None):
         maxlen = maxlen if maxlen else self.maxlen
         if len(astring) > maxlen:
             return astring[len(astring) - maxlen:]
+        if self.padding_character is not None:
+            return astring + (PASSWORD_END * (maxlen - len(astring)))
         return astring
 
     def encode_many(self, string_list, maxlen = None):
@@ -519,12 +522,15 @@ class CharacterTable(object):
             return OptimizingCharacterTable(
                 config.char_bag, config.context_length,
                 config.get_intermediate_info('rare_character_bag'),
-                config.uppercase_character_optimization)
+                config.uppercase_character_optimization,
+                padding_character = config.padding_character)
         else:
-            return CharacterTable(config.char_bag, config.context_length)
+            return CharacterTable(config.char_bag, config.context_length,
+                                  padding_character = config.padding_character)
 
 class OptimizingCharacterTable(CharacterTable):
-    def __init__(self, chars, maxlen, rare_characters, uppercase):
+    def __init__(self, chars, maxlen, rare_characters, uppercase,
+                 padding_character = None):
         if uppercase:
             self.rare_characters = ''.join(
                 c for c in rare_characters if c not in string.ascii_uppercase)
@@ -550,7 +556,7 @@ class OptimizingCharacterTable(CharacterTable):
                 char_bag = char_bag.replace(c, '')
                 assert c.lower() in char_bag
                 self.rare_character_preimage[c.lower()] = [c, c.lower()]
-        super().__init__(char_bag, maxlen)
+        super().__init__(char_bag, maxlen, padding_character)
         for key in self.rare_dict:
             self.char_indices[key] = self.char_indices[self.rare_dict[key]]
         translate_table = {}
@@ -862,6 +868,7 @@ class ModelDefaults(object):
     deep_model = False
     guesser_class = None
     freq_format = 'hex'
+    padding_character = None
 
     def __init__(self, adict = None, **kwargs):
         self.adict = adict if adict is not None else dict()

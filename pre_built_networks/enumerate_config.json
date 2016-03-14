@@ -21,7 +21,7 @@
         "rare_character_optimization" : true,
         "rare_character_optimization_guessing" : true,
         "parallel_guessing" : false,
-        "lower_probability_threshold" : 1e-8,
+        "lower_probability_threshold" : 1e-6,
         "chunk_size_guesser" : 20000,
         "guess_serialization_method" : "human",
         "random_walk_seed_num" : 100000,
