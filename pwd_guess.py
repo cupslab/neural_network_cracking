@@ -10,8 +10,10 @@ import sys
 if 'KERAS_PATH' in os.environ:
     sys.path.insert(0, os.environ['KERAS_PATH'])
 import keras
-sys.stderr.write('Using keras version %s\n' % (keras.__version__))
-
+try:
+    sys.stderr.write('Using keras version %s\n' % (keras.__version__))
+except AttributeError as e:
+    pass
 
 from keras.models import Sequential, slice_X, model_from_json
 from keras.layers.core import Activation, Dense, RepeatVector, TimeDistributedDense, Dropout, Masking

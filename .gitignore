@@ -1,7 +1,7 @@
 *.pyc
 __pycache__
 build
-generator.so
+generator.*so
 pwd_guess_ctypes.c
 js/examples/*.json
 js/node_modules

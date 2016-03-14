@@ -615,3 +615,33 @@ Example guessing configuration for a complex policy
         "save_model_versioned" : true
     }
 }
+
+
+Pretrained Usage
+----------------
+
+
+Enumerating passwords
+
+Edit guess_len8_config.json to replace "g1_len8.tsv" in the "enumerate_ofile"
+key with the output file you would like.
+
+If you want to guess more passwords, you should change the value of
+"lower_probability_threshold" to something lower, e.g. 1e-8.
+
+
+Monte Carlo Simulation
+
+Edit guess_len8_config.json to replace "g1_len8.tsv" in the "enumerate_ofile"
+key with the output file you would like. Edit "<input_file>" in the
+"password_test_fname" key to set the password input file. This file should
+point to a line-delimited password file where each line is one password.
+
+
+Command:
+
+python3 <path_to_root>/pwd_guess.py --config-args <config_file.json>
+
+e.g.:
+
+python3 ../pwd_guess.py --config-args guess_len8_config.json

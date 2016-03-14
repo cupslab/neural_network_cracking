@@ -1,0 +1,32 @@
+{
+    "args" : {
+        "arch_file" : "arch.json",
+        "weight_file" : "nn_len8.h5",
+        "log_file" : "guess_log.txt",
+        "enumerate_ofile" : "g1_enumerate.tsv"
+    },
+    "config" : {
+        "training_chunk" : 10000,
+        "min_len" : 8,
+        "max_len" : 30,
+        "context_length" : 10,
+        "chunk_print_interval" : 100,
+        "layers" : 2,
+        "hidden_size" : 1000,
+        "model_type" : "JZS2",
+        "simulated_frequency_optimization" : true,
+        "intermediate_fname" : "intermediate_data.sqlite",
+        "randomize_training_order" : true,
+        "uppercase_character_optimization" : true,
+        "rare_character_optimization" : true,
+        "rare_character_optimization_guessing" : true,
+        "parallel_guessing" : false,
+        "lower_probability_threshold" : 1e-8,
+        "chunk_size_guesser" : 20000,
+        "guess_serialization_method" : "human",
+        "random_walk_seed_num" : 100000,
+        "max_gpu_prediction_size" : 20000,
+        "random_walk_seed_iterations" : 1,
+        "no_end_word_cache" : true
+    }
+}
