@@ -46,6 +46,7 @@
         "random_walk_seed_iterations" : 50,
         "no_end_word_cache" : true,
         "intermediate_fname" : "intermediate_data.sqlite",
-        "save_model_versioned" : true
+        "save_model_versioned" : true,
+        "padding_character" : true
     }
 }
