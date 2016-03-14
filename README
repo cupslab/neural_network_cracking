@@ -118,15 +118,6 @@ optional arguments:
 Pretrained Network Usage
 ------------------------
 
-You must use revision 275 for the pre-built neural network. You can check if
-you are using the correct version with:
-
-md5sum pwd_guess.py
-546c53989f017aa78a399c5af851ed87  pwd_guess.py
-
-New trained networks should use the most recent version.
-
-
 Enumerating passwords
 
 Edit guess_len8_config.json to replace "g1_len8.tsv" in the "enumerate_ofile"
@@ -223,6 +214,10 @@ bidirectional_rnn - Only supported for some versions of Keras. If true, then
 
 deep_model - If true, then train a deeper NN model. Set this to true if you
   use more than one layer in the 'layers' argument.
+
+padding_character - If true, then use a padding character. This should
+generally be false, but is included for backward compatibility. Models trained
+before version 275 include a padding character.
 
 
 # Training Configuration Options:
