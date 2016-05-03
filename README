@@ -18,9 +18,9 @@ Setup
         root = /usr/local/cuda
 
         [global]
-        device = gpu
+        device = gpu                  # change this to be gpu# if necessary
         floatX = float32
-        warn_float64 = warn
+        warn_float64 = ignore
 
       Using the GPU will require that you have nvidia drivers installed and
       CUDA.
@@ -41,6 +41,13 @@ Setup
 
     python3 setup.py build_ext --inplace
 
+  Set up:
+
+    - Cuda must be in path and library path. Add these two lines to your .bashrc
+      file:
+
+      export PATH="$PATH":/usr/local/cuda-7.5/bin
+      export LD_LIBRARY_PATH="$LD_LIBRARY_PATH":/usr/local/cuda-7.5/lib64
 
 Tests
 -----
@@ -329,7 +336,9 @@ relevel_not_matching_passwords - If true, then passwords that do not match the
 guess_serialization_method - Default is 'human' which enumerates all passwords
   above the lower_probability_threshold cutoff. 'delamico_random_walk' means
   calculate password guess numbers using Monte Carlo simulations.
-  'generate_random' means generate random passwords.
+  'generate_random' means generate random passwords. 'calculator' enumerates
+  all passwords, but does not save the enumerated passwords to disk; instead it
+  calculates the guess number of the test set of passwords.
 
 parallel_guessing - Boolean. If true, then use multiple cores to generate
   passwords.
@@ -463,6 +472,10 @@ final_schedule_ratio
 Example Configuration File
 --------------------------
 
+You can also see the pre_built_networks/ directory for examples of
+configuration files. Here are some starting configuration files that you should
+modify to suit your needs.
+
 Combined arguments and configuration file for generic training.
 
 {
@@ -471,7 +484,7 @@ Combined arguments and configuration file for generic training.
         "weight_file" : "weight.h5",
         "log_file" : "train_log.txt",
         "pwd_file" : [
-            "../leaks/all_combined_long_feeder_v2.utf8.shuffled.txt"
+            "[INPUT_FILE]"
         ],
         "pwd_format" : [
             "list"
@@ -480,28 +493,23 @@ Combined arguments and configuration file for generic training.
     "config" : {
         "training_chunk" : 1000,
         "training_main_memory_chunk": 10000000,
-        "min_len" : 4,
+        "min_len" : 8,
         "max_len" : 30,
         "context_length" : 10,
         "chunk_print_interval" : 100,
         "layers" : 2,
         "hidden_size" : 1000,
-        "generations" : 3,
+        "generations" : 5,
         "training_accuracy_threshold" : -1,
         "train_test_ratio" : 20,
-        "model_type" : "JZS2",
-        "tokenize_words" : false,
-        "most_common_token_count" : 2000,
-
-        "bidirectional_rnn" : false,
+        "model_type" : "LSTM",
         "train_backwards" : true,
-
         "dense_layers" : 1,
         "dense_hidden_size" : 512,
         "secondary_training" : true,
         "secondary_train_sets" : {
             "pwd_file" : [
-                "../leaks/all_combined_long_v2.txt"
+                "[SECONDARY_INPUT_OPTIONAL]"
             ],
             "pwd_format" : [
                 "list"
@@ -509,17 +517,12 @@ Combined arguments and configuration file for generic training.
         },
 
         "simulated_frequency_optimization" : false,
-
         "randomize_training_order" : true,
         "uppercase_character_optimization" : true,
         "rare_character_optimization" : true,
-
         "rare_character_optimization_guessing" : true,
         "parallel_guessing" : false,
-        "lower_probability_threshold" : 1e-7,
         "chunk_size_guesser" : 40000,
-        "guess_serialization_method" : "delamico_random_walk",
-        "password_test_fname" : "../leaks/basic16.txt",
         "random_walk_seed_num" : 100000,
         "max_gpu_prediction_size" : 10000,
         "random_walk_seed_iterations" : 1,
