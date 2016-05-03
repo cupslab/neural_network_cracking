@@ -636,9 +636,9 @@ PlotGuessingCurves <- function(lookup.results,
   }
 
   # Increase the size of the axis labels
-  plot.plus.axes <- plot.plus.axes + theme(axis.title.x = element_text(size=24))
+  plot.plus.axes <- plot.plus.axes + theme(axis.title.x = element_text(size=22))
   plot.plus.axes <- plot.plus.axes + theme(axis.title.y = element_text(size=24))
-  plot.plus.axes <- plot.plus.axes + theme(axis.text.x = element_text(size=24))
+  plot.plus.axes <- plot.plus.axes + theme(axis.text.x = element_text(size=22))
   plot.plus.axes <- plot.plus.axes + theme(axis.text.y = element_text(size=24))
 
   # The minor gridlines don't align to log-scale, so turn them off
@@ -964,6 +964,7 @@ ReadSingleResultsPair <- function(filenamestub) {
                                quote = "",
                                comment.char = "")
   # lookupresults files don't have a header row, so set column names here
+print(head(lookup.results))
   colnames(lookup.results)[1:7] <- c("workerid","condition","brokenpassword",
                                      "probability","pattern","guess.number","source.ids")
   # Make sure probability column is numeric
@@ -1099,6 +1100,8 @@ MakePlotFromCurrentDirectory <-
   results.list <- ReadFilesFromDirectoryPath(".")
   lookup.results <- results.list$lookup.results
   # Make pdf current device if pdf.filename is specified
+
+  lookup.results$guess.number <- ifelse(lookup.results$guess.number > 10^14, -5, lookup.results$guess.number)
   if (!is.na(pdf.filename)) {
     pdf(pdf.filename, width = 8, height = 5)
   }

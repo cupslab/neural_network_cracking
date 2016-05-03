@@ -8,7 +8,7 @@ import numpy as np
 import pwd_guess as pg
 import logging
 
-PASSWORD_START = '\t';
+PASSWORD_START = '\t'
 
 DEFAULT_CONFIG = {
     'additive_smoothing_amount' : 0,

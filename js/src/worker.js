@@ -11,7 +11,7 @@ var NEURAL_NETWORK_INTERMEDIATE =
 var NEURAL_NETWORK_FILE =
       'basic_3M.weight_arch.quantized.fixed_point1000.zigzag.nospace.json';
 var ZIGZAG = true;
-var SCALE_FACTOR = 200;
+var SCALE_FACTOR = 300;
 
 
 
