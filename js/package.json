@@ -14,7 +14,7 @@
     "js-cache": "^1.0.2",
     "binarysearch": "^0.2.4",
     "msgpack-lite" : "^0.1.14",
-    "neocortex-rnn": "git+ssh://wmeliche@grey4.andrew.cmu.edu/home/wmeliche/nn/neocortex",
+    "neocortex-rnn-cups": "https://github.com/cupslab/javascript_neural_networks",
     "md5" : "^2.0.0",
     "base64-js" : "^1.0.2"
   },

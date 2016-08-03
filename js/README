@@ -6,9 +6,10 @@ password cracker.
 SETUP
 
 You will need to download and install node.js and the npm package manager and
-the jq utility. You will also need a copy of a modified version of the neocortex
-javascript library. If you don't have it, ask me. This should be a file called
-"neocortex.min.js". For some steps you may need the whole library.
+the jq utility. You will need to build your own neural network for running the
+javascript code, convert it to the correct format using the directions below,
+and then modify the worker.js file to point to your network.
+
 
 Compiling
 

@@ -34,7 +34,7 @@ var jscache = require('js-cache');
 var bs = require('binarysearch');
 var bloom_filter = require('./bloom_filter');
 var pcfg = require('./pcfg');
-import NeuralNet from 'neocortex-rnn';
+import NeuralNet from 'neocortex-rnn-cups';
 
 var ACTION_TOTAL_PROB = 'total_prob';
 var ACTION_PREDICT_NEXT = 'predict_next';
