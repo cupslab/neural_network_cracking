@@ -1,6 +1,6 @@
 'use strict';
 
-var PERFORMANCE_TIMING = true;
+var PERFORMANCE_TIMING = false;
 var USE_BLOOM_FILTER = true;
 var USE_PCFG = false;
 var TO_LOWERCASE = true;
@@ -33,7 +33,6 @@ var SCALE_FACTOR = 300;
 var jscache = require('js-cache');
 var bs = require('binarysearch');
 var bloom_filter = require('./bloom_filter');
-var pcfg = require('./pcfg');
 import NeuralNet from 'neocortex-rnn-cups';
 
 var ACTION_TOTAL_PROB = 'total_prob';
@@ -325,9 +324,6 @@ request.addEventListener('load', function() {
   guess_numbers = info['guessing_table'];
   if (info['bloom_filter'] && USE_BLOOM_FILTER) {
     bf = new bloom_filter.BloomFilter(info['bloom_filter']);
-  }
-  if (info['pcfg'] && USE_PCFG) {
-    pc = new pcfg.PCFG(info['pcfg']);
   }
   nn = new NeuralNet({
     modelFilePath: NEURAL_NETWORK_FILE,
