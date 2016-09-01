@@ -35,7 +35,8 @@ Setup
 
     - keras - at time of writing, the version on pip is not current and will
       cause model saving to fail. Use the version from github instead
-      (https://github.com/fchollet/keras).
+      (https://github.com/fchollet/keras). Version 0.2.0 was the main keras
+      version during development.
 
     - scikit-learn - pip install scikit-learn
 
