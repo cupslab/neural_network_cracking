@@ -172,6 +172,32 @@ Version
 python pwd_guess.py --version
 
 
+Output format
+-------------
+
+delamico_random_walk - This output format performs a monte-carlo estimation of
+the guess number, the strength of a password. The output file is a TSV where
+each line has 7 fields: the password, the probability of that password, the
+estimated output guess number (the strength of the password), the std deviation
+of the randomized trial for this password (in units of number of guess), the
+number of measurements for this password, the estimated confidence interval for
+the guess number (in units of number of guesses).
+
+human - This output format enumerates guesses and stores the list of passwords
+guessed to the output file. The guesses are not in order of probability. The
+otuput file is a TSV with each line having two fields: the password, and the
+probability. You can sort the passwords by probability using the unix sort
+command.
+
+calculator - This output format calculates the exact number of guesses for a
+test set of passwords by enumerating guesses. The output file is a TSV with 3
+fields: the password, the probability for that password, and the guess number.
+
+generate_random - This output format generates random passwords and stores them to
+disk. The output is a TSV with 2 fields: the random password and its probability.
+
+
+
 Config files
 ------------
 
