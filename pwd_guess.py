@@ -958,6 +958,15 @@ class ModelDefaults(object):
                           str(e), self.intermediate_fname)
             raise
 
+    def override_from_commandline(self, cmdline):
+        answer = {}
+        for keyval in cmdline.split(';'):
+            if not keyval:
+                continue
+            key, _, value = keyval.partition('=')
+            answer[key] = type(getattr(self, key))(value)
+        self.adict.update(answer)
+
 class BasePreprocessor(object):
     def __init__(self, config = ModelDefaults()):
         self.config = config
@@ -3122,6 +3131,7 @@ def main(args):
         config, args = read_config_args(args)
     else:
         config = ModelDefaults.fromFile(args['config'])
+    config.override_from_commandline(args['config_cmdline'])
     if args['args']:
         with open(args['args'], 'r') as argfile:
             args = json.load(argfile)
@@ -3195,6 +3205,9 @@ def make_parser():
                         help='Only output password probabilities')
     parser.add_argument('--train-secondary-only', action='store_true',
                         help='Only train on secondary data. ')
+    parser.add_argument('--config-cmdline', default='',
+                        help=('Extra configuration values. Should be a list of '
+                              'key1=value1;key2=value2 elements. '))
     return parser
 
 if __name__=='__main__':

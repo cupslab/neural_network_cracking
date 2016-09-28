@@ -920,6 +920,28 @@ class ModelDefaultsTest(unittest.TestCase):
         self.assertTrue(pwd_guess.ModelDefaults(
             max_len = 20, context_length = 15).context_length, 20)
 
+    def test_override_from_commandline_one(self):
+        args = pwd_guess.ModelDefaults(context_length=20)
+        self.assertEqual(20, args.context_length)
+        args.override_from_commandline('context_length=10')
+        self.assertEqual(10, args.context_length)
+
+    def test_override_from_commandline_two(self):
+        args = pwd_guess.ModelDefaults(context_length=20, freq_format='hex')
+        self.assertEqual(20, args.context_length)
+        self.assertEqual('hex', args.freq_format)
+        args.override_from_commandline('context_length=10;freq_format=normal')
+        self.assertEqual(10, args.context_length)
+        self.assertEqual('normal', args.freq_format)
+
+    def test_override_from_commandline_two_ending_semi(self):
+        args = pwd_guess.ModelDefaults(context_length=20, freq_format='hex')
+        self.assertEqual(20, args.context_length)
+        self.assertEqual('hex', args.freq_format)
+        args.override_from_commandline('context_length=10;freq_format=normal;')
+        self.assertEqual(10, args.context_length)
+        self.assertEqual('normal', args.freq_format)
+
 class PwdListTest(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.mkdtemp()
