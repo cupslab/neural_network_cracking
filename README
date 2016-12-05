@@ -1,9 +1,35 @@
 Paper
 -----
 
-Fast, Lean, and Accurate:\\Modeling Password Guessability Using Neural Networks.
+Fast, Lean, and Accurate: Modeling Password Guessability Using Neural Networks.
 W. Melicher, Blase Ur, Sean M. Segreti, Saranga Komanduri, Lujo Bauer, Nicolas Christin, Lorrie Faith Cranor. USENIX 2016
 
+
+TODO
+----
+
+- Update code to newer versions of keras and Theano.
+
+- Refactor code to split into separate files.
+
+- Change to YAML for configuration files to support comments and reduce the
+  number of configuration writing errors.
+
+- Remove support for things that are no longer used or keras no longer
+  supports (e.g., bidirectional models, JSZ1).
+
+- Make live demo of JavaScript guesser.
+
+- Improve testing on the JavaScript guesser.
+
+- Improve documentation about versions and check compatibility with previous
+  versions of keras and Theano.
+
+- Improve state of saving data in the intermediate_sqlite file. Its easy to end
+  up with data in the intermediate files that doesn't match the training data
+  and leads to obscure and sometimes silent errors.
+
+- Improve performance for enumerating guesses.
 
 
 Setup
@@ -33,10 +59,29 @@ Setup
       Using the GPU will require that you have nvidia drivers installed and
       CUDA.
 
+      Make sure that gcc is compatible with nvcc. At the time of writing, gcc
+      version 4.9 is required. You can check this by executing:
+
+      `which gcc` --version
+
+      Theano 0.7.0-0.8.2 was used during development.
+
+      If using 0.8.2, you may need to add the following lines to you .theanorc
+      due to https://github.com/Theano/Theano/pull/4369. If you don't you might
+      get errors like "WARNING (theano.sandbox.cuda): CUDA is installed, but
+      device gpu is not available (error: cuda unavailable)":
+
+        [nvcc]
+        flags = -D_FORCE_INLINES
+
     - keras - at time of writing, the version on pip is not current and will
       cause model saving to fail. Use the version from github instead
       (https://github.com/fchollet/keras). Version 0.2.0 was the main keras
-      version during development.
+      version during development. However, during development, keras changed to
+      version 0.3.1. Some commits support on version or the other. It is
+      currently a todo item to improve the state of keras support. On my
+      machine the current commit's tests pass with Keras commit
+      1e58b895236f6a80f5e07de74af25f16d9cc4625.
 
     - scikit-learn - pip install scikit-learn
 
@@ -65,6 +110,10 @@ Run automated tests by:
 
     python pwd_guess_unit.py
 
+Running all tests takes roughly 15 minutes on my machine. It may take more
+depending on the GPU you are using.
+
+
 or to run only specific tests:
 
     python -m unittest pwd_guess_unit.<specific unit test>
@@ -92,7 +141,7 @@ Neural Network with passwords. This program uses a neural network to guess
 passwords. This happens in two phases, training and enumeration. Either --pwd-
 file or --enumerate-ofile are required. --pwd-file will give a password file
 as training data. --enumerate-ofile will guess passwords based on an existing
-model. Version 93196263da47c29ddba40625cc23927bbe63f7ce
+model. Version <version number>
 
 optional arguments:
   -h, --help            show this help message and exit

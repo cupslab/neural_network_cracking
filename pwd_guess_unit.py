@@ -815,6 +815,7 @@ class TrainerTest(unittest.TestCase):
         t.build_model()
         self.assertNotEqual(None, t.model)
 
+    @unittest.skip('Not supporting bidirectional models')
     def test_build_model_bidirectional(self):
         t = pwd_guess.Trainer(['pass'], pwd_guess.ModelDefaults(
             hidden_size = 12, layers = 1,
