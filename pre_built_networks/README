@@ -1,0 +1,68 @@
+Requirements
+------------
+
+
+These networks were built using: the git commit of this library
+(https://github.com/cupslab/neural_network_cracking)
+aab909cb87659a47d0837cff9d686bdbb5efe41a, the git commit of the Keras library
+(https://github.com/fchollet/keras) 10852b25294c604add0cc3b2e3cf9986891c8385,
+and Theano version 0.7. You will need to use those version of those libraries,
+in addition to the other requirements. Theano 0.7 will require NVidia CUDNN
+version 4.
+
+
+pip freeze should report:
+
+appdirs==1.4.0
+Cython==0.25.2
+h5py==2.6.0
+Keras==0.2.0
+numpy==1.12.0
+packaging==16.8
+pyparsing==2.1.10
+PyYAML==3.12
+scikit-learn==0.18.1
+scipy==0.18.1
+seya==0.1.0
+six==1.10.0
+sqlitedict==1.4.2
+Theano==0.7.0
+
+
+
+When you have set up those, you should follow the directions in the main README
+for using the network.
+
+
+
+If you get an error like:
+
+    Keyword argument not understood: go_backwards
+
+then you have the incorrect version of Keras or this library.
+
+
+If you get an error like:
+
+    assert self.model_type in model_type_dict
+
+then you have the incorrect version of Keras or this library.
+
+
+
+Then len8 neural network should output the following for a handful of test
+passwords. Not that the estimated guess number columns may be different
+depending on the randomness used for the Monte Carlo simulation, however the
+password probability should match exactly.
+
+123456789	0.00493708154004	0.0	0.0	1100000	0.0
+12345678	0.0026969943769	2.022120329432265	23.92854783010029	1100000	0.04471735133510986
+1234567890	0.000536437692599	2.9630397424931845	38.76227877603296	1100000	0.07243843006623746
+internet	3.67935884738e-05	70.45325472656259	1044.053111166608	1100000	1.9511125420583473
+1q2w3e4r	3.57851598925e-05	74.8092202178425	1099.7096318650838	1100000	2.0551227063121438
+1234qwer	3.3519707639e-05	78.45453920633491	1145.9781025987727	1100000	2.141588607888251
+jsstep71298	2.63038633838e-17	4.24955380345e+14	2633680226601500.0	1100000	4921786513476.753
+bboonnzz666	2.51489722756e-17	4.38624948714e+14	2730498341098737.0	1100000	5102718915740.201
+!26hhdh!	2.42570098311e-17	4.51203637787e+14	2820158356369850.0	1100000	5270274357552.102
+statusasas1212	2.35557763431e-17	4.62680614833e+14	2902161914629224.5	1100000	5423521514523.359
+Cobra12Cobra12	1.0736904447e-17	8.61108612379e+14	5881174307694303.0	1100000	10990660179108.975
