@@ -1308,7 +1308,7 @@ class Trainer(object):
         self.classification_layers.append(dense_layer(self.ctable.vocab_size))
         self.classification_layers.append(Activation('softmax'))
         if deep_model:
-+            self.feature_layers.append(RepeatVector(1))
+            self.feature_layers.append(RepeatVector(1))
         for layer in self.feature_layers + self.classification_layers:
             model.add(layer)
         model.compile(loss='categorical_crossentropy',
