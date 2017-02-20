@@ -15,9 +15,12 @@ try:
 except AttributeError as e:
     pass
 
-from keras.models import Sequential, slice_X, model_from_json
-from keras.layers.core import Activation, Dense, RepeatVector, TimeDistributedDense, Dropout, Masking
+from keras.models import Sequential, model_from_json
+from keras.engine.training import slice_X
+from keras.layers.core import Activation, Dense, RepeatVector, Dropout, Masking
 from keras.layers import recurrent
+from keras.layers.wrappers import TimeDistributed
+from keras.layers.convolutional import Convolution1D, MaxPooling1D
 import keras.utils.layer_utils as layer_utils
 from keras.optimizers import SGD
 
@@ -921,6 +924,7 @@ class ModelDefaults(object):
                 ' output guesses may ignore case or special characters')
         assert self.guess_serialization_method in serializer_type_list
         assert self.context_length <= self.max_len
+        print(self.model_type)
         assert self.model_type in model_type_dict
         assert self.training_main_memory_chunksize > self.training_chunk
         if self.guessing_secondary_training:
@@ -1254,7 +1258,7 @@ class Trainer(object):
         x_strs, y_str_list, weight_list = self.pwd_list.next_chunk()
         x_vec = self.prepare_x_data(x_strs)
         y_vec = self.prepare_y_data(y_str_list)
-        weight_vec = np.zeros((len(weight_list), 1, 1))
+        weight_vec = np.zeros((len(weight_list), 1))
         for i, weight in enumerate(weight_list):
             weight_vec[i] = weight
         return shuffle(x_vec, y_vec, weight_vec)
@@ -1264,15 +1268,15 @@ class Trainer(object):
 
     def prepare_y_data(self, y_str_list):
         # The version of keras introduced non-backward compatible changes...
-        if keras.__version__ == '0.2.0':
-            y_vec = np.zeros((len(y_str_list), 1, self.ctable.vocab_size),
-                             dtype = np.bool)
-            for i, ystr in enumerate(y_str_list):
-                y_vec[i] = self.ctable.encode(ystr, maxlen = 1)
-        else:
-            y_vec = np.zeros((len(y_str_list), self.ctable.vocab_size),
-                             dtype = np.bool)
-            self.ctable._encode_into(y_vec, y_str_list)
+        # if keras.__version__ == '0.2.0':
+        # y_vec = np.zeros((len(y_str_list), 1, self.ctable.vocab_size), dtype = np.bool)
+        # for i, ystr in enumerate(y_str_list):
+            # y_vec[i] = self.ctable.encode(ystr, maxlen = 1)
+        # else:
+        y_vec = np.zeros((len(y_str_list), self.ctable.vocab_size), dtype = np.bool)
+        self.ctable._encode_into(y_vec, y_str_list)
+        if len(y_vec.shape) == 2:
+            y_vec = np.expand_dims(y_vec, axis = 1)
         return y_vec
 
     def build_model(self):
@@ -1304,16 +1308,36 @@ class Trainer(object):
         if deep_model:
             dense_layer = lambda x: Dense(x)
         else:
-            dense_layer = lambda x: TimeDistributedDense(x)
+            dense_layer = lambda x: TimeDistributed(Dense(x))
         for _ in range(self.config.dense_layers):
             self.classification_layers.append(dense_layer(
                 self.config.dense_hidden_size))
         self.classification_layers.append(dense_layer(self.ctable.vocab_size))
+        #self.classification_layers.append(RepeatVector(1))
         self.classification_layers.append(Activation('softmax'))
+        input_shape = (self.config.context_length, self.ctable.vocab_size)
+        if deep_model:
+            self.feature_layers.append(RepeatVector(1))
+        print ("Input_Shape:")
+        print (input_shape)
+        print("feature")
+        print(self.feature_layers)
+        print("class")
+        print(self.classification_layers)
+
+        #self.feature_layers.append(Convolution1D(64, 5))
         for layer in self.feature_layers + self.classification_layers:
             model.add(layer)
+            print(layer)
+            print(layer.input_shape)
+            print(layer.output_shape)
+            print(layer.get_config())
         model.compile(loss='categorical_crossentropy',
-                      optimizer=self.config.model_optimizer)
+                      optimizer=self.config.model_optimizer,metrics=["accuracy"], sample_weight_mode="temporal")
+        print ("SUMMARY")
+        model.summary()
+        #print ("CONFIG")
+        #print (model.get_config())
         self.model = model
 
     def init_layers(self):
@@ -1321,7 +1345,7 @@ class Trainer(object):
         assert len(self.classification_layers) == 0
         assert len(self.feature_layers) == 0
         for layer in self.model.layers:
-            if (type(layer) == TimeDistributedDense or
+            if (type(layer) == TimeDistributed or
                 type(layer) == Activation):
                 self.classification_layers.append(layer)
             else:
@@ -1361,9 +1385,9 @@ class Trainer(object):
         x_train, x_val, y_train, y_val, w_train, w_val = self.test_set(
             x_all, y_all, w_all)
         train_loss, train_accuracy = self.model.train_on_batch(
-            x_train, y_train, accuracy = True, sample_weight = w_train)
+            x_train, y_train, sample_weight = w_train)
         test_loss, test_accuracy = self.model.test_on_batch(
-            x_val, y_val, accuracy = True, sample_weight = w_val)
+            x_val, y_val, sample_weight = w_val)
         return train_loss, train_accuracy, test_loss, test_accuracy
 
     def train_model_generation(self):
