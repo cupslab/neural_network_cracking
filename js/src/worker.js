@@ -6,6 +6,8 @@ var USE_PCFG = false;
 var TO_LOWERCASE = true;
 
 // Change these
+// XXXstroucki this gets expanded in the minified file, so maybe
+// have external configurability
 var NEURAL_NETWORK_INTERMEDIATE =
       'basic_3M.info_and_guess_numbers.json';
 var NEURAL_NETWORK_FILE =
@@ -53,6 +55,30 @@ var guess_numbers;
 var gn_cache = new jscache.Cache(CACHE_SIZE);
 var onLoadMsgs = [];
 
+// deal with possible absence of a console object
+// http://www.clintharris.net/2011/how-to-safely-use-the-javascript-console-object-and-dynamically-enabledisable-logging/
+// declare namespace object
+if (worker === undefined) {
+  var worker = {};
+}
+
+worker.nullConsole = {
+  assert: function() {},
+  log: function() {},
+  warn: function() {},
+  error: function() {},
+  debug: function() {},
+  dir: function() {},
+  info: function() {}
+};
+
+worker.console = worker.nullConsole;
+
+// if we have a console object, use it
+if ("undefined" !== typeof console) {
+  worker.console = console;
+}
+  
 self.onmessage = function(e) {
   onLoadMsgs.push(e);
 };
@@ -279,7 +305,7 @@ function lookupGuessNumberComplete(input_pwd) {
     }
   }
   if (PERFORMANCE_TIMING) {
-    console.log('Total time', performance.now() - start_time);
+    worker.console.log('Total time', performance.now() - start_time);
   }
   return min_guess;
 };
@@ -312,7 +338,7 @@ function handleMsg(e) {
       password : pwd
     };
   } else {
-    console.error('Unknown message action', e.data.action);
+    worker.console.error('Unknown message action', e.data.action);
   }
   self.postMessage(message);
 }
@@ -333,7 +359,7 @@ request.addEventListener('load', function() {
     msgPackFmt: false,
     zigzagEncoding: ZIGZAG
   });
-  console.log(nn, info);
+  worker.console.log(nn, info);
   cached_table = new ProbCacher(CACHE_SIZE, nn, ctable);
   nn.init(function() {
     onLoadMsgs.forEach(handleMsg);
