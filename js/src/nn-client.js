@@ -1,15 +1,31 @@
 function NeuralNetworkClient(callback) {
   this.callback = callback;
-  this.worker = new Worker('worker.min.js');
-  this.worker.onmessage = this.onMessageTriggered.bind(this);
+  // random string id
+  this.id = (Math.random()*1e32).toString(36);
+  // register this instance
+  NeuralNetworkWorker.clients[this.id] = this;
 }
 
-NeuralNetworkClient.prototype.onMessageTriggered = function(event) {
-  this.callback(event.data.prediction, event.data.password);
+// declare shared state for neural network clients
+var NeuralNetworkWorker = new Object();
+// map of client ids to instances
+NeuralNetworkWorker.clients = new Object();
+// shared worker
+NeuralNetworkWorker.worker = new Worker('worker.min.js');
+
+NeuralNetworkWorker.onMessageTriggered = function(event) {
+  var tag = event.data.tag;
+  var client = NeuralNetworkWorker.clients[tag];
+  if (typeof client !== "undefined") {
+    client.callback(event.data.prediction, event.data.password);
+  }
 };
 
+NeuralNetworkWorker.worker.onmessage = NeuralNetworkWorker.onMessageTriggered;
+
 NeuralNetworkClient.prototype.query = function(pwd, prefix) {
-  this.worker.postMessage({
+  NeuralNetworkWorker.worker.postMessage({
+    tag : this.id,
     inputData : pwd,
     action : 'total_prob',
     prefix : prefix
@@ -17,28 +33,32 @@ NeuralNetworkClient.prototype.query = function(pwd, prefix) {
 };
 
 NeuralNetworkClient.prototype.query_guess_number = function(pwd) {
-  this.worker.postMessage({
+  NeuralNetworkWorker.worker.postMessage({
+    tag : this.id,
     inputData : pwd,
     action : 'guess_number'
   });
 };
 
 NeuralNetworkClient.prototype.predict_next = function(pwd) {
-  this.worker.postMessage({
+  NeuralNetworkWorker.worker.postMessage({
+    tag : this.id,
     inputData : pwd,
     action : 'predict_next'
   });
 };
 
 NeuralNetworkClient.prototype.raw_predict_next = function(pwd) {
-  this.worker.postMessage({
+  NeuralNetworkWorker.worker.postMessage({
+    tag : this.id,
     inputData : pwd,
     action : 'raw_predict_next'
   });
 };
 
 NeuralNetworkClient.prototype.probability_char = function(pwd, next_char) {
-  this.worker.postMessage({
+  NeuralNetworkWorker.worker.postMessage({
+    tag : this.id,
     inputData : pwd,
     action : 'predict_next'
   });

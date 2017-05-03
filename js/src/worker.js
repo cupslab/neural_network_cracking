@@ -10,8 +10,10 @@ var TO_LOWERCASE = true;
 // have external configurability
 var NEURAL_NETWORK_INTERMEDIATE =
       'basic_3M.info_and_guess_numbers.json';
+//      'basic_3M.info_and_guess_numbers.no_bloomfilter.json';
 var NEURAL_NETWORK_FILE =
       'basic_3M.weight_arch.quantized.fixed_point1000.zigzag.nospace.json';
+//      'basic_3M.weight_arch.quantized.fixed_point1000.zigzag.nospace.json';
 var ZIGZAG = true;
 var SCALE_FACTOR = 300;
 
@@ -53,6 +55,8 @@ var ctable;
 var cached_table;
 var guess_numbers;
 var gn_cache = new jscache.Cache(CACHE_SIZE);
+
+// queue of incoming messages at load time
 var onLoadMsgs = [];
 
 // deal with possible absence of a console object
@@ -78,7 +82,8 @@ worker.console = worker.nullConsole;
 if ("undefined" !== typeof console) {
   worker.console = console;
 }
-  
+
+// enqueue a message while things are loading
 self.onmessage = function(e) {
   onLoadMsgs.push(e);
 };
@@ -317,23 +322,28 @@ function predictNext(input_pwd) {
 function handleMsg(e) {
   var message;
   var pwd = e.data.inputData;
+  var clientTag = e.data.tag;
   if (e.data.action == ACTION_TOTAL_PROB) {
     message = {
+      tag : clientTag,
       prediction : totalProb(e.data.inputData, e.data.prefix),
       password : pwd
     };
   } else if (e.data.action == ACTION_GUESS_NUMBER) {
     message = {
+      tag : clientTag,
       prediction : lookupGuessNumberComplete(e.data.inputData),
       password : pwd
     };
   } else if (e.data.action == ACTION_PREDICT_NEXT) {
     message = {
+      tag : clientTag,
       prediction : predictNext(e.data.inputData),
       password : pwd
     };
   } else if (e.data.action == ACTION_RAW_PREDICT_NEXT) {
     message = {
+      tag : clientTag,
       prediction : rawPredictNext(e.data.inputData),
       password : pwd
     };
