@@ -7,9 +7,7 @@ SETUP
 
 You will need to download and install node.js and the npm package manager and
 the jq utility. You will need to build your own neural network for running the
-javascript code, convert it to the correct format using the directions below,
-and then modify the worker.js file to point to your network.
-
+javascript code, convert it to the correct format using the directions below.
 
 Compiling
 
@@ -30,8 +28,6 @@ Creating a model
     This section assumes you have a trained model (weight file and architecture
     file) and configuration file from the pwd_guess.py step, and have prepared a
     guessing file.
-
-    Make sure that the string in src/worker.js points to the correct files.
 
     General steps:
 
@@ -61,10 +57,6 @@ Creating a model
     Combine these two files into one json file:
 
     jq --slurp '.[0] * .[1]' output_info_file.json output_guess_number_file.json > info_file_and_gn.json
-
-    Make sure that "info_file_and_gn.json" is stored in the same directory as
-    the worker.{min.}js file and matches the filename in the worker.js source
-    file.
 
     3. [Optional for testing] Generate test cases
 
@@ -139,8 +131,6 @@ Creating a model
 
     jq --slurp '.[0] * .[1]' output_from_step2.json bloom_filter.json > info_file.json
 
-    info_file.json should match the filename in the worker.js source.
-
 USAGE
 
 First set up a neural network client by calling the constructor. This will
@@ -158,6 +148,14 @@ Minimal example of usage in javascript code:
     var client = new NeuralNetworkClient(function(guess_number, pwd) {
       // Do something with the password and guess number
       console.log(pwd + ': ' + guess_number);
-    });
+    }, configuration);
     // Request a guess number for a password
     client.query_guess_number('ASDF123;!a');
+
+An example of the value of configuration is:
+{
+  intermediate: "basic_3M.info_and_guess_numbers.no_bloomfilter.json",
+  file: "basic_3M.weight_arch.quantized.fixed_point1000.zigzag.nospace.json",
+  zigzag: true,
+  scaleFactor: 300
+}

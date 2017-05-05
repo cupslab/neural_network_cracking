@@ -5,19 +5,15 @@ var USE_BLOOM_FILTER = true;
 var USE_PCFG = false;
 var TO_LOWERCASE = true;
 
-// Change these
-// XXXstroucki this gets expanded in the minified file, so maybe
-// have external configurability
-var NEURAL_NETWORK_INTERMEDIATE =
-      'basic_3M.info_and_guess_numbers.json';
-//      'basic_3M.info_and_guess_numbers.no_bloomfilter.json';
-var NEURAL_NETWORK_FILE =
-      'basic_3M.weight_arch.quantized.fixed_point1000.zigzag.nospace.json';
-//      'basic_3M.weight_arch.quantized.fixed_point1000.zigzag.nospace.json';
-var ZIGZAG = true;
-var SCALE_FACTOR = 300;
+// create global variables for configuration
+var NEURAL_NETWORK_INTERMEDIATE;
+var NEURAL_NETWORK_FILE;
+var ZIGZAG;
+var SCALE_FACTOR;
 
-
+// either hardcode values here for configuration, then call init(),
+// or send a message to this running as a worker with configuration
+// information
 
 // For testing quantizing
 // For no quantization
@@ -83,10 +79,33 @@ if ("undefined" !== typeof console) {
   worker.console = console;
 }
 
-// enqueue a message while things are loading
+// we need to have some way to get our config if we are a web worker
 self.onmessage = function(e) {
-  onLoadMsgs.push(e);
-};
+  var messageType = e.data.messageType;
+  if (typeof (messageType) === "undefined") {
+    worker.console.log("Spurious message received");
+    return;
+  }
+  if (messageType !== "config") {
+    worker.console.log("Non-configuration message received");
+    return;
+  }
+
+  var payload = e.data.payload;
+  NEURAL_NETWORK_INTERMEDIATE = payload.intermediate;
+  NEURAL_NETWORK_FILE = payload.file;
+  ZIGZAG = payload.zigzag;
+  SCALE_FACTOR = payload.scaleFactor;
+
+  worker.console.log("Configured");
+
+  // enqueue a message while things are loading
+  self.onmessage = function(e) {
+    onLoadMsgs.push(e);
+  };
+
+  init();
+}
 
 function CharacterTable(intermediate_info) {
   this.characters = intermediate_info.char_bag;
@@ -353,6 +372,7 @@ function handleMsg(e) {
   self.postMessage(message);
 }
 
+function init() {
 var request = new XMLHttpRequest();
 request.addEventListener('load', function() {
   var info = JSON.parse(this.responseText);
@@ -378,3 +398,4 @@ request.addEventListener('load', function() {
 });
 request.open('GET', NEURAL_NETWORK_INTERMEDIATE);
 request.send();
+}

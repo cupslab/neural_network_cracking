@@ -1,4 +1,12 @@
-function NeuralNetworkClient(callback) {
+function NeuralNetworkClient(callback, configuration) {
+  if (!NeuralNetworkWorker.configured) {
+    NeuralNetworkWorker.worker.postMessage({
+      messageType: "config",
+      payload: configuration
+    });
+    NeuralNetworkWorker.configured = true;
+  }
+
   this.callback = callback;
   // random string id
   this.id = (Math.random()*1e32).toString(36);
@@ -12,6 +20,8 @@ var NeuralNetworkWorker = new Object();
 NeuralNetworkWorker.clients = new Object();
 // shared worker
 NeuralNetworkWorker.worker = new Worker('worker.min.js');
+// configuration flag
+NeuralNetworkWorker.configured = false;
 
 NeuralNetworkWorker.onMessageTriggered = function(event) {
   var tag = event.data.tag;
