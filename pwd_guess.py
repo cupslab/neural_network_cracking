@@ -15,8 +15,9 @@ try:
 except AttributeError as e:
     pass
 
-from keras.models import Sequential, slice_X, model_from_json
-from keras.layers.core import Activation, Dense, RepeatVector, TimeDistributedDense, Dropout, Masking
+from keras.models import Sequential, model_from_json
+from keras.layers.core import Activation, Dense, RepeatVector, Dropout, Masking
+from keras.layers import TimeDistributed
 from keras.layers import recurrent
 import keras.utils.layer_utils as layer_utils
 from keras.optimizers import SGD
@@ -31,7 +32,6 @@ except ImportError as e:
 from sklearn.utils import shuffle
 import numpy as np
 from sqlitedict import SqliteDict
-import theano
 
 import argparse
 import itertools
@@ -63,7 +63,6 @@ FNAME_PREFIX_PREPROCESSOR = 'disk_cache.'
 FNAME_PREFIX_TRIE = 'trie_nodes.'
 
 FNAME_PREFIX_SUBPROCESS_CONFIG = 'child_process.'
-FNAME_PREFIX_THEANO_COMPILE = 'theanocompiledir.'
 FNAME_PREFIX_PROCESS_LOG = 'log.child_process.'
 FNAME_PREFIX_PROCESS_OUT = 'out.child_process.'
 
@@ -1304,7 +1303,7 @@ class Trainer(object):
         if deep_model:
             dense_layer = lambda x: Dense(x)
         else:
-            dense_layer = lambda x: TimeDistributedDense(x)
+            dense_layer = lambda x: TimeDistributed(Dense(x))
         for _ in range(self.config.dense_layers):
             self.classification_layers.append(dense_layer(
                 self.config.dense_hidden_size))
@@ -1321,7 +1320,7 @@ class Trainer(object):
         assert len(self.classification_layers) == 0
         assert len(self.feature_layers) == 0
         for layer in self.model.layers:
-            if (type(layer) == TimeDistributedDense or
+            if (type(layer) == TimeDistributed or
                 type(layer) == Activation):
                 self.classification_layers.append(layer)
             else:
@@ -1352,7 +1351,8 @@ class Trainer(object):
     def test_set(self, x_all, y_all, w_all):
         split_at = len(x_all) - max(
             int(len(x_all) / self.config.train_test_ratio), 1)
-        x_train, x_val = (slice_X(x_all, 0, split_at), slice_X(x_all, split_at))
+        x_train = x_all[0:split_at, :]
+        x_val = x_all[split_at:, :]
         y_train, y_val = (y_all[:split_at], y_all[split_at:])
         w_train, w_val = (w_all[:split_at], w_all[split_at:])
         return x_train, x_val, y_train, y_val, w_train, w_val
@@ -2851,11 +2851,9 @@ class ParallelGuesser(Guesser):
 
     @classmethod
     def run_cmd_process(cls, args):
-        argfname, logfile, compiledir, output_fname = args
+        argfname, logfile, output_fname = args
         logging.info('Launching process: %s', args)
         env = os.environ.copy()
-        env['THEANO_FLAGS'] = (
-            'compiledir=%s,floatX=float32,device=gpu' % compiledir)
         subp.check_call(cls.subp_command(argfname, logfile), env = env)
         with open(output_fname, 'r') as data:
             return json.load(data)
@@ -2879,9 +2877,6 @@ class ParallelGuesser(Guesser):
             self.config.guesser_intermediate_directory,
             FNAME_PREFIX_PROCESS_OUT)
         logging.info('Preparing subprocess data')
-        prefix_tdir = os.path.join(
-            self.config.guesser_intermediate_directory,
-            FNAME_PREFIX_THEANO_COMPILE)
         def prepare(args, pnum):
             argfname = prefix_sb_conf + pnum
             ofile = prefix_output + pnum
@@ -2894,7 +2889,7 @@ class ParallelGuesser(Guesser):
                     'model' : [
                         self.serializer.archfile, self.serializer.weightfile
                     ]}, config_fname)
-            return (argfname, prefix_pl_conf + pnum, prefix_tdir + pnum, ofile)
+            return (argfname, prefix_pl_conf + pnum, ofile)
         subarglist = []
         random.shuffle(arglist)
         for i, arg_chunk in enumerate(grouper(arglist, pool_size)):
@@ -3142,9 +3137,7 @@ def main(args):
         logging.critical('Configuration not valid %s', str(e))
         raise
     logging.info('Configuration: %s', json.dumps(config.as_dict(), indent = 4))
-    if theano.config.floatX == 'float64':
-        logging.warning(('Using float64 instead of float32 for theano will'
-                         ' harm performance. Edit ~/.theanorc'))
+
     if args['pwd_file']:
         train(args, config)
     elif args['enumerate_ofile']:

@@ -1,7 +1,5 @@
 # -*- coding: utf-8 -*-
 # author: William Melicher
-from theano import function, config, shared, sandbox
-import theano.tensor as T
 from keras.models import Sequential, model_from_json
 from keras.layers.core import Activation, Dense, RepeatVector
 from keras.layers import recurrent
@@ -1394,7 +1392,7 @@ aaa	0.0625
         actual = list(csv.reader(ostream, delimiter = '\t'))
         self.assertEqual(len(actual), 8)
         for row in actual:
-            self.assertEqual(float(row[1]), expected[row[0]])
+            self.assertAlmostEqual(float(row[1]), expected[row[0]])
 
     def test_guesser_larger_tokenized(self):
         tokens = ['ab', 'bbb', 'abb']
@@ -1569,11 +1567,18 @@ aaa	0.0625
             # This example is fairly sensitive to floating point rounding error
             # The GPU also computes at a rounding error higher than the original
             # computation
-            self.assertEqual("""Total count: 8
-abb	0.144	1
-aab	0.096	4
-aaa	0.064	7
-""", gfile.read())
+            EXPECTED_VALUES = [
+                ('abb', 0.144, 1), ('aab', 0.096, 4), ('aaa', 0.064, 7)]
+
+            for i, line in enumerate(gfile.readlines()):
+                if i == 0:
+                    self.assertEqual(line, "Total count: 8\n")
+                else:
+                    pwd, prob, guess_number = line.strip("\n").split("\t")
+                    expected_pwd, expected_prob, expected_guessnum = EXPECTED_VALUES[i - 1]
+                    self.assertEqual(pwd, expected_pwd)
+                    self.assertAlmostEqual(float(prob), expected_prob)
+                    self.assertEqual(int(guess_number), expected_guessnum)
 
     def test_do_guessing(self):
         config = pwd_guess.ModelDefaults(
@@ -2155,8 +2160,10 @@ class RandomWalkGuesserTest(unittest.TestCase):
                 self.assertEqual(len(reader), 2)
                 for row in reader:
                     pwd, prob, gn, *_ = row
+                    prob = float(prob)
                     self.assertTrue(pwd == 'aaa' or pwd == 'bbb')
-                    self.assertEqual(prob, '0.008' if pwd == 'aaa' else '0.512')
+                    self.assertAlmostEqual(
+                        prob, 0.008 if pwd == 'aaa' else 0.512)
                     self.assertAlmostEqual(
                         float(gn), 8 if pwd == 'aaa' else 1, delta = 2)
 
@@ -2237,9 +2244,10 @@ class RandomWalkGuesserTest(unittest.TestCase):
                 self.assertEqual(len(reader), 2)
                 for row in reader:
                     pwd, prob, gn, *_ = row
+                    prob = float(prob)
                     self.assertTrue(pwd == 'aaaa' or pwd == 'bbbBa')
-                    self.assertEqual(
-                        prob, '0.00016384' if pwd == 'aaaa' else '0.0016777216')
+                    self.assertAlmostEqual(
+                        prob, 0.00016384 if pwd == 'aaaa' else 0.0016777216)
                     self.assertAlmostEqual(
                         float(gn), 397 if pwd == 'aaaa' else 137, delta = 20)
 
@@ -2421,8 +2429,9 @@ class DelAmicoRandomWalkTest(RandomWalkGuesserTest):
                 for row in reader:
                     pwd, prob, gn, *_ = row
                     self.assertTrue(pwd == 'aAaa' or pwd == 'bbbBa')
-                    self.assertEqual(
-                        prob, '4.096e-05' if pwd == 'aAaa' else '0.0016777216')
+                    self.assertAlmostEqual(
+                        float(prob),
+                        4.096e-05 if pwd == 'aAaa' else 0.0016777216)
                     self.assertAlmostEqual(
                         float(gn), 613 if pwd == 'aAaa' else 100, delta = 20)
 
@@ -2591,7 +2600,7 @@ class ParallelRandomWalkGuesserTest(unittest.TestCase):
                 for row in reader:
                     pwd, prob, gn, *_ = row
                     self.assertTrue(pwd == 'aaaa' or pwd == 'bbbBa')
-                    self.assertEqual(prob, '0.0001638400000000001' if pwd == 'aaaa' else '0.0016777216000000014')
+                    self.assertAlmostEqual(float(prob), 0.00016384 if pwd == 'aaaa' else 0.0016777216)
                     self.assertAlmostEqual(float(gn), 397 if pwd == 'aaaa' else 137, delta = 20)
 
 class PolicyTests(unittest.TestCase):
