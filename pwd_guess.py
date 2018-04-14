@@ -1312,7 +1312,8 @@ class Trainer(object):
         for layer in self.feature_layers + self.classification_layers:
             model.add(layer)
         model.compile(loss='categorical_crossentropy',
-                      optimizer=self.config.model_optimizer)
+                      optimizer=self.config.model_optimizer,
+                      metrics=['accuracy'])
         self.model = model
 
     def init_layers(self):
@@ -1361,10 +1362,10 @@ class Trainer(object):
         x_train, x_val, y_train, y_val, w_train, w_val = self.test_set(
             x_all, y_all, w_all)
         train_loss, train_accuracy = self.model.train_on_batch(
-            x_train, y_train, accuracy = True, sample_weight = w_train)
+            x_train, y_train, sample_weight = w_train)
         test_loss, test_accuracy = self.model.test_on_batch(
-            x_val, y_val, accuracy = True, sample_weight = w_val)
-        return train_loss, train_accuracy, test_loss, test_accuracy
+            x_val, y_val, sample_weight = w_val)
+        return (train_loss, train_accuracy, test_loss, test_accuracy)
 
     def train_model_generation(self):
         self.chunk = 0
