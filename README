@@ -40,8 +40,26 @@ This is software used and maintained by students for a research project and
 likely will have many bugs and issues.
 
 
-Setup
------
+Setup using Docker
+------------------
+
+Make sure you have installed the NVIDIA driver (https://github.com/NVIDIA/nvidia-docker/wiki/Frequently-Asked-Questions#how-do-i-install-the-nvidia-driver) and Docker (https://docs.docker.com/install). For GPU support, additionally install nvidia-docker (https://github.com/NVIDIA/nvidia-docker).
+
+Build a CPU-only container and start an interactive bash session within it:
+
+    ./deploy.py build-cpu
+    ./deploy.py run-cpu
+
+Build a GPU-supported container and start an interactive bash session within it:
+
+    ./deploy.py build-gpu
+    ./deploy.py run-gpu
+
+Note: You may need to specify python3 when executing python scripts within the Docker container, e.g. `python3 pwd_guess_unit.py`.
+
+
+Setup (Manual)
+--------------
 
   Requirements:
 
