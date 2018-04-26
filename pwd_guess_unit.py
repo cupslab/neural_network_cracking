@@ -2824,5 +2824,89 @@ class TokenizingSerializer(unittest.TestCase):
         t.serialize(('pass', '1', '23'), .1)
         mock_serializer.serialize.assert_called_with('pass123', 0)
 
+
+class TestMain(unittest.TestCase):
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.test_dir)
+
+    def _temp_path(self, name):
+        return os.path.join(self.test_dir, name)
+
+    def test_main(self):
+        random_password_chars = (
+            string.ascii_uppercase + string.ascii_lowercase + string.digits)
+        test_data_file = self._temp_path('test_data.txt')
+        with open(test_data_file, 'w') as test_data:
+            for i in range(10):
+                random_password = ''.join([
+                    random.choice(random_password_chars) for j in range(10)])
+                test_data.write('%s\n' % random_password)
+
+        config_file = self._temp_path('config.json')
+        with open(config_file, 'w') as config:
+            json.dump({
+                "args" : {
+                    "arch_file" : self._temp_path("arch.json"),
+                    "weight_file" : self._temp_path("weight.h5"),
+                    "log_file" : self._temp_path("train_log.txt"),
+                    "pwd_file" : [
+                        test_data_file
+                    ],
+                    "pwd_format" : [
+                        "list"
+                    ]
+                },
+                "config" : {
+                    "training_chunk" : 10,
+                    "training_main_memory_chunk": 10000000,
+                    "min_len" : 1,
+                    "fork_length" : 0,
+                    "max_len" : 30,
+                    "context_length" : 10,
+                    "chunk_print_interval" : 100,
+                    "layers" : 2,
+                    "hidden_size" : 1000,
+                    "generations" : 3,
+                    "training_accuracy_threshold" : -1,
+                    "train_test_ratio" : 20,
+                    "model_type" : "LSTM",
+                    "tokenize_words" : False,
+                    "most_common_token_count" : 2000,
+
+                    "bidirectional_rnn" : False,
+                    "train_backwards" : True,
+
+                    "dense_layers" : 1,
+                    "dense_hidden_size" : 512,
+                    "secondary_training" : False,
+
+                    "simulated_frequency_optimization" : False,
+
+                    "randomize_training_order" : True,
+                    "uppercase_character_optimization" : True,
+                    "rare_character_optimization" : True,
+
+                    "rare_character_optimization_guessing" : True,
+                    "parallel_guessing" : False,
+                    "lower_probability_threshold" : 1e-7,
+                    "chunk_size_guesser" : 40000,
+                    "random_walk_seed_num" : 100000,
+                    "max_gpu_prediction_size" : 10000,
+                    "random_walk_seed_iterations" : 1,
+                    "no_end_word_cache" : True,
+                    "intermediate_fname" : self._temp_path(
+                        "intermediate_data.sqlite"),
+                    "save_model_versioned" : True
+                }
+            }, config)
+
+        parser = pwd_guess.make_parser()
+        args = vars(parser.parse_args(['--config-args', config_file]))
+        pwd_guess.main(args)
+
+
 if __name__ == '__main__':
     unittest.main()

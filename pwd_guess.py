@@ -16,7 +16,7 @@ except AttributeError as e:
     pass
 
 from keras.models import Sequential, model_from_json
-from keras.layers.core import Activation, Dense, RepeatVector, Dropout, Masking
+from keras.layers.core import Activation, Dense, RepeatVector, Dropout, Masking, Flatten, Reshape
 from keras.layers import TimeDistributed
 from keras.layers import recurrent
 import keras.utils.layer_utils as layer_utils
@@ -532,7 +532,9 @@ class OptimizingCharacterTable(CharacterTable):
                  padding_character = None):
         if uppercase:
             self.rare_characters = ''.join(
-                c for c in rare_characters if c not in string.ascii_uppercase)
+                c for c in rare_characters if (
+                    c not in string.ascii_uppercase
+                    and c not in string.ascii_lowercase))
         else:
             self.rare_characters = rare_characters
         char_bag = chars
@@ -553,7 +555,10 @@ class OptimizingCharacterTable(CharacterTable):
                     continue
                 self.rare_dict[c] = c.lower()
                 char_bag = char_bag.replace(c, '')
-                assert c.lower() in char_bag
+                if c.lower() not in char_bag:
+                    raise ValueError(
+                        "expected %s to be in %s" % (c.lower(), chars))
+
                 self.rare_character_preimage[c.lower()] = [c, c.lower()]
         super().__init__(char_bag, maxlen, padding_character)
         for key in self.rare_dict:
@@ -1086,6 +1091,8 @@ class Preprocessor(BasePreprocessor):
             self.begin(self.chunked_pwd_list.__next__())
         except StopIteration:
             logging.warning('Password list has no passwords?')
+            self.pwd_whole_list = []
+
         self.reset_subiterator()
 
     def reset_subiterator(self):
@@ -1281,15 +1288,16 @@ class Trainer(object):
         self.feature_layers.append(model_type(
             self.config.hidden_size,
             input_shape=(self.config.context_length, self.ctable.vocab_size),
-            return_sequences=deep_model and self.config.layers > 0,
+            return_sequences=self.config.layers > 0,
             go_backwards=self.config.train_backwards))
-        if not self.config.deep_model:
-            self.feature_layers.append(RepeatVector(1))
+        # if not self.config.deep_model:
+        #     self.feature_layers.append(RepeatVector(1))
         for i in range(self.config.layers):
             if self.config.dropouts:
                 self.feature_layers.append(Dropout(self.config.dropout_ratio))
             last_layer = (i == (self.config.layers - 1))
-            ret_sequences = (not (deep_model and last_layer))
+            ret_sequences = not last_layer
+            print (self.config.deep_model, self.config.layers > 0, ret_sequences)
             actual_layer = lambda: model_type(
                 self.config.hidden_size,
                 return_sequences=ret_sequences,
@@ -1300,17 +1308,28 @@ class Trainer(object):
                     return_sequences=ret_sequences))
             else:
                 self.feature_layers.append(actual_layer())
-        if deep_model:
-            dense_layer = lambda x: Dense(x)
-        else:
-            dense_layer = lambda x: TimeDistributed(Dense(x))
+
+
+        # self.feature_layers.append(Flatten())
         for _ in range(self.config.dense_layers):
-            self.classification_layers.append(dense_layer(
-                self.config.dense_hidden_size))
-        self.classification_layers.append(dense_layer(self.ctable.vocab_size))
-        self.classification_layers.append(Activation('softmax'))
+            layer = Dense(self.config.hidden_size)
+            # if not deep_model:
+            #     layer = TimeDistributed(layer)
+
+            self.classification_layers.append(layer)
+
+        dense_layer = Dense(self.ctable.vocab_size, activation='softmax')
+        # if not deep_model:
+        #     layer = TimeDistributed(layer)
+
+        self.classification_layers.append(dense_layer)
         for layer in self.feature_layers + self.classification_layers:
-            model.add(layer)
+            try:
+                model.add(layer)
+            except Exception as e:
+                print ('Error when adding layer %s: %s' % (layer, e))
+                raise
+
         model.compile(loss='categorical_crossentropy',
                       optimizer=self.config.model_optimizer,
                       metrics=['accuracy'])
@@ -1362,9 +1381,11 @@ class Trainer(object):
         x_train, x_val, y_train, y_val, w_train, w_val = self.test_set(
             x_all, y_all, w_all)
         train_loss, train_accuracy = self.model.train_on_batch(
-            x_train, y_train, sample_weight = w_train)
+            x_train, y_train# , sample_weight = w_train
+        )
         test_loss, test_accuracy = self.model.test_on_batch(
-            x_val, y_val, sample_weight = w_val)
+            x_val, y_val# , sample_weight = w_val
+        )
         return (train_loss, train_accuracy, test_loss, test_accuracy)
 
     def train_model_generation(self):
