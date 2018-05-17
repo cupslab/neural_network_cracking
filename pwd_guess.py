@@ -2360,7 +2360,7 @@ class Guesser(object):
         answer = self.model.predict(self.ctable.encode_many(astring_list),
                                     verbose = 0,
                                     batch_size = self.chunk_size_guesser)
-        answer = np.array(answer)
+        answer = np.array(answer, dtype=np.float64)
         # Versions of the Keras library after about 0.2.0 return a different
         # shape than the library before 0.3.1
         if len(answer.shape) == 2:
