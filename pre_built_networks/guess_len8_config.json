@@ -3,7 +3,7 @@
         "arch_file" : "arch.json",
         "weight_file" : "nn_len8.h5",
         "log_file" : "guess_log.txt",
-        "enumerate_ofile": "g1_len8.tsv"
+        "enumerate_ofile": "/nn/output/g1_len8.tsv"
     },
     "config" : {
         "training_chunk" : 1000,
@@ -40,7 +40,7 @@
         "lower_probability_threshold" : 1e-7,
         "chunk_size_guesser" : 40000,
         "guess_serialization_method" : "delamico_random_walk",
-        "password_test_fname" : "<input_file>",
+        "password_test_fname" : "/nn/input/<input_file>",
         "random_walk_seed_num" : 100000,
         "max_gpu_prediction_size" : 10000,
         "random_walk_seed_iterations" : 50,
