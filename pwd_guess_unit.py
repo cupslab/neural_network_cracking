@@ -22,6 +22,7 @@ import logging
 import itertools
 import sys
 import glob
+from tensorflow.python.client import device_lib
 
 import pwd_guess
 import generator
@@ -719,7 +720,7 @@ class TrainerTest(unittest.TestCase):
         config = pwd_guess.ModelDefaults(max_len = 5)
         pre = pwd_guess.Preprocessor(config)
         pre.begin([('pass', 1)])
-        t = pwd_guess.Trainer(pre, config)
+        t = pwd_guess.Trainer(pre, config=config)
         mock_model = Mock()
         mock_model.train_on_batch = MagicMock(return_value = (0.5, 0.5))
         mock_model.test_on_batch = MagicMock(return_value = (0.5, 0.5))
@@ -741,14 +742,14 @@ class TrainerTest(unittest.TestCase):
         config.get_intermediate_info = MagicMock(return_value = ['ab', 'bc'])
         pre = pwd_guess.Preprocessor(config)
         pre.begin([('abc', 1), ('bca', 1)])
-        t = pwd_guess.Trainer(pre, config)
+        t = pwd_guess.Trainer(pre, config=config)
         xv, yv, wv = t.next_train_set_as_np()
 
     def test_train_model(self):
         config = pwd_guess.ModelDefaults(max_len = 5, generations = 20)
         pre = pwd_guess.Preprocessor(config)
         pre.begin([('pass', 1)])
-        t = pwd_guess.Trainer(pre, config)
+        t = pwd_guess.Trainer(pre, config=config)
         mock_model = Mock()
         mock_model.train_on_batch = MagicMock(return_value = (0.5, 0.5))
         mock_model.test_on_batch = MagicMock(return_value = (0.5, 0.5))
@@ -762,7 +763,7 @@ class TrainerTest(unittest.TestCase):
                                          scheduled_sampling = True)
         pre = pwd_guess.Preprocessor(config)
         pre.begin([('pass', 1)])
-        t = pwd_guess.Trainer(pre, config)
+        t = pwd_guess.Trainer(pre, config = config)
         mock_model = Mock()
         mock_model.train_on_batch = MagicMock(return_value = (0.5, 0.5))
         mock_model.test_on_batch = MagicMock(return_value = (0.5, 0.5))
@@ -776,7 +777,7 @@ class TrainerTest(unittest.TestCase):
                                          scheduled_sampling = True)
         pre = pwd_guess.Preprocessor(config)
         pre.begin([('pass', 1)])
-        t = pwd_guess.Trainer(pre, config)
+        t = pwd_guess.Trainer(pre, config = config)
         mock_model = Mock()
         mock_model.train_on_batch = MagicMock(return_value = (0.5, 0.5))
         mock_model.test_on_batch = MagicMock(return_value = (0.5, 0.5))
@@ -796,26 +797,26 @@ class TrainerTest(unittest.TestCase):
         t.next_train_set_as_np()
 
     def test_build_model(self):
-        t = pwd_guess.Trainer(['pass'], pwd_guess.ModelDefaults(
+        t = pwd_guess.Trainer(['pass'], config=pwd_guess.ModelDefaults(
             hidden_size = 12, layers = 1))
         t.build_model()
         self.assertNotEqual(None, t.model)
 
     def test_build_model_deep(self):
-        t = pwd_guess.Trainer(['pass'], pwd_guess.ModelDefaults(
+        t = pwd_guess.Trainer(['pass'], config=pwd_guess.ModelDefaults(
             hidden_size = 12, layers = 1, deep_model = True))
         t.build_model()
         self.assertNotEqual(None, t.model)
 
     def test_build_model_deep_no_layers(self):
-        t = pwd_guess.Trainer(['pass'], pwd_guess.ModelDefaults(
+        t = pwd_guess.Trainer(['pass'], config=pwd_guess.ModelDefaults(
             hidden_size = 12, layers = 0, deep_model = True))
         t.build_model()
         self.assertNotEqual(None, t.model)
 
     @unittest.skip('Not supporting bidirectional models')
     def test_build_model_bidirectional(self):
-        t = pwd_guess.Trainer(['pass'], pwd_guess.ModelDefaults(
+        t = pwd_guess.Trainer(['pass'], config=pwd_guess.ModelDefaults(
             hidden_size = 12, layers = 1,
             bidirectional_rnn = True))
         t.build_model()
@@ -825,12 +826,12 @@ class TrainerTest(unittest.TestCase):
         config = pwd_guess.ModelDefaults()
         pre = pwd_guess.Preprocessor(config)
         pre.begin([('pass', 1), ('word', 1)])
-        t = pwd_guess.Trainer(pre, config)
+        t = pwd_guess.Trainer(pre, config=config)
         t.next_train_set_as_np()
 
     def test_test_set(self):
         config = pwd_guess.ModelDefaults(train_test_ratio = 10)
-        t = pwd_guess.Trainer(pwd_guess.Preprocessor(config), config)
+        t = pwd_guess.Trainer(pwd_guess.Preprocessor(config), config=config)
         a = np.zeros((10, 1, 1), dtype = np.bool)
         b = np.zeros((10, 1, 1), dtype = np.bool)
         w = np.zeros((10, 1))
@@ -844,7 +845,7 @@ class TrainerTest(unittest.TestCase):
 
     def test_test_set_small(self):
         config = pwd_guess.ModelDefaults(train_test_ratio = 10)
-        t = pwd_guess.Trainer(pwd_guess.Preprocessor(config), config)
+        t = pwd_guess.Trainer(pwd_guess.Preprocessor(config), config=config)
         a = np.zeros((5, 1, 1), dtype = np.bool)
         b = np.zeros((5, 1, 1), dtype = np.bool)
         w = np.zeros((5, 1), dtype = np.bool)
@@ -1329,10 +1330,10 @@ class GuesserTest(unittest.TestCase):
             relevel_not_matching_passwords = False)
         guesser, ostream = self.make(config, [0.5, 0.5])
         guesser.guess()
-        self.assertEqual("""	0.5
-a	0.25
-aa	0.125
-aaa	0.0625
+        self.assertEqual("""    0.5
+a   0.25
+aa  0.125
+aaa 0.0625
 """, ostream.getvalue())
 
     def test_guesser_small_batch(self):
@@ -1352,10 +1353,10 @@ aaa	0.0625
             chunk_size_guesser = 2)
         guesser, ostream = self.make(config, [0.5, 0.5])
         guesser.guess()
-        self.assertEqual("""	0.5
-a	0.25
-aa	0.125
-aaa	0.0625
+        self.assertEqual("""    0.5
+a   0.25
+aa  0.125
+aaa 0.0625
 """, ostream.getvalue())
 
     def test_guesser_small_chunk_tokenized(self):
@@ -1478,7 +1479,7 @@ aaa	0.0625
             lower_probability_threshold = 10**-1)
         guesser, ostream = self.make(config, [0.5, 0.5])
         guesser.guess()
-        self.assertEqual("""aaa	1.0
+        self.assertEqual("""aaa 1.0
 """, ostream.getvalue())
 
     def test_predict(self):
@@ -1589,10 +1590,10 @@ aaa	0.0625
         with tempfile.NamedTemporaryFile() as fp:
             (pwd_guess.GuesserBuilder(config).add_model(model).add_file(fp.name)
              .build().complete_guessing())
-            self.assertEqual("""	0.5
-a	0.25
-aa	0.125
-aaa	0.0625
+            self.assertEqual("""    0.5
+a   0.25
+aa  0.125
+aaa 0.0625
 """, fp.read().decode('utf8'))
 
 def mock_predict_smart_parallel(input_vec, **kwargs):
@@ -1984,10 +1985,10 @@ class GuessNumberGeneratorTest(unittest.TestCase):
         with open(self.ostream.name, 'r') as guesses:
             self.assertEqual(
                 """Total count: 235
-forever	0.00013370734607	0
-william	2.12144662517e-05	72
-    	1.26799704013e-05	160
-8daddy	1.00234253381e-05	234
+forever 0.00013370734607    0
+william 2.12144662517e-05   72
+        1.26799704013e-05   160
+8daddy  1.00234253381e-05   234
 """,
                 guesses.read())
 
@@ -2824,6 +2825,91 @@ class TokenizingSerializer(unittest.TestCase):
         t.serialize(('pass', '1', '23'), .1)
         mock_serializer.serialize.assert_called_with('pass123', 0)
 
+
+class TestMainMultiGPU(unittest.TestCase):
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.test_dir)
+
+    def get_available_gpus(self):
+        local_device_protos = device_lib.list_local_devices()
+        return [x.name for x in local_device_protos if x.device_type == 'GPU']
+
+    def _temp_path(self, name):
+        return os.path.join(self.test_dir, name)
+
+    @unittest.skipIf(len(get_available_gpus(None)) < 2,
+                     "Atleast 2 GPUs not available for testing multi-gpu functionality")
+    def test_main(self):
+        print("Running multi gpu test")
+        random_password_chars = (
+            string.ascii_uppercase + string.ascii_lowercase + string.digits)
+        test_data_file = self._temp_path('test_data.txt')
+        with open(test_data_file, 'w') as test_data:
+            for i in range(10):
+                random_password = ''.join([
+                    random.choice(random_password_chars) for j in range(10)])
+                test_data.write('%s\n' % random_password)
+
+        config_file = self._temp_path('config.json')
+        with open(config_file, 'w') as config:
+            json.dump({
+                "args" : {
+                    "arch_file" : self._temp_path("arch.json"),
+                    "weight_file" : self._temp_path("weight.h5"),
+                    "log_file" : self._temp_path("train_log.txt"),
+                    "pwd_file" : [
+                        test_data_file
+                    ],
+                    "pwd_format" : [
+                        "list"
+                    ],
+                    "multi_gpu" :2
+                },
+                "config" : {
+                    "training_chunk" : 10,
+                    "training_main_memory_chunk": 10000000,
+                    "min_len" : 1,
+                    "fork_length" : 0,
+                    "max_len" : 30,
+                    "context_length" : 10,
+                    "chunk_print_interval" : 100,
+                    "layers" : 2,
+                    "hidden_size" : 1000,
+                    "generations" : 3,
+                    "training_accuracy_threshold" : -1,
+                    "train_test_ratio" : 20,
+                    "model_type" : "LSTM",
+                    "tokenize_words" : False,
+                    "most_common_token_count" : 2000,
+                    "bidirectional_rnn" : False,
+                    "train_backwards" : True,
+                    "dense_layers" : 1,
+                    "dense_hidden_size" : 512,
+                    "secondary_training" : False,
+                    "simulated_frequency_optimization" : False,
+                    "randomize_training_order" : True,
+                    "uppercase_character_optimization" : True,
+                    "rare_character_optimization" : True,
+                    "rare_character_optimization_guessing" : True,
+                    "parallel_guessing" : False,
+                    "lower_probability_threshold" : 1e-7,
+                    "chunk_size_guesser" : 40000,
+                    "random_walk_seed_num" : 100000,
+                    "max_gpu_prediction_size" : 10000,
+                    "random_walk_seed_iterations" : 1,
+                    "no_end_word_cache" : True,
+                    "intermediate_fname" : self._temp_path(
+                        "intermediate_data.sqlite"),
+                    "save_model_versioned" : True
+                }
+            }, config)
+
+        parser = pwd_guess.make_parser()
+        args = vars(parser.parse_args(['--config-args', config_file]))
+        pwd_guess.main(args)
 
 class TestMain(unittest.TestCase):
     def setUp(self):
