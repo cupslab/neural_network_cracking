@@ -9,6 +9,7 @@ import sys
 # It would be better to use a solution like virtualenv.
 if 'KERAS_PATH' in os.environ:
     sys.path.insert(0, os.environ['KERAS_PATH'])
+import tensorflow as tf
 import keras
 try:
     sys.stderr.write('Using keras version %s\n' % (keras.__version__))
@@ -20,6 +21,7 @@ from keras.layers.core import Activation, Dense, RepeatVector, Dropout, Masking,
 from keras.layers import TimeDistributed
 from keras.layers import recurrent
 import keras.utils.layer_utils as layer_utils
+import keras.utils
 from keras.optimizers import SGD
 
 try:
@@ -1242,11 +1244,13 @@ class HybridDiskPreprocessor(TriePreprocessor):
         return out_pwd_list.read()
 
 class Trainer(object):
-    def __init__(self, pwd_list, config = ModelDefaults()):
+    def __init__(self, pwd_list, config = ModelDefaults(), multi_gpu=1):
         self.config = config
         self.chunk = 0
         self.generation = 0
         self.model = None
+        self.model_to_save = None
+        self.multi_gpu = multi_gpu
         self.pwd_list = pwd_list
         if config.scheduled_sampling:
             logging.info('Using scheduled sampling')
@@ -1281,7 +1285,7 @@ class Trainer(object):
             self.ctable._encode_into(y_vec, y_str_list)
         return y_vec
 
-    def build_model(self):
+    def return_model(self):
         model = Sequential()
         deep_model = self.config.deep_model
         model_type = self.config.model_type_exec()
@@ -1297,7 +1301,7 @@ class Trainer(object):
                 self.feature_layers.append(Dropout(self.config.dropout_ratio))
             last_layer = (i == (self.config.layers - 1))
             ret_sequences = not last_layer
-            print (self.config.deep_model, self.config.layers > 0, ret_sequences)
+            print(self.config.deep_model, self.config.layers > 0, ret_sequences)
             actual_layer = lambda: model_type(
                 self.config.hidden_size,
                 return_sequences=ret_sequences,
@@ -1308,7 +1312,6 @@ class Trainer(object):
                     return_sequences=ret_sequences))
             else:
                 self.feature_layers.append(actual_layer())
-
 
         # self.feature_layers.append(Flatten())
         for _ in range(self.config.dense_layers):
@@ -1327,8 +1330,19 @@ class Trainer(object):
             try:
                 model.add(layer)
             except Exception as e:
-                print ('Error when adding layer %s: %s' % (layer, e))
+                logging.error('Error when adding layer %s: %s', layer, e)
                 raise
+        return model
+    def build_model(self):
+        if(self.multi_gpu>=2):
+            print("MULTI_GPU")
+            with tf.device('/cpu:0'):
+                model = self.return_model()
+                self.model_to_save = model
+            model = keras.utils.multi_gpu_model(model, gpus=self.multi_gpu)
+        else:
+            model = self.return_model()
+            self.model_to_save =model
 
         model.compile(loss='categorical_crossentropy',
                       optimizer=self.config.model_optimizer,
@@ -1358,7 +1372,7 @@ class Trainer(object):
             logging.info('Generation accuracy: %s', accuracy)
             if accuracy > max_accuracy or self.config.save_always:
                 max_accuracy = accuracy
-                serializer.save_model(self.model)
+                serializer.save_model(self.model_to_save)
             if ((accuracy - prev_accuracy) <
                 self.config.training_accuracy_threshold):
                 logging.info('Accuracy diff of %s is less than threshold.',
@@ -3078,7 +3092,7 @@ def train(args, config):
     preprocessor = preprocessing(args, config)
     if preprocessor is None:
         return
-    trainer = (Trainer.getFactory(config))(preprocessor, config)
+    trainer = (Trainer.getFactory(config))(preprocessor,config,args['multi_gpu'])
     serializer = ModelSerializer(args['arch_file'], args['weight_file'],
                                  config.save_model_versioned)
     if args['retrain']:
@@ -3220,6 +3234,8 @@ def make_parser():
                         help='Only output password probabilities')
     parser.add_argument('--train-secondary-only', action='store_true',
                         help='Only train on secondary data. ')
+    parser.add_argument('--multi-gpu',help="The number of GPUs to use to train in parallel",
+                        default=1)
     parser.add_argument('--config-cmdline', default='',
                         help=('Extra configuration values. Should be a list of '
                               'key1=value1;key2=value2 elements. '))
