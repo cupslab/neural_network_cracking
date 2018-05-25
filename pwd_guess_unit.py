@@ -2825,7 +2825,9 @@ class TokenizingSerializer(unittest.TestCase):
         t.serialize(('pass', '1', '23'), .1)
         mock_serializer.serialize.assert_called_with('pass123', 0)
 
-
+def get_available_gpus():
+    local_device_protos = device_lib.list_local_devices()
+    return [x.name for x in local_device_protos if x.device_type == 'GPU']
 class TestMainMultiGPU(unittest.TestCase):
     def setUp(self):
         self.test_dir = tempfile.mkdtemp()
@@ -2833,14 +2835,10 @@ class TestMainMultiGPU(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.test_dir)
 
-    def get_available_gpus(self):
-        local_device_protos = device_lib.list_local_devices()
-        return [x.name for x in local_device_protos if x.device_type == 'GPU']
-
     def _temp_path(self, name):
         return os.path.join(self.test_dir, name)
 
-    @unittest.skipIf(len(get_available_gpus(None)) < 2,
+    @unittest.skipIf(len(get_available_gpus()) < 2,
                      "Atleast 2 GPUs not available for testing multi-gpu functionality")
     def test_main(self):
         print("Running multi gpu test")

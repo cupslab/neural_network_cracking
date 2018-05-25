@@ -1330,7 +1330,7 @@ class Trainer(object):
             try:
                 model.add(layer)
             except Exception as e:
-                print('Error when adding layer %s: %s' % (layer, e))
+                logging.error('Error when adding layer %s: %s', layer, e)
                 raise
         return model
     def build_model(self):
