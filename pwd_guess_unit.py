@@ -1330,10 +1330,10 @@ class GuesserTest(unittest.TestCase):
             relevel_not_matching_passwords = False)
         guesser, ostream = self.make(config, [0.5, 0.5])
         guesser.guess()
-        self.assertEqual("""    0.5
-a   0.25
-aa  0.125
-aaa 0.0625
+        self.assertEqual("""	0.5
+a	0.25
+aa	0.125
+aaa	0.0625
 """, ostream.getvalue())
 
     def test_guesser_small_batch(self):
@@ -1353,10 +1353,10 @@ aaa 0.0625
             chunk_size_guesser = 2)
         guesser, ostream = self.make(config, [0.5, 0.5])
         guesser.guess()
-        self.assertEqual("""    0.5
-a   0.25
-aa  0.125
-aaa 0.0625
+        self.assertEqual("""	0.5
+a	0.25
+aa	0.125
+aaa	0.0625
 """, ostream.getvalue())
 
     def test_guesser_small_chunk_tokenized(self):
@@ -1479,7 +1479,7 @@ aaa 0.0625
             lower_probability_threshold = 10**-1)
         guesser, ostream = self.make(config, [0.5, 0.5])
         guesser.guess()
-        self.assertEqual("""aaa 1.0
+        self.assertEqual("""aaa	1.0
 """, ostream.getvalue())
 
     def test_predict(self):
@@ -1590,10 +1590,10 @@ aaa 0.0625
         with tempfile.NamedTemporaryFile() as fp:
             (pwd_guess.GuesserBuilder(config).add_model(model).add_file(fp.name)
              .build().complete_guessing())
-            self.assertEqual("""    0.5
-a   0.25
-aa  0.125
-aaa 0.0625
+            self.assertEqual("""	0.5
+a	0.25
+aa	0.125
+aaa	0.0625
 """, fp.read().decode('utf8'))
 
 def mock_predict_smart_parallel(input_vec, **kwargs):
@@ -1985,10 +1985,10 @@ class GuessNumberGeneratorTest(unittest.TestCase):
         with open(self.ostream.name, 'r') as guesses:
             self.assertEqual(
                 """Total count: 235
-forever 0.00013370734607    0
-william 2.12144662517e-05   72
-        1.26799704013e-05   160
-8daddy  1.00234253381e-05   234
+forever	0.00013370734607	0
+william	2.12144662517e-05	72
+    	1.26799704013e-05	160
+8daddy	1.00234253381e-05	234
 """,
                 guesses.read())
 
