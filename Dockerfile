@@ -53,6 +53,6 @@ RUN git clone https://github.com/fchollet/keras.git && \
 RUN git clone https://github.com/EderSantana/seya.git && \
     cd seya && \
     git checkout 49d1bfd66f7442b7ce09dc86f7e78a32b132dd48 && \
-    python setup.py install
+    python3 setup.py install
 
 RUN python3 setup.py build_ext --inplace
