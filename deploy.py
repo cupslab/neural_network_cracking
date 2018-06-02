@@ -31,10 +31,12 @@ def main(args):
         # volume map configs and pre-built networks
         configs_dir = os.path.join(os.getcwd(), "configs")
         pre_built_dir = os.path.join(os.getcwd(), "pre_built_networks")
+        test_data_dir = os.path.join(os.getcwd(), "test_data")
 
         mappings = []        
         mappings.extend(["-v", "{}:{}".format(configs_dir, "/nn/configs")])
         mappings.extend(["-v", "{}:{}".format(pre_built_dir, "/nn/pre_built_networks")])
+        mappings.extend(["-v", "{}:{}".format(test_data_dir, "/nn/test_data")])
 
         if args.output_dir:
             source = os.path.join(os.getcwd(), args.output_dir)
