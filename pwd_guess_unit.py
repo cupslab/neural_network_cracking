@@ -395,7 +395,7 @@ class TrainerTest(unittest.TestCase):
         mock_model.train_on_batch = MagicMock(return_value = (0.5, 0.5))
         mock_model.test_on_batch = MagicMock(return_value = (0.5, 0.5))
         t.model = mock_model
-        self.assertEqual(0.5, t.train_model_generation())
+        self.assertEqual((0.5, False), t.train_model_generation())
 
     def test_tokenize(self):
         config = Mock()

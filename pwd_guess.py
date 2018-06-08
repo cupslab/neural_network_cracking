@@ -45,6 +45,7 @@ from keras.layers import TimeDistributed
 from keras.layers import recurrent
 import keras.utils.layer_utils as layer_utils
 import keras.utils
+from keras.callbacks import TensorBoard
 
 try:
     from seya.layers.recurrent import Bidirectional
@@ -564,6 +565,8 @@ class ModelDefaults(object):
     guesser_intermediate_directory = 'guesser_files'
     cleanup_guesser_files = True
     use_mmap = True
+    early_stopping = False
+    early_stopping_patience = 10000
     compute_stats = False
     password_test_fname = None
     chunk_size_guesser = 1000
@@ -580,6 +583,7 @@ class ModelDefaults(object):
     dropouts = False
     dropout_ratio = .25
     fuzzy_training_smoothing = False
+    tensorboard = True
     scheduled_sampling = False
     final_schedule_ratio = .05
     context_length = None
@@ -826,6 +830,13 @@ class Trainer(object):
         self.model_to_save = None
         self.multi_gpu = multi_gpu
         self.pwd_list = pwd_list
+        self.cumulative_chunks = 0
+        self.min_loss_early_stopping = 999999999 #A really large number
+        self.poor_batches_early_stopping = 0
+        if config.tensorboard:
+            self.callback = TensorBoard(".")
+            self.train_log_names = []
+            self.test_log_names = []
         if config.scheduled_sampling:
             logging.info('Using scheduled sampling')
             self.ctable = ScheduledSamplingCharacterTable(self.config)
@@ -900,19 +911,28 @@ class Trainer(object):
                 raise
         return model
 
-    def build_model(self):
+    def build_model(self, model=None):
+
         if self.multi_gpu >= 2:
             with tf.device('/cpu:0'):
-                model = self.return_model()
+                if model is None:
+                    model = self.return_model()
                 self.model_to_save = model
             model = keras.utils.multi_gpu_model(model, gpus=self.multi_gpu)
         else:
-            model = self.return_model()
+            if model is None:
+                model = self.return_model()
             self.model_to_save = model
+        metrics = ['accuracy']
+
+        if self.config.tensorboard:
+            tensorboard_metrics = ['loss'] + metrics
+            self.train_log_names = ['train_' + name for name in tensorboard_metrics]
+            self.test_log_names = ['test_' + name for name in tensorboard_metrics]
 
         model.compile(loss='categorical_crossentropy',
                       optimizer=self.config.model_optimizer,
-                      metrics=['accuracy'])
+                      metrics=metrics)
         self.model = model
 
     def init_layers(self):
@@ -930,11 +950,16 @@ class Trainer(object):
         max_accuracy = 0
         if self.config.scheduled_sampling:
             self.ctable.init_model(self.model)
+            if self.config.tensorboard:
+            self.callback.set_model(self.model)
+
         for gen in range(self.config.generations):
             self.generation = gen + 1
             logging.info('Generation %d', gen + 1)
-            accuracy = self.train_model_generation()
+            accuracy, early_stop = self.train_model_generation(serializer)
             logging.info('Generation accuracy: %s', accuracy)
+            if early_stop:
+                break
             if accuracy > max_accuracy or self.config.save_always:
                 max_accuracy = accuracy
                 serializer.save_model(self.model_to_save)
@@ -965,31 +990,62 @@ class Trainer(object):
             x_val, y_val, sample_weight=w_val)
         return (train_loss, train_accuracy, test_loss, test_accuracy)
 
-    def train_model_generation(self):
+    def early_stopping(self,smooth_loss, serializer):
+        stop=False
+        if self.min_loss_early_stopping > smooth_loss:
+            self.min_loss_early_stopping = smooth_loss
+            serializer.save_model(self.model_to_save)
+            self.poor_batches_early_stopping = 0
+        elif self.poor_batches_early_stopping < self.config.early_stopping_patience:
+            self.poor_batches_early_stopping +=1
+        else:
+            stop = True
+        return stop
+
+    def train_model_generation(self, serializer=None):
+        assert(not(self.config.early_stopping and serializer is not None)), "Need to specify serializer with early_stopping"
         self.chunk = 0
         self.pwd_list.reset()
         accuracy_accum = []
+        smoothened_loss = collections.deque(maxlen= self.config.chunk_print_interval)
         x_all, y_all, w_all = self.next_train_set_as_np()
         chunk = 0
+        early_stop = False
         while len(x_all) != 0:
             assert len(x_all) == len(y_all)
-            tr_loss, _, te_loss, te_acc = self.training_step(
+            tr_loss, tr_acc, te_loss, te_acc = self.training_step(
                 x_all, y_all, w_all)
             accuracy_accum += [(len(x_all), te_acc)]
+            smoothened_loss.append((len(x_all),te_loss))
+            if self.config.tensorboard:
+                self.write_log(self.train_log_names,[tr_loss, tr_acc], self.cumulative_chunks)
+                self.write_log(self.test_log_names,[te_loss,te_acc], self.cumulative_chunks)
             if chunk % self.config.chunk_print_interval == 0:
+                instances_smoothened = map(lambda x: x[0], smoothened_loss)
+                loss_smoothened = sum(map(lambda x: x[0] * x[1], smoothened_loss)) / sum(instances_smoothened)
                 logging.info('Chunk %s. Each chunk is size %s',
                              chunk, len(x_all))
-                logging.info('Train loss %s. Test loss %s. Test accuracy %s.',
-                             tr_loss, te_loss, te_acc)
+                logging.info('Train loss %s. Test loss %s. Test accuracy %s. Averaged loss %s',
+                             tr_loss, te_loss, te_acc, loss_smoothened)
+            if self.config.early_stopping and self.cumulative_chunks >= self.config.early_stopping_patience and \
+                self.cumulative_chunks % self.config.chunk_print_interval == 0:
+                #Second condition so that the model doesn't start saving very early in the training process
+                #Third condition to prevent evaluation of accuracy too frequently
+                instances_smoothened = map(lambda x: x[0], smoothened_loss)
+                loss_smoothened = sum(map(lambda x: x[0] * x[1], smoothened_loss)) / sum(instances_smoothened)
+                early_stop = self.early_stopping(loss_smoothened, serializer)
+                if early_stop:
+                    instances = map(lambda x: x[0], accuracy_accum)
+                    return sum(map(lambda x: x[0] * x[1], accuracy_accum)) / sum(instances), early_stop
             x_all, y_all, w_all = self.next_train_set_as_np()
             chunk += 1
+            self.cumulative_chunks += 1
         instances = map(lambda x: x[0], accuracy_accum)
-        return sum(map(lambda x: x[0] * x[1], accuracy_accum)) / sum(instances)
+        return sum(map(lambda x: x[0] * x[1], accuracy_accum)) / sum(instances), early_stop
 
     def train(self, serializer):
         logging.info('Building model...')
-        if self.model is None:
-            self.build_model()
+        self.build_model(self.model)
         logging.info('Done compiling model. Beginning training...')
         self.train_model(serializer)
 
@@ -1007,6 +1063,15 @@ class Trainer(object):
         self.pwd_list = preprocessor
         self.train(serializer)
 
+    def write_log(self, names, logs, batch_no):
+        assert(self.callback)
+        for name, value in zip(names, logs):
+            summary = tf.Summary()
+            summary_value = summary.value.add()
+            summary_value.simple_value = value
+            summary_value.tag = name
+            self.callback.writer.add_summary(summary, batch_no)
+            self.callback.writer.flush()
 
 class PwdList(object):
     class NoListTypeException(Exception):
@@ -2769,7 +2834,7 @@ def make_parser():
                         help='Only output password probabilities')
     parser.add_argument('--train-secondary-only', action='store_true',
                         help='Only train on secondary data. ')
-    parser.add_argument('--multi-gpu', default=1,
+    parser.add_argument('--multi-gpu', default=1, type=int,
                         help="The number of GPUs to use to train in parallel")
     parser.add_argument('--config-cmdline', default='',
                         help=('Extra configuration values. Should be a list of '
