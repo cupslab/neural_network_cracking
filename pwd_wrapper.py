@@ -53,7 +53,7 @@ if __name__ == "__main__":
         raise FileNotFoundError("Couldn't find the pwd_guess.py script at {}".format(pwd_guess))
 
     #Make training attempt
-    train_cmd = "python3 {} --config-args {} |& tee training.log".format(pwd_guess, os.path.basename(args.train_config))
+    train_cmd = "python3 {} --config-args \"{}\" |& tee training.log".format(pwd_guess, os.path.basename(args.train_config))
     print(train_cmd)
     ret = subprocess.call(train_cmd, shell=True, executable='/bin/bash')
     if ret != 0:
@@ -63,7 +63,7 @@ if __name__ == "__main__":
         exit(0)
 
     #Make guessing attempt
-    guess_cmd = "python3 {} --config-args {} |& tee guess.log".format(pwd_guess, os.path.basename(args.guess_config))
+    guess_cmd = "python3 {} --config-args \"{}\" |& tee guess.log".format(pwd_guess, os.path.basename(args.guess_config))
     print(guess_cmd)
     ret = subprocess.call(guess_cmd, shell=True,executable='/bin/bash')
     if ret != 0:
@@ -72,7 +72,7 @@ if __name__ == "__main__":
 
     #Convert to format for plotting
     guess_op_file = guess_conf['args']['enumerate_ofile']
-    convert_cmd = "python3 {} {} . --condition {}".format(convert_py, guess_op_file, os.path.basename(os.getcwd()))
+    convert_cmd = "python3 {} \"{}\" . --condition {}".format(convert_py, guess_op_file, os.path.basename(os.getcwd()))
     ret = subprocess.call(convert_cmd, shell= True, executable='/bin/bash')
     if ret != 0:
         raise RuntimeError("Convert command failed with the commandline {}".format(convert_cmd))

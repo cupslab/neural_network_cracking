@@ -410,6 +410,7 @@ class TrainerTest(unittest.TestCase):
         config.scheduled_sampling = False
         config.most_common_token_count = 2
         config.get_intermediate_info = MagicMock(return_value = ['ab', 'bc'])
+        config.chunk_print_interval = 100
         pre = pwd_guess.Preprocessor(config)
         pre.begin([('abc', 1), ('bca', 1)])
         t = pwd_guess.Trainer(pre, config=config)
@@ -526,6 +527,22 @@ class TrainerTest(unittest.TestCase):
         self.assertEqual(1, len(y_v))
         self.assertEqual(4, len(w_t))
         self.assertEqual(1, len(w_v))
+
+    def test_early_stopping(self):
+        config = pwd_guess.ModelDefaults(early_stopping=True, early_stopping_patience=100)
+        t = pwd_guess.Trainer(pwd_guess.Preprocessor(config), config=config)
+        serializer = Mock()
+        serializer.save_model = MagicMock(return_value=None)
+        loss_function = [(x/1000)**2 - (x/1000) + 1 for x in range(0,1500)]
+        for i, loss in enumerate(loss_function):
+            stop = t.early_stopping(loss,serializer)
+            if i == 601:
+                self.assertTrue(stop)
+                break
+            else:
+                self.assertFalse(stop)
+
+
 
 class ModelDefaultsTest(unittest.TestCase):
     def test_get_default(self):

@@ -583,7 +583,8 @@ class ModelDefaults(object):
     dropouts = False
     dropout_ratio = .25
     fuzzy_training_smoothing = False
-    tensorboard = True
+    tensorboard = False
+    tensorboard_dir = "."
     scheduled_sampling = False
     final_schedule_ratio = .05
     context_length = None
@@ -831,12 +832,17 @@ class Trainer(object):
         self.multi_gpu = multi_gpu
         self.pwd_list = pwd_list
         self.cumulative_chunks = 0
-        self.min_loss_early_stopping = 999999999 #A really large number
+        self.min_loss_early_stopping = float("inf")
         self.poor_batches_early_stopping = 0
+        self.smoothened_loss = collections.deque(maxlen=int(config.chunk_print_interval))
         if config.tensorboard:
-            self.callback = TensorBoard(".")
+            self.callback = TensorBoard(config.tensorboard_dir)
             self.train_log_names = []
             self.test_log_names = []
+        else:
+            self.callback = None
+            self.train_log_names = None
+            self.test_log_names = None
         if config.scheduled_sampling:
             logging.info('Using scheduled sampling')
             self.ctable = ScheduledSamplingCharacterTable(self.config)
@@ -951,7 +957,7 @@ class Trainer(object):
         if self.config.scheduled_sampling:
             self.ctable.init_model(self.model)
             if self.config.tensorboard:
-            self.callback.set_model(self.model)
+                self.callback.set_model(self.model)
 
         for gen in range(self.config.generations):
             self.generation = gen + 1
@@ -960,7 +966,7 @@ class Trainer(object):
             logging.info('Generation accuracy: %s', accuracy)
             if early_stop:
                 break
-            if accuracy > max_accuracy or self.config.save_always:
+            if not self.config.early_stopping and (accuracy > max_accuracy or self.config.save_always):
                 max_accuracy = accuracy
                 serializer.save_model(self.model_to_save)
             if ((accuracy - prev_accuracy) <
@@ -990,24 +996,24 @@ class Trainer(object):
             x_val, y_val, sample_weight=w_val)
         return (train_loss, train_accuracy, test_loss, test_accuracy)
 
-    def early_stopping(self,smooth_loss, serializer):
-        stop=False
+    def early_stopping(self, smooth_loss, serializer):
+        stop = False
         if self.min_loss_early_stopping > smooth_loss:
             self.min_loss_early_stopping = smooth_loss
             serializer.save_model(self.model_to_save)
             self.poor_batches_early_stopping = 0
         elif self.poor_batches_early_stopping < self.config.early_stopping_patience:
-            self.poor_batches_early_stopping +=1
+            self.poor_batches_early_stopping += 1
         else:
             stop = True
         return stop
 
     def train_model_generation(self, serializer=None):
-        assert(not(self.config.early_stopping and serializer is not None)), "Need to specify serializer with early_stopping"
+        if self.config.early_stopping:
+            assert serializer, "Need to specify serializer with early_stopping"
         self.chunk = 0
         self.pwd_list.reset()
         accuracy_accum = []
-        smoothened_loss = collections.deque(maxlen= self.config.chunk_print_interval)
         x_all, y_all, w_all = self.next_train_set_as_np()
         chunk = 0
         early_stop = False
@@ -1016,23 +1022,29 @@ class Trainer(object):
             tr_loss, tr_acc, te_loss, te_acc = self.training_step(
                 x_all, y_all, w_all)
             accuracy_accum += [(len(x_all), te_acc)]
-            smoothened_loss.append((len(x_all),te_loss))
+            self.smoothened_loss.append((len(x_all), te_loss))
             if self.config.tensorboard:
-                self.write_log(self.train_log_names,[tr_loss, tr_acc], self.cumulative_chunks)
-                self.write_log(self.test_log_names,[te_loss,te_acc], self.cumulative_chunks)
+                self.write_log(self.train_log_names, [tr_loss, tr_acc], self.cumulative_chunks)
+                self.write_log(self.test_log_names, [te_loss, te_acc], self.cumulative_chunks)
+
             if chunk % self.config.chunk_print_interval == 0:
-                instances_smoothened = map(lambda x: x[0], smoothened_loss)
-                loss_smoothened = sum(map(lambda x: x[0] * x[1], smoothened_loss)) / sum(instances_smoothened)
+                #Finding weighted average to get the right loss value over batches
+                # of unequal sizes
+                instances_smoothened = map(lambda x: x[0], self.smoothened_loss)
+                loss_smoothened = sum(map(lambda x: x[0] * x[1], self.smoothened_loss)) / sum(instances_smoothened)
                 logging.info('Chunk %s. Each chunk is size %s',
                              chunk, len(x_all))
                 logging.info('Train loss %s. Test loss %s. Test accuracy %s. Averaged loss %s',
                              tr_loss, te_loss, te_acc, loss_smoothened)
+                if self.config.tensorboard:
+                    self.callback.writer.flush()
+
             if self.config.early_stopping and self.cumulative_chunks >= self.config.early_stopping_patience and \
                 self.cumulative_chunks % self.config.chunk_print_interval == 0:
                 #Second condition so that the model doesn't start saving very early in the training process
                 #Third condition to prevent evaluation of accuracy too frequently
-                instances_smoothened = map(lambda x: x[0], smoothened_loss)
-                loss_smoothened = sum(map(lambda x: x[0] * x[1], smoothened_loss)) / sum(instances_smoothened)
+                instances_smoothened = map(lambda x: x[0], self.smoothened_loss)
+                loss_smoothened = sum(map(lambda x: x[0] * x[1], self.smoothened_loss)) / sum(instances_smoothened)
                 early_stop = self.early_stopping(loss_smoothened, serializer)
                 if early_stop:
                     instances = map(lambda x: x[0], accuracy_accum)
@@ -1064,14 +1076,13 @@ class Trainer(object):
         self.train(serializer)
 
     def write_log(self, names, logs, batch_no):
-        assert(self.callback)
+        assert self.callback
         for name, value in zip(names, logs):
             summary = tf.Summary()
             summary_value = summary.value.add()
             summary_value.simple_value = value
             summary_value.tag = name
             self.callback.writer.add_summary(summary, batch_no)
-            self.callback.writer.flush()
 
 class PwdList(object):
     class NoListTypeException(Exception):

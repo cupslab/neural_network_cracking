@@ -417,6 +417,9 @@ most_common_token_count - If tokenize_words is true, then this is the number of
 
 tensorboard - Boolean. If true, will create training visualizations with training statistics
 
+tensorboard_dir - The directory where the tensorboard data should be saved. Defaults
+  to current working directory.
+
 early_stopping - Boolean. If true, will enable early stopping logic to save weights and
   stop training when the accuracy fails to improve. The training will wait till
   early_stopping_patience batches for the loss to decrease before it stops the training
