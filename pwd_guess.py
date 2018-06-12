@@ -966,7 +966,8 @@ class Trainer(object):
             logging.info('Generation accuracy: %s', accuracy)
             if early_stop:
                 break
-            if not self.config.early_stopping and (accuracy > max_accuracy or self.config.save_always):
+            if not self.config.early_stopping and \
+                    (accuracy > max_accuracy or self.config.save_always):
                 max_accuracy = accuracy
                 serializer.save_model(self.model_to_save)
             if ((accuracy - prev_accuracy) <
@@ -1031,7 +1032,8 @@ class Trainer(object):
                 #Finding weighted average to get the right loss value over batches
                 # of unequal sizes
                 instances_smoothened = map(lambda x: x[0], self.smoothened_loss)
-                loss_smoothened = sum(map(lambda x: x[0] * x[1], self.smoothened_loss)) / sum(instances_smoothened)
+                loss_smoothened = sum(map(lambda x: x[0] * x[1], self.smoothened_loss)
+                                      ) / sum(instances_smoothened)
                 logging.info('Chunk %s. Each chunk is size %s',
                              chunk, len(x_all))
                 logging.info('Train loss %s. Test loss %s. Test accuracy %s. Averaged loss %s',
@@ -1039,16 +1041,20 @@ class Trainer(object):
                 if self.config.tensorboard:
                     self.callback.writer.flush()
 
-            if self.config.early_stopping and self.cumulative_chunks >= self.config.early_stopping_patience and \
+            if self.config.early_stopping and \
+                    self.cumulative_chunks >= self.config.early_stopping_patience and \
                 self.cumulative_chunks % self.config.chunk_print_interval == 0:
-                #Second condition so that the model doesn't start saving very early in the training process
+                #Second condition so that the model doesn't start saving \
+                # very early in the training process
                 #Third condition to prevent evaluation of accuracy too frequently
                 instances_smoothened = map(lambda x: x[0], self.smoothened_loss)
-                loss_smoothened = sum(map(lambda x: x[0] * x[1], self.smoothened_loss)) / sum(instances_smoothened)
+                loss_smoothened = sum(map(lambda x: x[0] * x[1], self.smoothened_loss)
+                                      ) / sum(instances_smoothened)
                 early_stop = self.early_stopping(loss_smoothened, serializer)
                 if early_stop:
                     instances = map(lambda x: x[0], accuracy_accum)
-                    return sum(map(lambda x: x[0] * x[1], accuracy_accum)) / sum(instances), early_stop
+                    return sum(map(lambda x: x[0] * x[1], accuracy_accum)
+                               ) / sum(instances), early_stop
             x_all, y_all, w_all = self.next_train_set_as_np()
             chunk += 1
             self.cumulative_chunks += 1

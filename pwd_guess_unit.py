@@ -2598,7 +2598,9 @@ class TestMain(unittest.TestCase):
                     "no_end_word_cache" : True,
                     "intermediate_fname" : self._temp_path(
                         "intermediate_data.sqlite"),
-                    "save_model_versioned" : True
+                    "save_model_versioned" : True,
+                    "tensorboard" : True,
+                    "tensorboard_dir" : self.test_dir
                 }
             }, config)
 
