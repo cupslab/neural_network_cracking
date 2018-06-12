@@ -956,8 +956,8 @@ class Trainer(object):
         max_accuracy = 0
         if self.config.scheduled_sampling:
             self.ctable.init_model(self.model)
-            if self.config.tensorboard:
-                self.callback.set_model(self.model)
+        if self.config.tensorboard:
+            self.callback.set_model(self.model)
 
         for gen in range(self.config.generations):
             self.generation = gen + 1
