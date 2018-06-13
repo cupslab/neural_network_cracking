@@ -1394,7 +1394,7 @@ aaa	0.0625
         actual = list(csv.reader(ostream, delimiter = '\t'))
         self.assertEqual(len(actual), 8)
         for row in actual:
-            self.assertEqual(float(row[1]), expected[row[0]])
+            self.assertAlmostEqual(float(row[1]), expected[row[0]])
 
     def test_guesser_larger_tokenized(self):
         tokens = ['ab', 'bbb', 'abb']
@@ -1569,11 +1569,23 @@ aaa	0.0625
             # This example is fairly sensitive to floating point rounding error
             # The GPU also computes at a rounding error higher than the original
             # computation
-            self.assertEqual("""Total count: 8
-abb	0.144	1
-aab	0.096	4
-aaa	0.064	7
-""", gfile.read())
+            gfile_lines = gfile.read().splitlines()
+            self.assertEqual(gfile_lines[0], "Total count: 8")
+
+            line2_elements = gfile_lines[1].split("\t")
+            self.assertEqual(line2_elements[0], "abb")
+            self.assertAlmostEqual(float(line2_elements[1]), 0.144)
+            self.assertEqual(line2_elements[2], "1")
+
+            line3_elements = gfile_lines[2].split("\t")
+            self.assertEqual(line3_elements[0], "aab")
+            self.assertAlmostEqual(float(line3_elements[1]), 0.096)
+            self.assertEqual(line3_elements[2], "4")
+
+            line4_elements = gfile_lines[3].split("\t")
+            self.assertEqual(line4_elements[0], "aaa")
+            self.assertAlmostEqual(float(line4_elements[1]), 0.064)
+            self.assertEqual(line4_elements[2], "7")
 
     def test_do_guessing(self):
         config = pwd_guess.ModelDefaults(
@@ -2156,7 +2168,7 @@ class RandomWalkGuesserTest(unittest.TestCase):
                 for row in reader:
                     pwd, prob, gn, *_ = row
                     self.assertTrue(pwd == 'aaa' or pwd == 'bbb')
-                    self.assertEqual(prob, '0.008' if pwd == 'aaa' else '0.512')
+                    self.assertAlmostEqual(float(prob), 0.008 if pwd == 'aaa' else 0.512)
                     self.assertAlmostEqual(
                         float(gn), 8 if pwd == 'aaa' else 1, delta = 2)
 
@@ -2238,8 +2250,8 @@ class RandomWalkGuesserTest(unittest.TestCase):
                 for row in reader:
                     pwd, prob, gn, *_ = row
                     self.assertTrue(pwd == 'aaaa' or pwd == 'bbbBa')
-                    self.assertEqual(
-                        prob, '0.00016384' if pwd == 'aaaa' else '0.0016777216')
+                    self.assertAlmostEqual(
+                        float(prob), 0.00016384 if pwd == 'aaaa' else 0.0016777216)
                     self.assertAlmostEqual(
                         float(gn), 397 if pwd == 'aaaa' else 137, delta = 20)
 
@@ -2421,8 +2433,8 @@ class DelAmicoRandomWalkTest(RandomWalkGuesserTest):
                 for row in reader:
                     pwd, prob, gn, *_ = row
                     self.assertTrue(pwd == 'aAaa' or pwd == 'bbbBa')
-                    self.assertEqual(
-                        prob, '4.096e-05' if pwd == 'aAaa' else '0.0016777216')
+                    self.assertAlmostEqual(
+                        float(prob), float('4.096e-05') if pwd == 'aAaa' else 0.0016777216)
                     self.assertAlmostEqual(
                         float(gn), 613 if pwd == 'aAaa' else 100, delta = 20)
 
