@@ -4,6 +4,8 @@ import sys
 import argparse
 import os
 
+root_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0,os.path.join(root_dir,".."))
 import pwd_guess
 
 def main(args):

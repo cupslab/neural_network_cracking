@@ -355,7 +355,9 @@ training_chunk - Smaller training chunk means less memory consumed on
   GPU. Potentially, there is a possibility that large values also have lower
   quality training but I have not observed this to happen in practice.
 
-chunk_print_interval - Interval over which to print info to the log.
+chunk_print_interval - Interval over which to print info to the log. This
+  value is also used to calculate the number of previous batches to
+  calculate the moving average loss for making early stopping decisions
 
 train_test_ratio - Ratio of training data to holdout testing data. A value of
   20 means using one out of every 20 passwords for holdout testing. These
@@ -412,6 +414,18 @@ tokenize_words - If true, create a tokenized model.
 most_common_token_count - If tokenize_words is true, then this is the number of
   tokens to simulate. E.g., 2000 will simulate the most common 2000 tokens in
   the training set.
+
+tensorboard - Boolean. If true, will create training visualizations with training statistics
+
+tensorboard_dir - The directory where the tensorboard data should be saved. Defaults
+  to current working directory.
+
+early_stopping - Boolean. If true, will enable early stopping logic to save weights and
+  stop training when the accuracy fails to improve. The training will wait till
+  early_stopping_patience batches for the loss to decrease before it stops the training
+
+early_stopping_patience - Integer. The early stopping algorithm will wait till
+  the number of batches specified by this parameter before stopping the training
 
 
 
