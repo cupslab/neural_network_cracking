@@ -1,10 +1,15 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 import argparse
 import os.path
+from collections import Counter
 def create_output(args):
     prob = "0x0.1p-1"
     max_guess = 0
-    with open(args.inp_file,"r") as inp, open(os.path.join(args.op_dir,"lookupresults."+args.condition),"w") as out:
+    if args.deduplicate:
+        with open(args.deduplicate,"r") as f:
+            deduplicated = [x.rstrip("\n") for x in f.readlines()]
+        counts = Counter(deduplicated)
+    with open(args.inp_file, "r") as inp, open(os.path.join(args.op_dir, "lookupresults."+args.condition), "w") as out:
         for line in inp:
             cols = line.split('\t')
             op_cols=[]
@@ -16,7 +21,11 @@ def create_output(args):
             guess_no = int(round(float(cols[2])))
             op_cols.append(str(guess_no))
             op_cols.append(args.guess_type)
-            out.write("\t".join(op_cols)+"\n")
+            if args.deduplicate:
+                for _ in range(counts[cols[0]]):
+                    out.write("\t".join(op_cols)+"\n")
+            else:
+                out.write("\t".join(op_cols)+"\n")
             if guess_no > max_guess:
                 max_guess = guess_no
     with open(os.path.join(args.op_dir,"totalcounts."+args.condition),"w") as out:
@@ -29,5 +38,6 @@ if __name__ == "__main__":
     parser.add_argument('--user',default="no_name")
     parser.add_argument('--condition', default="4c8")
     parser.add_argument('--guess_type', default="WRGOMI")
+    parser.add_argument('--deduplicate', help="The test file used to generate guessing numbers", required=True)
     args = parser.parse_args()
     create_output(args)
