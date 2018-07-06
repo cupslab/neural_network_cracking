@@ -1,0 +1,63 @@
+{
+ "args" :{
+	"arch_file" : "arch.txt",
+	"weight_file" : "weights.h5",
+	"pwd_file" : ["../../data/pwd_100M_train_1class8.txt"],
+	"pwd_format" : ["list"],
+    "retrain" : true,
+    "train_secondary_only" : true,
+	"multi_gpu" : 4
+  },
+ "config": {
+                "training_chunk": 1024,
+                "training_main_memory_chunk": 10000000,
+                "min_len": 4,
+                "fork_length": 0,
+                "max_len": 30,
+                "context_length": 10,
+                "chunk_print_interval": 500,
+                "layers": 2,
+                "hidden_size": 1000,
+                "generations": 2,
+                "training_accuracy_threshold": -1,
+                "train_test_ratio": 10,
+                "model_type": "LSTM",
+                "tokenize_words": false,
+                "most_common_token_count": 2000,
+
+                "bidirectional_rnn": false,
+                "train_backwards": true,
+
+                "dense_layers": 1,
+                "dense_hidden_size": 512,
+               "secondary_training" : true,
+                    "secondary_train_sets" : {
+                        "pwd_file" : [
+			    "../../data/pwd_100M_train_1class8.txt"
+                        ],
+                        "pwd_format" : [
+                            "list"
+                        ]
+                    },
+
+
+                "simulated_frequency_optimization": false,
+
+                "randomize_training_order": false,
+                "uppercase_character_optimization": true,
+                "rare_character_optimization": true,
+
+                "rare_character_optimization_guessing": true,
+                "parallel_guessing": false,
+                "lower_probability_threshold": 1e-7,
+                "chunk_size_guesser": 40000,
+                "random_walk_seed_num": 100000,
+                "max_gpu_prediction_size": 10000,
+                "random_walk_seed_iterations": 1,
+                "no_end_word_cache": true,
+                "intermediate_fname": "secondary_intermediate_data_new.sqlite",
+                "save_model_versioned": false,
+		"early_stopping" : true,
+		"early_stopping_patience" : 20000
+	}
+}
