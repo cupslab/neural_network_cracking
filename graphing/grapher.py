@@ -31,7 +31,8 @@ if __name__ == "__main__":
                         continue
                     guesses.append(guess_num)
                 except:
-                    continue
+                    raise ValueError("Error while parsing the following line.\
+                    Expected integer at column 6\n{}".format(line))
             guesses.sort()
             counts = np.arange(1, len(guesses)+1)
             counts = (counts/len(counts))*100
