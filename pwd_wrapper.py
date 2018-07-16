@@ -68,6 +68,12 @@ if __name__ == "__main__":
         train_cmd = "python3 {} --config-args \"{}\" |& tee training.log".format(pwd_guess, os.path.basename(args.train_config))
         print(train_cmd)
         ret = subprocess.call(train_cmd, shell=True, executable='/bin/bash')
+        train_conf = json.load(open(os.path.basename(args.train_config), "r"))
+        try:
+            shutil.copy(train_conf['args']['weight_file'],
+                        os.path.join(args.rundir, train_conf['args']['weight_file'])+".orig")
+        except shutil.SameFileError:
+            pass
         if ret != 0:
             raise RuntimeError("The training process returned non-zero error code. Look in training.log for more information")
         if args.train_only:
