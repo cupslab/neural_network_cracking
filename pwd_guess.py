@@ -219,7 +219,24 @@ class CharacterTable(object):
                          dtype=np.bool)
         for i, xstr in enumerate(x_str_list):
             self.encode_into(x_vec[i], xstr)
+
         return x_vec
+
+    def encode_many_chunks(self, string_list, max_input_str_len, maxlen=None):
+        maxlen = maxlen if maxlen else self.maxlen
+        chunks_str_list = []
+        iters = list(range(maxlen, max_input_str_len, maxlen // 2))
+        iters.append(max_input_str_len)
+        for str in string_list:
+            prev_iter = 0
+            for i in iters:
+                if prev_iter >= len(str) and (len(str) != 0) or (len(str) == 0 and prev_iter != 0):
+                    break
+                chunk = str[i-maxlen:i]
+                chunks_str_list.append(chunk)
+                prev_iter = i
+
+        return self.encode_many(chunks_str_list, maxlen), chunks_str_list
 
     def encode_into(self, X, C):
         for i, c in enumerate(C):
@@ -729,7 +746,7 @@ class BasePreprocessor(object):
 
     @staticmethod
     def fromConfig(config):
-        return Preprocessor(config)
+        return ManyToManyPreprocessor(config)
 
 
 class Preprocessor(BasePreprocessor):
@@ -1089,6 +1106,67 @@ class Trainer(object):
             summary_value.simple_value = value
             summary_value.tag = name
             self.callback.writer.add_summary(summary, batch_no)
+
+
+class ManyToManyTrainer(Trainer):
+    def __init__(self, pwd_list, config=ModelDefaults(), multi_gpu=1):
+        super().__init__(pwd_list, config, multi_gpu)
+
+    def return_model(self):
+        model = keras.models.Sequential()
+        self.feature_layers.append(keras.layers.Embedding(self.ctable.vocab_size, 6, input_length=self.config.context_length))
+
+        #model.add()
+
+        self.feature_layers.append(keras.layers.LSTM(2048, return_sequences=True))
+        if self.config.dropouts:
+            self.feature_layers.append(keras.layers.Dropout(0.4))
+        self.feature_layers.append(keras.layers.LSTM(512, return_sequences=True))
+
+        for _ in range(self.config.dense_layers):
+            self.classification_layers.append(keras.layers.TimeDistributed(keras.layers.Dense(
+                self.config.hidden_size)))
+
+        self.classification_layers.append(keras.layers.TimeDistributed(keras.layers.Dense(
+            self.ctable.vocab_size, activation="softmax")))
+
+        for layer in self.feature_layers + self.classification_layers:
+            try:
+                model.add(layer)
+            except Exception as e:
+                logging.error('Error when adding layer %s: %s', layer, e)
+                raise
+        return model
+
+
+    def next_train_set_as_np(self):
+        x_strs, y_str_list, weight_list = self.pwd_list.next_chunk()
+        x_vec = self.prepare_x_data(x_strs)
+        x_vec = np.argmax(x_vec, axis=2) #TODO: Inefficient method, change this
+        y_vec = self.prepare_x_data(y_str_list)
+        weight_vec = np.zeros((len(weight_list)))
+        for i, weight in enumerate(weight_list):
+            weight_vec[i] = weight
+        return shuffle(x_vec, y_vec, weight_vec)
+
+    # def prepare_y_data(self, y_str_list):
+    #     y_vec = np.zeros((len(y_str_list), self.ctable.vocab_size),
+    #                      dtype=np.bool)
+    #     self.ctable.encode_into(y_vec, y_str_list)
+    #     return y_vec
+
+class ManyToManyPreprocessor(Preprocessor):
+    def __init__(self, config=ModelDefaults()):
+        super().__init__(config)
+
+    def all_prefixes(self, pwd):
+        return [pwd]
+
+    def all_suffixes(self, pwd):
+        return [pwd[1:]+ PASSWORD_END]
+
+    def repeat_weight(self, pwd):
+        return [self.password_weight(pwd)]
 
 class PwdList(object):
     class NoListTypeException(Exception):
@@ -1483,7 +1561,7 @@ class ProbabilityCalculator(object):
     def __init__(self, guesser, prefixes=False):
         self.guesser = guesser
         self.ctable = CharacterTable.fromConfig(guesser.config)
-        self.preproc = Preprocessor(guesser.config)
+        self.preproc = ManyToManyPreprocessor(guesser.config)
         self.template_probs = False
         self.prefixes = prefixes
         self.config = guesser.config
@@ -1515,6 +1593,29 @@ class ProbabilityCalculator(object):
                         self.ctable.translate(input_string), input_string)
                 yield (input_string, prev_prob)
                 prev_prob = 1
+
+class ManyToManyProbabilityCalculator(ProbabilityCalculator):
+    def __init__(self, guesser, prefixes=False):
+        super().__init__(guesser, prefixes)
+
+    def probability_stream(self, pwd_list):
+        self.preproc.begin(pwd_list)
+        x_strings, y_strings, _ = self.preproc.next_chunk()
+        logging.debug('Initial probabilities: %s, %s', x_strings, y_strings)
+        while len(x_strings) != 0:
+            probs = self.guesser.batch_prob(x_strings)
+            y_indices, y_strings = self.ctable.encode_many_chunks(y_strings, self.config.max_len)
+            _, x_strings = self.ctable.encode_many_chunks(x_strings, self.config.max_len)
+            assert len(probs) == len(y_indices) == len(y_strings) == len(x_strings)
+            for i, y_str in enumerate(y_strings):
+                #y_indices = list(map(self.ctable.get_char_index, y_str))
+                #y_indices_2 = self.ctable.encode_many(y_strings)
+                a = 1
+                for j, y_idx in enumerate(y_indices[i]):
+                    if j == len(x_strings[i]):
+                        break
+                    yield x_strings[i], y_strings[i][j], probs[i][j][y_idx]
+            x_strings, y_strings, _ = self.preproc.next_chunk()
 
 class PasswordTemplateSerializer(DelegatingSerializer):
     def __init__(self, config, serializer=None, lower_prob_threshold=None):
@@ -1916,7 +2017,7 @@ class Guesser(object):
                     for i in range(1, self.config.probability_striation + 1)]
         pwds = self.read_test_passwords()
         logging.info('Calculating test set probabilities')
-        return ProbabilityCalculator(self).calc_probabilities(pwds)
+        return ManyToManyProbabilityCalculator(self).calc_probabilities(pwds)
 
     def calculate_probs_from_file(self):
         if self._calc_prob_cache is None:
@@ -1992,7 +2093,9 @@ class Guesser(object):
         return self.conditional_probs_many([astring])[0][0].copy()
 
     def conditional_probs_many(self, astring_list):
-        answer = self.model.predict(self.ctable.encode_many(astring_list),
+        predict_strings, _ = self.ctable.encode_many_chunks(astring_list, self.config.max_len)
+        predict_strings = np.argmax(predict_strings, axis=2)
+        answer = self.model.predict(predict_strings,
                                     verbose=0,
                                     batch_size=self.chunk_size_guesser)
         # pylint: disable=no-member
@@ -2003,7 +2106,7 @@ class Guesser(object):
         # shape than the library before 0.3.1
         if len(answer.shape) == 2:
             answer = np.expand_dims(answer, axis=1)
-        assert answer.shape == (len(astring_list), 1, self.ctable.vocab_size)
+        assert answer.shape == (len(predict_strings), self.config.context_length, self.ctable.vocab_size)
         if self.relevel_not_matching_passwords:
             self.relevel_prediction_many(answer, astring_list)
         return answer
@@ -2039,7 +2142,7 @@ class Guesser(object):
             'Super node buffer size %s, guess number %s, gpu_batch: %s',
             len(prefixes), self.generated, self.max_gpu_prediction_size)
         if len(prefixes) > self.max_gpu_prediction_size:
-            answer = np.zeros((0, 1, len(self.chars_list)))
+            answer = np.zeros((0, self.config.context_length, len(self.chars_list)))
             for chunk_num in range(
                     math.ceil(len(prefixes) / self.max_gpu_prediction_size)):
                 answer = np.concatenate(
@@ -2709,7 +2812,8 @@ def train(args, config):
     preprocessor = preprocessing(args, config)
     if preprocessor is None:
         return
-    trainer = Trainer(preprocessor, config, args['multi_gpu'])
+    #trainer = Trainer(preprocessor, config, args['multi_gpu'])
+    trainer = ManyToManyTrainer(preprocessor, config, args['multi_gpu'])
     serializer = ModelSerializer(args['arch_file'], args['weight_file'],
                                  config.save_model_versioned)
     if args['retrain']:
