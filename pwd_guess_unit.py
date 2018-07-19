@@ -220,6 +220,28 @@ class TokenizingTableTest(unittest.TestCase):
         config.context_length = 4
         t = pwd_guess.TokenizingCharacterTable(config)
 
+    def test_encode_embedding(self):
+        tokens = ['ab', 'bc']
+        config = Mock()
+        config.char_bag = 'abc\n'
+        config.most_common_token_count = len(tokens)
+        config.uppercase_character_optimization = False
+        config.rare_character_optimization = False
+        config.context_length = 2
+        config.embedding_layer = True
+        config.get_intermediate_info = MagicMock(return_value=tokens)
+        t = pwd_guess.TokenizingCharacterTable(config)
+        np.testing.assert_array_equal(t.encode('abbc'),
+                                      [0, 1])
+        np.testing.assert_array_equal(t.encode('ba'),
+                                      [4, 3])
+        np.testing.assert_array_equal(t.encode('a'),
+                                      [3, 2])
+
+        self.assertEqual(t.decode(np.array([0, 1]), argmax=False), 'abbc')
+        self.assertEqual(t.decode(np.array([4, 3]), argmax=False), 'ba')
+        self.assertEqual(t.decode(np.array([3, 2]), argmax=False), 'a\n')
+
     def test_encode(self):
         tokens = ['ab', 'bc']
         config = Mock()
@@ -228,6 +250,7 @@ class TokenizingTableTest(unittest.TestCase):
         config.uppercase_character_optimization = False
         config.rare_character_optimization = False
         config.context_length = 2
+        config.embedding_layer = False
         config.get_intermediate_info = MagicMock(return_value = tokens)
         t = pwd_guess.TokenizingCharacterTable(config)
         np.testing.assert_array_equal(t.encode('abbc'),
@@ -273,6 +296,7 @@ class TokenizingTableTest(unittest.TestCase):
         config.uppercase_character_optimization = False
         config.rare_character_optimization = True
         config.context_length = 2
+        config.embedding_layer = False
         t = pwd_guess.TokenizingCharacterTable(config)
         np.testing.assert_array_equal(t.encode('a::'),
             [[False, False, False, False, False, True, False, False],
