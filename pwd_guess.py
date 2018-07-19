@@ -613,6 +613,7 @@ class ModelDefaults(object):
     train_backwards = False
     bidirectional_rnn = False
     embedding_layer = False
+    embedding_size = 8
     dense_layers = 0
     dense_hidden_size = 128
     secondary_training = False
