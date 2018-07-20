@@ -225,6 +225,10 @@ class CharacterTable(object):
             self.encode_into(x_vec[i], xstr)
         return x_vec
 
+    def y_encode_into(self, Y, C):
+        for i, c in enumerate(C):
+            Y[i, self.char_indices[c]] = 1
+
     def encode_into(self, X, C):
         for i, c in enumerate(C):
             if self.embedding:
@@ -899,7 +903,7 @@ class Trainer(object):
         else:
             y_vec = np.zeros((len(y_str_list), self.ctable.vocab_size),
                              dtype=np.bool)
-            self.ctable.encode_into(y_vec, y_str_list)
+            self.ctable.y_encode_into(y_vec, y_str_list)
         return y_vec
 
     def return_model(self):
