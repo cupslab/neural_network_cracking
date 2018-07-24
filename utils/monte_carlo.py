@@ -24,10 +24,7 @@ def main(args):
             random_walk_confidence_bound_z_value=args.confidence_interval))
     filtered_policy_num, filtered_not_prob_num, ctr = 0, 0, 0
     for row in csv.reader(args.randomfile, delimiter='\t', quotechar=None):
-        if not args.flip_random_input_columns:
-            pwd, prob_str = row
-        else:
-            prob_str, pwd = row
+        pwd, prob_str = row
         prob = prob_fmt(prob_str)
         ctr += 1
         if not policy.pwd_complies(pwd):
@@ -51,12 +48,12 @@ if __name__=='__main__':
                      ' password probabilities and calculates guess numbers. '))
     parser.add_argument('randomfile', type=argparse.FileType('r'),
                         help=('Randomly generated passwords file. Should be a '
-                              'tsv where the first column is probability and '
-                              'second column is the password. '))
+                              'tsv where the first column is password and '
+                              'second column is the probability. '))
     parser.add_argument('testfile', type=argparse.FileType('r'),
                         help=('Password file. Should be a tsv of passwords '
-                              'where the first column is the probability and '
-                              'second is the password. '))
+                              'where the first column is the password and '
+                              'second is the probability. '))
     parser.add_argument('-o', '--ofile', type=argparse.FileType('w'),
                         help='Input file. Default is stdout. ',
                         default=sys.stdout)
@@ -70,6 +67,4 @@ if __name__=='__main__':
     parser.add_argument('-p', '--policy', default='basic',
                         choices=sorted(pwd_guess.policy_list.keys()),
                         help='Password policy. Default is no policy. ')
-    parser.add_argument('-f', '--flip-random-input-columns',
-                        action='store_true')
     main(parser.parse_args())
