@@ -50,8 +50,6 @@ from keras.callbacks import TensorBoard
 try:
     from seya.layers.recurrent import Bidirectional
 except ImportError:
-    sys.stderr.write('Warning, cannot import Bidirectional model. You may need '
-                     'to install or use a different version of keras\n')
     Bidirectional = None
 
 from sklearn.utils import shuffle
@@ -532,11 +530,14 @@ if hasattr(recurrent, 'JZS1'):
     model_type_dict['JZS2'] = recurrent.JZS2
     model_type_dict['JZS3'] = recurrent.JZS3
 
+class ConfigurationException(Exception):
+    pass
+
 class ModelDefaults(object):
     char_bag = (string.ascii_lowercase + string.ascii_uppercase +
                 string.digits + '~!@#$%^&*(),.<>/?\'"{}[]\\|-_=+;: `' +
                 PASSWORD_END)
-    model_type = 'JZS1'
+    model_type = 'LSTM'
     hidden_size = 128
     layers = 1
     max_len = 40
@@ -568,7 +569,7 @@ class ModelDefaults(object):
     early_stopping = False
     early_stopping_patience = 10000
     compute_stats = False
-    password_test_fname = None
+    password_test_fname = ""
     chunk_size_guesser = 1000
     random_walk_seed_num = 1000
     max_gpu_prediction_size = 25000
@@ -593,7 +594,7 @@ class ModelDefaults(object):
     dense_layers = 0
     dense_hidden_size = 128
     secondary_training = False
-    secondary_train_sets = None
+    secondary_train_sets = {}
     training_main_memory_chunksize = 1000000
     tokenize_words = False
     tokenize_guessing = True
@@ -640,26 +641,53 @@ class ModelDefaults(object):
         return answer
 
     def validate(self):
-        assert self.fork_length < self.min_len
-        assert self.max_len <= 255
-        if (self.guess_serialization_method == 'calculator' and
-            self.password_test_fname):
-            assert os.path.exists(self.password_test_fname)
+        if self.fork_length >= self.min_len:
+            raise ConfigurationException('expected fork_length < min_len')
+
+        if self.max_len > 255:
+            raise ConfigurationException('expected max_len <= 255')
+
+        if self.password_test_fname:
+            if not os.path.exists(self.password_test_fname):
+                raise ConfigurationException(
+                    'password_test_fname with value "%s" does not exist' %
+                    self.password_test_fname)
+
         if self.rare_character_optimization_guessing:
-            assert (self.rare_character_optimization or
-                    self.uppercase_character_optimization)
+            if not (self.rare_character_optimization or
+                    self.uppercase_character_optimization):
+                raise ConfigurationException(
+                    'rare_character_optimization_guessing should not be true '
+                    'when neither uppercase_character_optimization or '
+                    'uppercase_character_optimization are true')
+
         elif (self.rare_character_optimization or
               self.uppercase_character_optimization):
             logging.warning(
                 'Without rare_character_optimization_guessing setting,'
                 ' output guesses may ignore case or special characters')
-        assert self.guess_serialization_method in serializer_type_list
-        assert self.context_length <= self.max_len
-        assert self.model_type in model_type_dict
-        assert self.training_main_memory_chunksize > self.training_chunk
+
+        if self.guess_serialization_method not in serializer_type_list:
+            raise ConfigurationException(
+                'unknown guess_serialization_method: %s' %
+                self.guess_serialization_method)
+
+        if self.context_length > self.max_len:
+            raise ConfigurationException('Expected context_length <= max_len')
+
+        if self.model_type not in model_type_dict:
+            raise ConfigurationException(
+                'Unknown model type: %s' % self.model_type)
+
+        if self.training_main_memory_chunksize <= self.training_chunk:
+            raise ConfigurationException(
+                'Expected training_main_memory_chunksize > training_chunk')
+
         if self.guessing_secondary_training:
-            assert self.secondary_training
-            assert self.secondary_training_save_freqs
+            if ((not self.secondary_training) or
+                (not self.secondary_training_save_freqs)):
+                raise ConfigurationException(
+                    'Expected secondary_training and secondary_training_save_freqs')
 
     def as_dict(self):
         answer = dict(vars(ModelDefaults).copy())
