@@ -622,6 +622,17 @@ class ModelDefaultsTest(unittest.TestCase):
         self.assertEqual(10, args.context_length)
         self.assertEqual('normal', args.freq_format)
 
+    def test_concurrent_mod(self):
+        with tempfile.NamedTemporaryFile() as tfile:
+            m = pwd_guess.ModelDefaults(intermediate_fname=tfile.name)
+            m.set_intermediate_info('test', ['value'])
+            self.assertListEqual(m.get_intermediate_info('test'), ['value'])
+            time.sleep(.01)
+            tfile.write('{"test" : ["value2"]}'.encode('utf8'))
+            tfile.flush()
+            self.assertListEqual(m.get_intermediate_info('test'), ['value2'])
+
+
 class PwdListTest(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.mkdtemp()
@@ -2443,6 +2454,7 @@ class TokenizingSerializer(unittest.TestCase):
 def get_available_gpus():
     local_device_protos = device_lib.list_local_devices()
     return [x.name for x in local_device_protos if x.device_type == 'GPU']
+
 class TestMainMultiGPU(unittest.TestCase):
     def setUp(self):
         self.test_dir = tempfile.mkdtemp()

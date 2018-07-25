@@ -22,6 +22,7 @@ import string
 import subprocess as subp
 import sys
 import tempfile
+import time
 import unittest
 # pylint: disable=no-name-in-module
 #
@@ -54,7 +55,6 @@ except ImportError:
 
 from sklearn.utils import shuffle
 import numpy as np
-from sqlitedict import SqliteDict
 import tensorflow as tf
 
 
@@ -67,6 +67,8 @@ FNAME_PREFIX_PROCESS_LOG = 'log.child_process.'
 FNAME_PREFIX_PROCESS_OUT = 'out.child_process.'
 
 FORKED_FLAG = 'forked'
+
+MEMORY_ONLY = ':memory:'
 
 # From: https://docs.python.org/3.4/library/itertools.html
 def grouper(iterable, num, fillvalue=None):
@@ -557,7 +559,7 @@ class ModelDefaults(object):
     rare_character_lowest_threshold = 20
     guess_serialization_method = 'human'
     simulated_frequency_optimization = False
-    intermediate_fname = ':memory:'
+    intermediate_fname = MEMORY_ONLY
     save_always = True
     save_model_versioned = False
     randomize_training_order = True
@@ -612,8 +614,47 @@ class ModelDefaults(object):
         self.adict = adict if adict is not None else dict()
         for k in kwargs:
             self.adict[k] = kwargs[k]
+
         if self.context_length is None:
             self.context_length = self.max_len
+
+        self._read_intermediate_data_time = None
+        self._intermediate_data = self._read_intermediate_data()
+
+    def _read_intermediate_data(self):
+        self._read_intermediate_data_time = time.time()
+        if self.intermediate_fname == MEMORY_ONLY:
+            return {}
+
+        if not os.path.exists(self.intermediate_fname):
+            return {}
+
+        with open(self.intermediate_fname, 'r') as info:
+            info_as_str = info.read()
+            if info_as_str:
+                return json.loads(info_as_str)
+            else:
+                return {}
+
+    def _write_intermediate_data(self):
+        if self.intermediate_fname == MEMORY_ONLY:
+            return
+
+        self._read_intermediate_data_time = time.time()
+        with open(self.intermediate_fname, 'w') as info:
+            json.dump(self._intermediate_data, info)
+
+    def _check_if_should_reload(self):
+        if self.intermediate_fname == MEMORY_ONLY:
+            return
+
+        if not os.path.exists(self.intermediate_fname):
+            return
+
+        mod_time = os.path.getmtime(self.intermediate_fname)
+        assert self._read_intermediate_data_time != None
+        if mod_time >= self._read_intermediate_data_time:
+            self._intermediate_data = self._read_intermediate_data()
 
     def __getattribute__(self, name):
         if name != 'adict' and name in self.adict:
@@ -622,7 +663,7 @@ class ModelDefaults(object):
         return super().__getattribute__(name)
 
     def __setattr__(self, name, value):
-        if name != 'adict':
+        if name != 'adict' and not name.startswith("_"):
             self.adict[name] = value
         else:
             super().__setattr__(name, value)
@@ -697,24 +738,16 @@ class ModelDefaults(object):
             and not isinstance(value, staticmethod))])
 
     def model_type_exec(self):
-        try:
-            return model_type_dict[self.model_type]
-        except KeyError:
-            logging.warning('Cannot find model type %s', self.model_type)
-            logging.warning('Defaulting to LSTM model')
-            if self.model_type == 'JZS1':
-                self.model_type = 'LSTM'
-            return self.model_type_exec()
+        return model_type_dict[self.model_type]
 
     def set_intermediate_info(self, key, value):
-        with SqliteDict(self.intermediate_fname) as info:
-            info[key] = value
-            info.commit()
+        self._intermediate_data[key] = value
+        self._write_intermediate_data()
 
     def get_intermediate_info(self, key):
+        self._check_if_should_reload()
         try:
-            with SqliteDict(self.intermediate_fname) as info:
-                return info[key]
+            return self._intermediate_data[key]
         except KeyError as e:
             logging.error('Cannot find intermediate data %s. Looking in %s',
                           str(e), self.intermediate_fname)

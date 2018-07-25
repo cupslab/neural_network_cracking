@@ -3,5 +3,4 @@ h5py
 Cython
 Keras
 scikit-learn
-sqlitedict
 tensorflow-gpu
