@@ -48,11 +48,6 @@ import keras.utils.layer_utils as layer_utils
 import keras.utils
 from keras.callbacks import TensorBoard
 
-try:
-    from seya.layers.recurrent import Bidirectional
-except ImportError:
-    Bidirectional = None
-
 from sklearn.utils import shuffle
 import numpy as np
 import tensorflow as tf
@@ -493,10 +488,6 @@ class ModelSerializer(object):
     def load_model(self):
         # To be able to load models
 
-        # In case bidirectional model cannot be loaded
-        if Bidirectional is not None:
-            layer_utils.Bidirectional = Bidirectional
-
         # This is for unittesting
         def mock_predict_smart_parallel(distribution, input_vec, **_):
             answer = []
@@ -592,7 +583,6 @@ class ModelDefaults(object):
     final_schedule_ratio = .05
     context_length = None
     train_backwards = False
-    bidirectional_rnn = False
     dense_layers = 0
     dense_hidden_size = 128
     secondary_training = False
@@ -937,45 +927,51 @@ class Trainer(object):
             self.ctable.encode_into(y_vec, y_str_list)
         return y_vec
 
-    def return_model(self):
-        model = Sequential()
-        model_type = self.config.model_type_exec()
-        self.feature_layers.append(model_type(
+    def _make_layer_input(self):
+        return self.config.model_type_exec()(
             self.config.hidden_size,
             input_shape=(self.config.context_length, self.ctable.vocab_size),
             return_sequences=self.config.layers > 0,
-            go_backwards=self.config.train_backwards))
+            go_backwards=self.config.train_backwards)
+
+    def _make_layer(self, is_last=False):
+        return self.config.model_type_exec()(
+            self.config.hidden_size,
+            return_sequences=not is_last,
+            go_backwards=self.config.train_backwards)
+
+    def _return_model(self):
+        model = Sequential()
+
+        # Add the first input layer
+        self.feature_layers.append(self._make_layer_input())
+
+        # Add the main model layers. These layers will not be trainable during
+        # secondary training.
         for i in range(self.config.layers):
             if self.config.dropouts:
                 self.feature_layers.append(Dropout(self.config.dropout_ratio))
-            # pylint: disable=cell-var-from-loop
-            last_layer = (i == (self.config.layers - 1))
-            ret_sequences = not last_layer
-            actual_layer = lambda: model_type(
-                self.config.hidden_size,
-                return_sequences=ret_sequences,
-                go_backwards=self.config.train_backwards)
-            if self.config.bidirectional_rnn:
-                self.feature_layers.append(Bidirectional(
-                    actual_layer(), actual_layer(),
-                    return_sequences=ret_sequences))
-            else:
-                self.feature_layers.append(actual_layer())
 
+            self.feature_layers.append(
+                self._make_layer(i == (self.config.layers - 1)))
+
+        # Add any additional classification layers. These layers may be
+        # trainable during secondary training.
         for _ in range(self.config.dense_layers):
-            layer = Dense(self.config.hidden_size)
+            self.classification_layers.append(Dense(self.config.hidden_size))
 
-            self.classification_layers.append(layer)
+        # Append the final layer which has the correct dimensions for the output
+        self.classification_layers.append(
+            Dense(self.ctable.vocab_size, activation='softmax'))
 
-        dense_layer = Dense(self.ctable.vocab_size, activation='softmax')
-
-        self.classification_layers.append(dense_layer)
+        # Actually build the model
         for layer in self.feature_layers + self.classification_layers:
             try:
                 model.add(layer)
             except Exception as e:
                 logging.error('Error when adding layer %s: %s', layer, e)
                 raise
+
         return model
 
     def build_model(self, model=None):
@@ -983,12 +979,12 @@ class Trainer(object):
         if self.multi_gpu >= 2:
             with tf.device('/cpu:0'):
                 if model is None:
-                    model = self.return_model()
+                    model = self._return_model()
                 self.model_to_save = model
             model = keras.utils.multi_gpu_model(model, gpus=self.multi_gpu)
         else:
             if model is None:
-                model = self.return_model()
+                model = self._return_model()
             self.model_to_save = model
         metrics = ['accuracy']
 
