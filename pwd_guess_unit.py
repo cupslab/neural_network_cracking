@@ -6,6 +6,7 @@ from keras.layers import recurrent
 
 import unittest
 from unittest.mock import MagicMock, Mock
+import argparse
 import tempfile
 import shutil
 import os.path
@@ -26,6 +27,25 @@ from tensorflow.python.client import device_lib
 
 import pwd_guess
 import generator
+
+TMPDIR = '/tmp'
+RUN_SLOW_TESTS = False
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--tmp-dir', help='directory temporary for tmp files', default=TMPDIR)
+    parser.add_argument(
+        '--run-slow', help='Also run slow tests', action='store_true')
+    ns, args = parser.parse_known_args(namespace=unittest)
+    return ns, sys.argv[:1] + args
+
+if __name__ == '__main__':
+    args, argv = parse_args()   # run this first before defining tests
+    sys.argv[:] = argv       # create cleans argv for main()
+    TMPDIR = args.tmp_dir
+    RUN_SLOW_TESTS = args.run_slow
+
 
 class NodeTrieTest(unittest.TestCase):
     def setUp(self):
@@ -473,6 +493,16 @@ class TrainerTest(unittest.TestCase):
         t.build_model()
         self.assertNotEqual(None, t.model)
 
+    def test_build_model_conv(self):
+        t = pwd_guess.Trainer(['pass'], config=pwd_guess.ModelDefaults(
+            layers = 2,
+            dense_layers = 1,
+            context_length = 10,
+            convolutional_kernel_size = 3,
+            model_type = 'Conv1D'))
+        t.build_model()
+        self.assertNotEqual(None, t.model)
+
     def test_build_model_deep(self):
         t = pwd_guess.Trainer(['pass'], config=pwd_guess.ModelDefaults(
             hidden_size = 12, layers = 1, deep_model = True))
@@ -568,10 +598,6 @@ class ModelDefaultsTest(unittest.TestCase):
         m = pwd_guess.ModelDefaults()
         self.assertTrue(json.dumps(m.as_dict()) is not None)
 
-    def test_model_type(self):
-        m = pwd_guess.ModelDefaults()
-        self.assertTrue(hasattr(m.model_type_exec(), '__call__'))
-
     def test_set(self):
         m = pwd_guess.ModelDefaults()
         m.test = 1
@@ -582,7 +608,7 @@ class ModelDefaultsTest(unittest.TestCase):
         self.assertNotEqual(other.hidden_size, 444)
 
     def test_intermediate_files(self):
-        with tempfile.NamedTemporaryFile() as intermediate_file:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as intermediate_file:
             m = pwd_guess.ModelDefaults(
                 intermediate_fname = intermediate_file.name)
             m.set_intermediate_info('test', 8)
@@ -623,7 +649,7 @@ class ModelDefaultsTest(unittest.TestCase):
         self.assertEqual('normal', args.freq_format)
 
     def test_concurrent_mod(self):
-        with tempfile.NamedTemporaryFile() as tfile:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as tfile:
             m = pwd_guess.ModelDefaults(intermediate_fname=tfile.name)
             m.set_intermediate_info('test', ['value'])
             self.assertListEqual(m.get_intermediate_info('test'), ['value'])
@@ -635,7 +661,7 @@ class ModelDefaultsTest(unittest.TestCase):
 
 class PwdListTest(unittest.TestCase):
     def setUp(self):
-        self.tempdir = tempfile.mkdtemp()
+        self.tempdir = tempfile.mkdtemp(dir=TMPDIR)
         self.fcontent = 'pass \nword\n'
 
     def make_file(self, fname, opener):
@@ -717,7 +743,7 @@ class PwdListTest(unittest.TestCase):
             ('pass ', 1), ('word', 1), ('pass', 1), ('word', 1)])
 
     def test_concat_second_time(self):
-        with tempfile.NamedTemporaryFile() as tf:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as tf:
             fnames = [os.path.join(self.tempdir, 'test.tsv'),
                       os.path.join(self.tempdir, 'test.txt')]
             config = pwd_guess.ModelDefaults(
@@ -739,7 +765,7 @@ class PwdListTest(unittest.TestCase):
                 ('pass ', 1), ('word', 1), ('pass', .2), ('word9', .2)])
 
     def test_concat_twice_same_weights(self):
-        with tempfile.NamedTemporaryFile() as tf:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as tf:
             config = pwd_guess.ModelDefaults(
                 intermediate_fname = tf.name,
                 simulated_frequency_optimization = False)
@@ -759,7 +785,7 @@ class PwdListTest(unittest.TestCase):
                 ('pass ', 1), ('word', 1), ('pass', 1), ('word9', 1)])
 
     def test_concat_twice_diff_weights(self):
-        with tempfile.NamedTemporaryFile() as tf:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as tf:
             fnames = [os.path.join(self.tempdir, 'test.tsv'),
                       os.path.join(self.tempdir, 'test.txt')]
             config = pwd_guess.ModelDefaults(
@@ -783,7 +809,7 @@ class PwdListTest(unittest.TestCase):
                 ('pass ', 1), ('word', 1), ('pass', .2), ('word9', .2)])
 
     def test_concat_three_diff_weights(self):
-        with tempfile.NamedTemporaryFile() as tf:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as tf:
             fnames = [os.path.join(self.tempdir, 'test.tsv'),
                       os.path.join(self.tempdir, 'test.txt'),
                       os.path.join(self.tempdir, 'test1.txt')]
@@ -813,7 +839,7 @@ class PwdListTest(unittest.TestCase):
                 ('pass', 1), ('word9', 1)])
 
     def test_concat_twice_lopside(self):
-        with tempfile.NamedTemporaryFile() as tf:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as tf:
             fnames = [os.path.join(self.tempdir, 'test.tsv'),
                       os.path.join(self.tempdir, 'test.txt')]
             config = pwd_guess.ModelDefaults(
@@ -884,7 +910,7 @@ class FiltererTest(unittest.TestCase):
         self.assertEqual([('aaa', 1)], list(f.filter([('aaa', 1)])))
 
     def test_filter_freqs(self):
-        with tempfile.NamedTemporaryFile() as tf:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as tf:
             config = pwd_guess.ModelDefaults(
                 rare_character_lowest_threshold = 2, char_bag = 'pass\n',
                 intermediate_fname = tf.name,
@@ -899,7 +925,7 @@ class FiltererTest(unittest.TestCase):
                 set(['a', 'p']))
 
     def test_filter_freqs_non_appearing_rare_characters(self):
-        with tempfile.NamedTemporaryFile() as tf:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as tf:
             config = pwd_guess.ModelDefaults(
                 rare_character_lowest_threshold = 2, char_bag = 'pass12\n',
                 intermediate_fname = tf.name,
@@ -919,7 +945,7 @@ class FiltererTest(unittest.TestCase):
                          list(f.filter([('pass', 1), ('passssss', 2)])))
 
     def test_filter_tokens(self):
-        with tempfile.NamedTemporaryFile() as tf:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as tf:
             common_tokens = 3
             config = pwd_guess.ModelDefaults(
                 rare_character_lowest_threshold = 2,
@@ -941,7 +967,7 @@ class FiltererTest(unittest.TestCase):
                 set(['123', 'password', 'asdf']))
 
     def test_filter_tokens_no_singletons(self):
-        with tempfile.NamedTemporaryFile() as tf:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as tf:
             common_tokens = 3
             config = pwd_guess.ModelDefaults(
                 rare_character_lowest_threshold = 2,
@@ -969,8 +995,8 @@ class ModelSerializerTest(unittest.TestCase):
         mock.to_json = MagicMock(return_value = write_value)
         mock.save_weights = MagicMock()
         mock.load_weights = MagicMock()
-        with tempfile.NamedTemporaryFile() as fp:
-            with tempfile.NamedTemporaryFile() as tp:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as fp:
+            with tempfile.NamedTemporaryFile(dir=TMPDIR) as tp:
                 serializer = pwd_guess.ModelSerializer(fp.name, tp.name)
                 serializer.save_model(mock)
                 self.assertEqual(write_value, fp.read().decode('utf8'))
@@ -985,8 +1011,8 @@ class ModelSerializerTest(unittest.TestCase):
         mock.to_json = MagicMock(return_value = write_value)
         mock.save_weights = MagicMock()
         mock.load_weights = MagicMock()
-        with tempfile.NamedTemporaryFile() as fp:
-            with tempfile.NamedTemporaryFile() as tp:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as fp:
+            with tempfile.NamedTemporaryFile(dir=TMPDIR) as tp:
                 serializer = pwd_guess.ModelSerializer(fp.name, tp.name,
                                                        versioned = True)
                 serializer.save_model(mock)
@@ -1121,7 +1147,7 @@ aaa	0.0625
         self.assertEqual(len(actual), 56)
 
     def test_guesser_bigger_rare_c(self):
-        with tempfile.NamedTemporaryFile() as intermediatef:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as intermediatef:
             config = pwd_guess.ModelDefaults(
                 parallel_guessing = False, char_bag = 'abAB\n', min_len = 3,
                 max_len = 5, uppercase_character_optimization = True,
@@ -1224,8 +1250,8 @@ aaa	0.0625
             for i in range(len(str_list)):
                 answer.append([distribution.copy()])
             return answer
-        with tempfile.NamedTemporaryFile(mode = 'w') as pwd_file, \
-             tempfile.NamedTemporaryFile(mode = 'r') as gfile:
+        with tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR) as pwd_file, \
+             tempfile.NamedTemporaryFile(mode = 'r', dir=TMPDIR) as gfile:
             password_list = ['aaa', 'abb', 'aab']
             for pwd in password_list:
                 pwd_file.write('%s\n' % pwd)
@@ -1278,7 +1304,7 @@ aaa	0.0625
             lower_probability_threshold = 10**-2,
             relevel_not_matching_passwords = False)
         model = self.mock_model(config, [0.5, 0.5])
-        with tempfile.NamedTemporaryFile() as fp:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as fp:
             (pwd_guess.GuesserBuilder(config).add_model(model).add_file(fp.name)
              .build().complete_guessing())
             self.assertEqual("""	0.5
@@ -1304,12 +1330,13 @@ class ParallelGuesserTest(unittest.TestCase):
 
     def setUp(self):
         self.mock_model.predict = mock_predict_smart_parallel
-        self.intermediate_dir = tempfile.mkdtemp()
+        self.intermediate_dir = tempfile.mkdtemp(dir=TMPDIR)
         self.config = pwd_guess.ModelDefaults(
             min_len = 3, max_len = 3, char_bag = 'ab\n', fork_length = 2,
             guesser_intermediate_directory = self.intermediate_dir)
         self.mock_output = io.StringIO()
-        self.archfile = tempfile.NamedTemporaryFile(mode = 'w', delete = False)
+        self.archfile = tempfile.NamedTemporaryFile(
+            mode = 'w', delete = False, dir=TMPDIR)
         self.weightfile = tempfile.NamedTemporaryFile(
             mode = 'w', delete = False)
         self.serializer = Mock()
@@ -1335,6 +1362,7 @@ class ParallelGuesserTest(unittest.TestCase):
                           ('ba', .0625),
                           ('bb', .0625)], parallel_guesser.fork_points)
 
+    @unittest.skipIf(not RUN_SLOW_TESTS, "skipping slow tests")
     def test_forking(self):
         parallel_guesser = pwd_guess.ParallelGuesser(
             self.serializer, self.config, self.mock_output)
@@ -1353,8 +1381,9 @@ class ParallelGuesserTest(unittest.TestCase):
                           ('bba', .125), ('bbb', .125)], sort_freq)
         self.assertEqual(8, parallel_guesser.generated)
 
+    @unittest.skipIf(not RUN_SLOW_TESTS, "skipping slow tests")
     def test_forking_calculator(self):
-        with tempfile.NamedTemporaryFile(mode = 'w') as tf:
+        with tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR) as tf:
             for s in ['aaa', 'bbb', 'aab']:
                 tf.write('%s\n' % (s))
             tf.flush()
@@ -1393,7 +1422,7 @@ class ParallelGuesserTest(unittest.TestCase):
 
 class GuesserBuilderTest(unittest.TestCase):
     def setUp(self):
-        self.tempf = tempfile.NamedTemporaryFile()
+        self.tempf = tempfile.NamedTemporaryFile(dir=TMPDIR)
 
     def tearDown(self):
         if self.tempf is not None:
@@ -1458,7 +1487,7 @@ class PreprocessingStepTest(unittest.TestCase):
     }
 
     def setUp(self):
-        self.input_file = tempfile.NamedTemporaryFile(mode = 'w')
+        self.input_file = tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR)
 
     def tearDown(self):
         self.input_file.close()
@@ -1545,7 +1574,7 @@ class ProbabilityCalculatorTest(unittest.TestCase):
                          set([('aaa', 0.1), ('abb', 0.15)]))
 
     def test_calc_optimizing(self):
-        with tempfile.NamedTemporaryFile() as tf:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as tf:
             config = pwd_guess.ModelDefaults(
                 min_len = 2, max_len = 2, char_bag = 'abAB\n',
                 uppercase_character_optimization = True,
@@ -1579,7 +1608,8 @@ class ProbabilityCalculatorTest(unittest.TestCase):
 
 class GuessNumberGeneratorTest(unittest.TestCase):
     def setUp(self):
-        self.ostream = tempfile.NamedTemporaryFile(mode = 'w', delete = False)
+        self.ostream = tempfile.NamedTemporaryFile(
+            mode = 'w', delete = False, dir=TMPDIR)
 
     def tearDown(self):
         os.remove(self.ostream.name)
@@ -1629,7 +1659,7 @@ class PasswordTemplateSerializerTest(unittest.TestCase):
         mock_serializer = Mock()
         mock_serializer.serialize = mock_serialize
         mock_serializer.finish = mock_finish
-        with tempfile.NamedTemporaryFile() as tf:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as tf:
             config = pwd_guess.ModelDefaults(
                 min_len = 2, max_len = 5, char_bag = 'abABc:!@\n',
                 uppercase_character_optimization = True,
@@ -1684,7 +1714,7 @@ class PasswordTemplateSerializerTest(unittest.TestCase):
             ('cc@c:', .4 * (.02 / .4) * (.3 / .4))]))
 
     def test_expand(self):
-        with tempfile.NamedTemporaryFile() as tf:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as tf:
             config = pwd_guess.ModelDefaults(
                 min_len = 3, max_len = 3, char_bag = 'abAB:^\n',
                 relevel_not_matching_passwords = False,
@@ -1763,7 +1793,7 @@ class RandomWalkGuesserTest(unittest.TestCase):
             ('aa\n', .25, .5), ('aaa', .125, .25), ('aab', .125, .25)])
 
     def test_guess(self):
-        with tempfile.NamedTemporaryFile(mode = 'w') as gf:
+        with tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR) as gf:
             gf.write('aaa\nbbb\n')
             gf.flush()
             pw = pwd_guess.PwdList(gf.name)
@@ -1799,7 +1829,7 @@ class RandomWalkGuesserTest(unittest.TestCase):
 
     @unittest.skip('Not supported anymore')
     def test_guess_wide(self):
-        with tempfile.NamedTemporaryFile(mode = 'w') as gf:
+        with tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR) as gf:
             gf.write('aaaa\nbbbba\n')
             gf.flush()
             pw = pwd_guess.PwdList(gf.name)
@@ -1831,9 +1861,10 @@ class RandomWalkGuesserTest(unittest.TestCase):
                         (self.TEST_GUESS_WIDE_EXPECTED_AAAA if pwd == 'aaaa'
                          else self.TEST_GUESS_WIDE_EXPECTED_BBBBA), delta = 2)
 
+    @unittest.skipIf(not RUN_SLOW_TESTS, "skipping slow tests")
     def test_guess_simulated(self):
-        with tempfile.NamedTemporaryFile(mode = 'w') as gf, \
-             tempfile.NamedTemporaryFile() as intermediatef:
+        with tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR) as gf, \
+             tempfile.NamedTemporaryFile(dir=TMPDIR) as intermediatef:
             gf.write('aaaa\nbbbBa\n')
             gf.flush()
             pw = pwd_guess.PwdList(gf.name)
@@ -1876,7 +1907,7 @@ class RandomWalkGuesserTest(unittest.TestCase):
                     self.assertAlmostEqual(
                         prob, 0.00016384 if pwd == 'aaaa' else 0.0016777216)
                     self.assertAlmostEqual(
-                        float(gn), 397 if pwd == 'aaaa' else 137, delta = 20)
+                        float(gn), 397 if pwd == 'aaaa' else 137, delta = 30)
 
 class RandomGeneratorTest(unittest.TestCase):
     def test_generate(self):
@@ -1913,7 +1944,7 @@ class RandomGeneratorTest(unittest.TestCase):
 
     def test_rare(self):
         num_passwords = 100
-        with tempfile.NamedTemporaryFile(mode = 'w') as gf:
+        with tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR) as gf:
             config = pwd_guess.ModelDefaults(
                 char_bag = 'abAB\n', min_len = 3, max_len = 5,
                 random_walk_seed_num = num_passwords,
@@ -1965,7 +1996,7 @@ class DelAmicoRandomWalkTest(RandomWalkGuesserTest):
         return pwd_guess.GuesserBuilder(config)
 
     def test_create(self):
-        with tempfile.NamedTemporaryFile(mode = 'w') as pwdfile:
+        with tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR) as pwdfile:
             pwdfile.write('aaaaa\nbbbbb\n')
             pwdfile.flush()
             builder = self.make_builder(pwd_guess.ModelDefaults(
@@ -1979,7 +2010,7 @@ class DelAmicoRandomWalkTest(RandomWalkGuesserTest):
             self.assertEqual(self.expected_class, type(guesser))
 
     def test_seed_data(self):
-        with tempfile.NamedTemporaryFile(mode = 'w') as pwdfile:
+        with tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR) as pwdfile:
             pwdfile.write('aaaaa\nbbbbb\n')
             pwdfile.flush()
             config = pwd_guess.ModelDefaults(
@@ -1996,7 +2027,7 @@ class DelAmicoRandomWalkTest(RandomWalkGuesserTest):
             self.assertEqual(g, [('', 1, 1, 0), ('', 1, 1, 0)])
 
     def test_next_nodes(self):
-        with tempfile.NamedTemporaryFile(mode = 'w') as pwdfile:
+        with tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR) as pwdfile:
             pwdfile.write('aaaaa\nbbbbb\n')
             pwdfile.flush()
             config = pwd_guess.ModelDefaults(
@@ -2014,9 +2045,10 @@ class DelAmicoRandomWalkTest(RandomWalkGuesserTest):
             self.assertEqual(list(next), [
                 ('aa\n', .25, .5), ('aaa', .125, .25), ('aab', .125, .25)])
 
+    @unittest.skipIf(not RUN_SLOW_TESTS, "skipping slow tests")
     def test_guess_simulated_policy(self):
-        with tempfile.NamedTemporaryFile(mode = 'w') as gf, \
-             tempfile.NamedTemporaryFile() as intermediatef:
+        with tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR) as gf, \
+             tempfile.NamedTemporaryFile(dir=TMPDIR) as intermediatef:
             gf.write('aAaa\nbbbBa\n')
             gf.flush()
             pw = pwd_guess.PwdList(gf.name)
@@ -2060,7 +2092,7 @@ class DelAmicoRandomWalkTest(RandomWalkGuesserTest):
                         float(prob),
                         4.096e-05 if pwd == 'aAaa' else 0.0016777216)
                     self.assertAlmostEqual(
-                        float(gn), 613 if pwd == 'aAaa' else 100, delta = 20)
+                        float(gn), 613 if pwd == 'aAaa' else 100, delta = 30)
 
     @unittest.skip('Not supported anymore')
     def test_guess_simulated_policy_tokens(self):
@@ -2069,8 +2101,8 @@ class DelAmicoRandomWalkTest(RandomWalkGuesserTest):
             for i in range(len(input_vec)):
                 answer.append([[0.25, 0.10, 0.05, 0.3, 0.1, 0.2].copy()])
             return answer
-        with tempfile.NamedTemporaryFile(mode = 'w') as gf, \
-             tempfile.NamedTemporaryFile() as intermediatef:
+        with tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR) as gf, \
+             tempfile.NamedTemporaryFile(dir=TMPDIR) as intermediatef:
             gf.write('aAaa\nbbbBa\nabBBa\n')
             gf.flush()
             pw = pwd_guess.PwdList(gf.name)
@@ -2122,15 +2154,16 @@ class DelAmicoRandomWalkTest(RandomWalkGuesserTest):
                     self.assertTrue(pwd in expected)
                     self.assertAlmostEqual(float(prob), float(expected[pwd][0]))
                     self.assertAlmostEqual(
-                        float(gn), float(expected[pwd][1]), delta = 20)
+                        float(gn), float(expected[pwd][1]), delta = 30)
 
 class ParallelRandomWalkGuesserTest(unittest.TestCase):
     def setUp(self):
         self.tempf = tempfile.NamedTemporaryFile(delete = False)
-        self.intermediate_dir = tempfile.mkdtemp()
-        self.archfile = tempfile.NamedTemporaryFile(mode = 'w', delete = False)
+        self.intermediate_dir = tempfile.mkdtemp(dir=TMPDIR)
+        self.archfile = tempfile.NamedTemporaryFile(
+            mode = 'w', delete = False, dir=TMPDIR)
         self.weightfile = tempfile.NamedTemporaryFile(
-            mode = 'w', delete = False)
+            mode = 'w', delete = False, dir=TMPDIR)
         self.serializer = Mock()
         self.serializer.archfile = self.archfile.name
         self.serializer.weightfile = self.weightfile.name
@@ -2147,8 +2180,8 @@ class ParallelRandomWalkGuesserTest(unittest.TestCase):
         os.remove(self.weightfile.name)
 
     def test_arglist(self):
-        with tempfile.NamedTemporaryFile(mode = 'w') as gf, \
-             tempfile.NamedTemporaryFile() as intermediatef:
+        with tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR) as gf, \
+             tempfile.NamedTemporaryFile(dir=TMPDIR) as intermediatef:
             gf.write('aaaa\nbbbBa\n')
             gf.flush()
             config = pwd_guess.ModelDefaults(
@@ -2183,9 +2216,10 @@ class ParallelRandomWalkGuesserTest(unittest.TestCase):
                              set([('bbbBa', 0.0016777216000000014),
                                   ('aaaa', 0.00016384000000000011)]))
 
+    @unittest.skipIf(not RUN_SLOW_TESTS, "skipping slow tests")
     def test_guess_simulated(self):
-        with tempfile.NamedTemporaryFile(mode = 'w') as gf, \
-             tempfile.NamedTemporaryFile() as intermediatef:
+        with tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR) as gf, \
+             tempfile.NamedTemporaryFile(dir=TMPDIR) as intermediatef:
             gf.write('aaaa\nbbbBa\n')
             gf.flush()
             pw = pwd_guess.PwdList(gf.name)
@@ -2228,7 +2262,7 @@ class ParallelRandomWalkGuesserTest(unittest.TestCase):
                     pwd, prob, gn, *_ = row
                     self.assertTrue(pwd == 'aaaa' or pwd == 'bbbBa')
                     self.assertAlmostEqual(float(prob), 0.00016384 if pwd == 'aaaa' else 0.0016777216)
-                    self.assertAlmostEqual(float(gn), 397 if pwd == 'aaaa' else 137, delta = 20)
+                    self.assertAlmostEqual(float(gn), 397 if pwd == 'aaaa' else 137, delta = 30)
 
 class PolicyTests(unittest.TestCase):
     def test_basic(self):
@@ -2292,7 +2326,7 @@ class PolicyTests(unittest.TestCase):
         self.assertTrue(policy.pwd_complies('999Apple*'))
         self.assertTrue(policy.pwd_complies('111*Asdf'))
         self.assertTrue(policy.pwd_complies('111*jjjJ'))
-        with tempfile.NamedTemporaryFile(mode = 'w') as temp_bl:
+        with tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR) as temp_bl:
             temp_bl.write('asdf\n')
             temp_bl.write('apple\n')
             temp_bl.flush()
@@ -2331,7 +2365,7 @@ class PolicyTests(unittest.TestCase):
         self.assertTrue(policy.pwd_complies('999Apple*'))
         self.assertTrue(policy.pwd_complies('111*Asdf'))
         self.assertTrue(policy.pwd_complies('111*jjjJ'))
-        with tempfile.NamedTemporaryFile(mode = 'w') as temp_bl:
+        with tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR) as temp_bl:
             temp_bl.write('asdf\n')
             temp_bl.write('apple\n')
             temp_bl.flush()
@@ -2455,9 +2489,9 @@ def get_available_gpus():
     local_device_protos = device_lib.list_local_devices()
     return [x.name for x in local_device_protos if x.device_type == 'GPU']
 
-class TestMainMultiGPU(unittest.TestCase):
+class TestMainConfigurations(unittest.TestCase):
     def setUp(self):
-        self.test_dir = tempfile.mkdtemp()
+        self.test_dir = tempfile.mkdtemp(dir=TMPDIR)
 
     def tearDown(self):
         shutil.rmtree(self.test_dir)
@@ -2465,234 +2499,202 @@ class TestMainMultiGPU(unittest.TestCase):
     def _temp_path(self, name):
         return os.path.join(self.test_dir, name)
 
-    @unittest.skipIf(len(get_available_gpus()) < 2,
+    def _run_with_config(self, config_items):
+        random_password_chars = (
+            string.ascii_uppercase + string.ascii_lowercase + string.digits)
+        test_data_file = self._temp_path('test_data.txt')
+        config_items['args']['arch_file'] = self._temp_path("arch.json")
+        config_items['args']['weight_file'] = self._temp_path("weight.h5")
+        config_items['args']['log_file'] = self._temp_path("train_log.txt")
+        config_items['args']['pwd_file'] = [ test_data_file ]
+        config_items['args']['pwd_format'] = [ 'list' ]
+        config_items['config']["intermediate_fname"] = self._temp_path(
+            "intermediate_data.sqlite")
+
+        with open(test_data_file, 'w') as test_data:
+            for i in range(40):
+                random_password = ''.join([
+                    random.choice(random_password_chars)
+                    for j in range(random.randrange(2, 18))])
+                test_data.write('%s\n' % random_password)
+
+        config_file = self._temp_path('config.json')
+        with open(config_file, 'w') as config_stream:
+            json.dump(config_items, config_stream)
+
+        parser = pwd_guess.make_parser()
+        args = vars(parser.parse_args(['--config-args', config_file]))
+        pwd_guess.main(args)
+
+    @unittest.skipIf((len(get_available_gpus()) < 2) or (not RUN_SLOW_TESTS),
                      "Atleast 2 GPUs not available for testing multi-gpu functionality")
+    def test_main_multigpu(self):
+        self._run_with_config({
+            "args" : {
+                "multi_gpu" :2
+            },
+            "config" : {
+                "training_chunk" : 10,
+                "training_main_memory_chunk": 10000000,
+                "min_len" : 1,
+                "fork_length" : 0,
+                "max_len" : 30,
+                "context_length" : 10,
+                "chunk_print_interval" : 100,
+                "layers" : 2,
+                "hidden_size" : 1000,
+                "generations" : 3,
+                "training_accuracy_threshold" : -1,
+                "train_test_ratio" : 20,
+                "model_type" : "LSTM",
+                "tokenize_words" : False,
+                "most_common_token_count" : 2000,
+                "bidirectional_rnn" : False,
+                "train_backwards" : True,
+                "dense_layers" : 1,
+                "dense_hidden_size" : 512,
+                "secondary_training" : False,
+                "simulated_frequency_optimization" : False,
+                "randomize_training_order" : True,
+                "uppercase_character_optimization" : True,
+                "rare_character_optimization" : True,
+                "rare_character_optimization_guessing" : True,
+                "parallel_guessing" : False,
+                "lower_probability_threshold" : 1e-7,
+                "chunk_size_guesser" : 40000,
+                "random_walk_seed_num" : 100000,
+                "max_gpu_prediction_size" : 10000,
+                "random_walk_seed_iterations" : 1,
+                "no_end_word_cache" : True,
+                "save_model_versioned" : True
+            }
+        })
+
+    @unittest.skipIf(not RUN_SLOW_TESTS, "skipping slow tests")
     def test_main(self):
-        print("Running multi gpu test")
-        random_password_chars = (
-            string.ascii_uppercase + string.ascii_lowercase + string.digits)
-        test_data_file = self._temp_path('test_data.txt')
-        with open(test_data_file, 'w') as test_data:
-            for i in range(10):
-                random_password = ''.join([
-                    random.choice(random_password_chars) for j in range(10)])
-                test_data.write('%s\n' % random_password)
+        self._run_with_config({
+            "args" : {},
+            "config" : {
+                "training_chunk" : 10,
+                "training_main_memory_chunk": 10000000,
+                "min_len" : 1,
+                "fork_length" : 0,
+                "max_len" : 30,
+                "context_length" : 10,
+                "chunk_print_interval" : 100,
+                "layers" : 2,
+                "hidden_size" : 1000,
+                "generations" : 3,
+                "training_accuracy_threshold" : -1,
+                "train_test_ratio" : 20,
+                "model_type" : "LSTM",
+                "tokenize_words" : False,
+                "most_common_token_count" : 2000,
+                "train_backwards" : True,
+                "dense_layers" : 1,
+                "dense_hidden_size" : 512,
+                "secondary_training" : False,
+                "simulated_frequency_optimization" : False,
+                "randomize_training_order" : True,
+                "uppercase_character_optimization" : True,
+                "rare_character_optimization" : True,
+                "rare_character_optimization_guessing" : True,
+                "parallel_guessing" : False,
+                "lower_probability_threshold" : 1e-7,
+                "chunk_size_guesser" : 40000,
+                "random_walk_seed_num" : 100000,
+                "max_gpu_prediction_size" : 10000,
+                "random_walk_seed_iterations" : 1,
+                "no_end_word_cache" : True,
+                "save_model_versioned" : True,
+                "tensorboard" : True,
+                "tensorboard_dir" : self.test_dir
+            }
+        })
 
-        config_file = self._temp_path('config.json')
-        with open(config_file, 'w') as config:
-            json.dump({
-                "args" : {
-                    "arch_file" : self._temp_path("arch.json"),
-                    "weight_file" : self._temp_path("weight.h5"),
-                    "log_file" : self._temp_path("train_log.txt"),
-                    "pwd_file" : [
-                        test_data_file
-                    ],
-                    "pwd_format" : [
-                        "list"
-                    ],
-                    "multi_gpu" :2
-                },
-                "config" : {
-                    "training_chunk" : 10,
-                    "training_main_memory_chunk": 10000000,
-                    "min_len" : 1,
-                    "fork_length" : 0,
-                    "max_len" : 30,
-                    "context_length" : 10,
-                    "chunk_print_interval" : 100,
-                    "layers" : 2,
-                    "hidden_size" : 1000,
-                    "generations" : 3,
-                    "training_accuracy_threshold" : -1,
-                    "train_test_ratio" : 20,
-                    "model_type" : "LSTM",
-                    "tokenize_words" : False,
-                    "most_common_token_count" : 2000,
-                    "bidirectional_rnn" : False,
-                    "train_backwards" : True,
-                    "dense_layers" : 1,
-                    "dense_hidden_size" : 512,
-                    "secondary_training" : False,
-                    "simulated_frequency_optimization" : False,
-                    "randomize_training_order" : True,
-                    "uppercase_character_optimization" : True,
-                    "rare_character_optimization" : True,
-                    "rare_character_optimization_guessing" : True,
-                    "parallel_guessing" : False,
-                    "lower_probability_threshold" : 1e-7,
-                    "chunk_size_guesser" : 40000,
-                    "random_walk_seed_num" : 100000,
-                    "max_gpu_prediction_size" : 10000,
-                    "random_walk_seed_iterations" : 1,
-                    "no_end_word_cache" : True,
-                    "intermediate_fname" : self._temp_path(
-                        "intermediate_data.sqlite"),
-                    "save_model_versioned" : True
-                }
-            }, config)
-
-        parser = pwd_guess.make_parser()
-        args = vars(parser.parse_args(['--config-args', config_file]))
-        pwd_guess.main(args)
-
-class TestMain(unittest.TestCase):
-    def setUp(self):
-        self.test_dir = tempfile.mkdtemp()
-
-    def tearDown(self):
-        shutil.rmtree(self.test_dir)
-
-    def _temp_path(self, name):
-        return os.path.join(self.test_dir, name)
-
-    def test_main(self):
-        random_password_chars = (
-            string.ascii_uppercase + string.ascii_lowercase + string.digits)
-        test_data_file = self._temp_path('test_data.txt')
-        with open(test_data_file, 'w') as test_data:
-            for i in range(10):
-                random_password = ''.join([
-                    random.choice(random_password_chars) for j in range(10)])
-                test_data.write('%s\n' % random_password)
-
-        config_file = self._temp_path('config.json')
-        with open(config_file, 'w') as config:
-            json.dump({
-                "args" : {
-                    "arch_file" : self._temp_path("arch.json"),
-                    "weight_file" : self._temp_path("weight.h5"),
-                    "log_file" : self._temp_path("train_log.txt"),
-                    "pwd_file" : [
-                        test_data_file
-                    ],
-                    "pwd_format" : [
-                        "list"
-                    ]
-                },
-                "config" : {
-                    "training_chunk" : 10,
-                    "training_main_memory_chunk": 10000000,
-                    "min_len" : 1,
-                    "fork_length" : 0,
-                    "max_len" : 30,
-                    "context_length" : 10,
-                    "chunk_print_interval" : 100,
-                    "layers" : 2,
-                    "hidden_size" : 1000,
-                    "generations" : 3,
-                    "training_accuracy_threshold" : -1,
-                    "train_test_ratio" : 20,
-                    "model_type" : "LSTM",
-                    "tokenize_words" : False,
-                    "most_common_token_count" : 2000,
-
-                    "bidirectional_rnn" : False,
-                    "train_backwards" : True,
-
-                    "dense_layers" : 1,
-                    "dense_hidden_size" : 512,
-                    "secondary_training" : False,
-
-                    "simulated_frequency_optimization" : False,
-
-                    "randomize_training_order" : True,
-                    "uppercase_character_optimization" : True,
-                    "rare_character_optimization" : True,
-
-                    "rare_character_optimization_guessing" : True,
-                    "parallel_guessing" : False,
-                    "lower_probability_threshold" : 1e-7,
-                    "chunk_size_guesser" : 40000,
-                    "random_walk_seed_num" : 100000,
-                    "max_gpu_prediction_size" : 10000,
-                    "random_walk_seed_iterations" : 1,
-                    "no_end_word_cache" : True,
-                    "intermediate_fname" : self._temp_path(
-                        "intermediate_data.sqlite"),
-                    "save_model_versioned" : True,
-                    "tensorboard" : True,
-                    "tensorboard_dir" : self.test_dir
-                }
-            }, config)
-
-        parser = pwd_guess.make_parser()
-        args = vars(parser.parse_args(['--config-args', config_file]))
-        pwd_guess.main(args)
-
+    @unittest.skipIf(not RUN_SLOW_TESTS, "skipping slow tests")
     def test_main_no_tensorboard(self):
-        random_password_chars = (
-            string.ascii_uppercase + string.ascii_lowercase + string.digits)
-        test_data_file = self._temp_path('test_data.txt')
-        with open(test_data_file, 'w') as test_data:
-            for i in range(10):
-                random_password = ''.join([
-                    random.choice(random_password_chars) for j in range(10)])
-                test_data.write('%s\n' % random_password)
+        self._run_with_config({
+            "args" : {},
+            "config" : {
+                "training_chunk" : 10,
+                "training_main_memory_chunk": 10000000,
+                "min_len" : 1,
+                "fork_length" : 0,
+                "max_len" : 30,
+                "context_length" : 10,
+                "chunk_print_interval" : 100,
+                "layers" : 2,
+                "hidden_size" : 1000,
+                "generations" : 3,
+                "training_accuracy_threshold" : -1,
+                "train_test_ratio" : 20,
+                "model_type" : "LSTM",
+                "tokenize_words" : False,
+                "most_common_token_count" : 2000,
+                "train_backwards" : True,
+                "dense_layers" : 1,
+                "dense_hidden_size" : 512,
+                "secondary_training" : False,
+                "simulated_frequency_optimization" : False,
+                "randomize_training_order" : True,
+                "uppercase_character_optimization" : True,
+                "rare_character_optimization" : True,
+                "rare_character_optimization_guessing" : True,
+                "parallel_guessing" : False,
+                "lower_probability_threshold" : 1e-7,
+                "chunk_size_guesser" : 40000,
+                "random_walk_seed_num" : 100000,
+                "max_gpu_prediction_size" : 10000,
+                "random_walk_seed_iterations" : 1,
+                "no_end_word_cache" : True,
+                "save_model_versioned" : True,
+                "tensorboard" : False,
+                "tensorboard_dir" : self.test_dir
+            }
+        })
 
-        config_file = self._temp_path('config.json')
-        with open(config_file, 'w') as config:
-            json.dump({
-                "args" : {
-                    "arch_file" : self._temp_path("arch.json"),
-                    "weight_file" : self._temp_path("weight.h5"),
-                    "log_file" : self._temp_path("train_log.txt"),
-                    "pwd_file" : [
-                        test_data_file
-                    ],
-                    "pwd_format" : [
-                        "list"
-                    ]
-                },
-                "config" : {
-                    "training_chunk" : 10,
-                    "training_main_memory_chunk": 10000000,
-                    "min_len" : 1,
-                    "fork_length" : 0,
-                    "max_len" : 30,
-                    "context_length" : 10,
-                    "chunk_print_interval" : 100,
-                    "layers" : 2,
-                    "hidden_size" : 1000,
-                    "generations" : 3,
-                    "training_accuracy_threshold" : -1,
-                    "train_test_ratio" : 20,
-                    "model_type" : "LSTM",
-                    "tokenize_words" : False,
-                    "most_common_token_count" : 2000,
-
-                    "bidirectional_rnn" : False,
-                    "train_backwards" : True,
-
-                    "dense_layers" : 1,
-                    "dense_hidden_size" : 512,
-                    "secondary_training" : False,
-
-                    "simulated_frequency_optimization" : False,
-
-                    "randomize_training_order" : True,
-                    "uppercase_character_optimization" : True,
-                    "rare_character_optimization" : True,
-
-                    "rare_character_optimization_guessing" : True,
-                    "parallel_guessing" : False,
-                    "lower_probability_threshold" : 1e-7,
-                    "chunk_size_guesser" : 40000,
-                    "random_walk_seed_num" : 100000,
-                    "max_gpu_prediction_size" : 10000,
-                    "random_walk_seed_iterations" : 1,
-                    "no_end_word_cache" : True,
-                    "intermediate_fname" : self._temp_path(
-                        "intermediate_data.sqlite"),
-                    "save_model_versioned" : True,
-                    "tensorboard" : False,
-                    "tensorboard_dir" : self.test_dir
-                }
-            }, config)
-
-        parser = pwd_guess.make_parser()
-        args = vars(parser.parse_args(['--config-args', config_file]))
-        pwd_guess.main(args)
+    @unittest.skipIf(not RUN_SLOW_TESTS, "skipping slow tests")
+    def test_main_convolutional(self):
+        self._run_with_config({
+            "args" : {},
+            "config" : {
+                "training_chunk" : 10,
+                "training_main_memory_chunk": 10000000,
+                "min_len" : 1,
+                "fork_length" : 0,
+                "max_len" : 30,
+                "context_length" : 10,
+                "chunk_print_interval" : 100,
+                "layers" : 2,
+                "hidden_size" : 1000,
+                "generations" : 3,
+                "training_accuracy_threshold" : -1,
+                "train_test_ratio" : 20,
+                "model_type" : "Conv1D",
+                "tokenize_words" : False,
+                "most_common_token_count" : 2000,
+                "train_backwards" : True,
+                "dense_layers" : 1,
+                "dense_hidden_size" : 512,
+                "secondary_training" : False,
+                "simulated_frequency_optimization" : False,
+                "randomize_training_order" : True,
+                "uppercase_character_optimization" : True,
+                "rare_character_optimization" : True,
+                "rare_character_optimization_guessing" : True,
+                "parallel_guessing" : False,
+                "lower_probability_threshold" : 1e-7,
+                "chunk_size_guesser" : 40000,
+                "random_walk_seed_num" : 100000,
+                "max_gpu_prediction_size" : 10000,
+                "random_walk_seed_iterations" : 1,
+                "no_end_word_cache" : True,
+                "save_model_versioned" : True,
+                "tensorboard" : False,
+                "tensorboard_dir" : self.test_dir
+            }
+        })
 
 
 if __name__ == '__main__':

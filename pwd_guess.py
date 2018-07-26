@@ -42,9 +42,7 @@ except AttributeError:
 
 from keras.models import Sequential, model_from_json
 from keras.layers.core import Activation, Dense, Dropout
-from keras.layers import TimeDistributed
-from keras.layers import recurrent
-import keras.utils.layer_utils as layer_utils
+from keras.layers import TimeDistributed, Flatten, Conv1D, recurrent
 import keras.utils
 from keras.callbacks import TensorBoard
 
@@ -190,7 +188,7 @@ class NodeTrie(BaseTrie):
         return self.random_iterate()
 
 class CharacterTable(object):
-    def __init__(self, chars, maxlen, padding_character=None):
+    def __init__(self, chars, maxlen, padding_character=False):
         self.chars = sorted(set(chars))
         self.char_indices = dict((c, i) for i, c in enumerate(self.chars))
         self.indices_char = dict((i, c) for i, c in enumerate(self.chars))
@@ -203,7 +201,7 @@ class CharacterTable(object):
         maxlen = maxlen if maxlen else self.maxlen
         if len(astring) > maxlen:
             return astring[len(astring) - maxlen:]
-        if self.padding_character is not None:
+        if self.padding_character:
             return astring + (PASSWORD_END * (maxlen - len(astring)))
         return astring
 
@@ -513,16 +511,6 @@ class ModelSerializer(object):
 
 serializer_type_list = {}
 
-model_type_dict = {
-    'GRU' : recurrent.GRU,
-    'LSTM' : recurrent.LSTM
-}
-
-if hasattr(recurrent, 'JZS1'):
-    model_type_dict['JZS1'] = recurrent.JZS1
-    model_type_dict['JZS2'] = recurrent.JZS2
-    model_type_dict['JZS3'] = recurrent.JZS3
-
 class ConfigurationException(Exception):
     pass
 
@@ -598,7 +586,8 @@ class ModelDefaults(object):
     guessing_secondary_training = False
     guesser_class = None
     freq_format = 'hex'
-    padding_character = None
+    padding_character = False
+    convolutional_kernel_size = 3
 
     def __init__(self, adict=None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -621,10 +610,10 @@ class ModelDefaults(object):
 
         with open(self.intermediate_fname, 'r') as info:
             info_as_str = info.read()
-            if info_as_str:
-                return json.loads(info_as_str)
-            else:
+            if not info_as_str:
                 return {}
+
+            return json.loads(info_as_str)
 
     def _write_intermediate_data(self):
         if self.intermediate_fname == MEMORY_ONLY:
@@ -706,10 +695,6 @@ class ModelDefaults(object):
         if self.context_length > self.max_len:
             raise ConfigurationException('Expected context_length <= max_len')
 
-        if self.model_type not in model_type_dict:
-            raise ConfigurationException(
-                'Unknown model type: %s' % self.model_type)
-
         if self.training_main_memory_chunksize <= self.training_chunk:
             raise ConfigurationException(
                 'Expected training_main_memory_chunksize > training_chunk')
@@ -726,9 +711,6 @@ class ModelDefaults(object):
         return dict([(key, value) for key, value in answer.items() if (
             key[0] != '_' and not hasattr(value, '__call__')
             and not isinstance(value, staticmethod))])
-
-    def model_type_exec(self):
-        return model_type_dict[self.model_type]
 
     def set_intermediate_info(self, key, value):
         self._intermediate_data[key] = value
@@ -927,33 +909,48 @@ class Trainer(object):
             self.ctable.encode_into(y_vec, y_str_list)
         return y_vec
 
-    def _make_layer_input(self):
-        return self.config.model_type_exec()(
-            self.config.hidden_size,
-            input_shape=(self.config.context_length, self.ctable.vocab_size),
-            return_sequences=self.config.layers > 0,
-            go_backwards=self.config.train_backwards)
+    def _make_layer(self, **kwargs):
+        recurrent_train_backwards = self.config.train_backwards
+        model_type = self.config.model_type
+        hidden_size = self.config.hidden_size
+        if model_type == 'GRU':
+            return recurrent.GRU(
+                hidden_size,
+                return_sequences=True,
+                go_backwards=recurrent_train_backwards,
+                **kwargs)
+        elif model_type == 'LSTM':
+            return recurrent.LSTM(
+                hidden_size,
+                return_sequences=True,
+                go_backwards=recurrent_train_backwards,
+                **kwargs)
+        elif model_type == 'Conv1D':
+            return Conv1D(
+                hidden_size,
+                self.config.convolutional_kernel_size,
+                **kwargs)
 
-    def _make_layer(self, is_last=False):
-        return self.config.model_type_exec()(
-            self.config.hidden_size,
-            return_sequences=not is_last,
-            go_backwards=self.config.train_backwards)
+        raise ConfigurationException('Unknown model_type: %s' % model_type)
 
     def _return_model(self):
         model = Sequential()
 
         # Add the first input layer
-        self.feature_layers.append(self._make_layer_input())
+        self.feature_layers.append(
+            self._make_layer(
+                input_shape=(
+                    self.config.context_length, self.ctable.vocab_size)))
 
         # Add the main model layers. These layers will not be trainable during
         # secondary training.
-        for i in range(self.config.layers):
+        for _ in range(self.config.layers):
             if self.config.dropouts:
                 self.feature_layers.append(Dropout(self.config.dropout_ratio))
 
-            self.feature_layers.append(
-                self._make_layer(i == (self.config.layers - 1)))
+            self.feature_layers.append(self._make_layer())
+
+        self.feature_layers.append(Flatten())
 
         # Add any additional classification layers. These layers may be
         # trainable during secondary training.
