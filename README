@@ -211,6 +211,11 @@ dense_hidden_size - Size of dense layer.
 
 layers - Number of hidden layers.
 
+embedding_layer - Whether to use a character embedding layer as the first layer
+
+embedding_size - The size of the character embedding layer. embedding_layer has
+    to be set true along with this option
+
 max_len - Maximum length of any password in training data. This can be
   larger than all passwords in the data and the network may output guesses
   that are this many characters long.

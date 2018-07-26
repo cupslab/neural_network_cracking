@@ -42,7 +42,7 @@ except AttributeError:
 
 from keras.models import Sequential, model_from_json
 from keras.layers.core import Activation, Dense, Dropout
-from keras.layers import TimeDistributed, Flatten, Conv1D, recurrent
+from keras.layers import TimeDistributed, Flatten, Conv1D, recurrent, Embedding
 import keras.utils
 from keras.callbacks import TensorBoard
 
@@ -188,7 +188,7 @@ class NodeTrie(BaseTrie):
         return self.random_iterate()
 
 class CharacterTable(object):
-    def __init__(self, chars, maxlen, padding_character=False):
+    def __init__(self, chars, maxlen, embedding=False, padding_character=False):
         self.chars = sorted(set(chars))
         self.char_indices = dict((c, i) for i, c in enumerate(self.chars))
         self.indices_char = dict((i, c) for i, c in enumerate(self.chars))
@@ -196,6 +196,7 @@ class CharacterTable(object):
         self.vocab_size = len(self.chars)
         self.char_list = self.chars
         self.padding_character = padding_character
+        self.embedding = embedding
 
     def pad_to_len(self, astring, maxlen=None):
         maxlen = maxlen if maxlen else self.maxlen
@@ -208,15 +209,25 @@ class CharacterTable(object):
     def encode_many(self, string_list, maxlen=None):
         maxlen = maxlen if maxlen else self.maxlen
         x_str_list = map(lambda x: self.pad_to_len(x, maxlen), string_list)
-        x_vec = np.zeros((len(string_list), maxlen, len(self.chars)),
+        if self.embedding:
+            x_vec = np.zeros(shape=(len(string_list), maxlen), dtype=np.int8)
+        else:
+            x_vec = np.zeros((len(string_list), maxlen, self.vocab_size),
                          dtype=np.bool)
         for i, xstr in enumerate(x_str_list):
             self.encode_into(x_vec[i], xstr)
         return x_vec
 
+    def y_encode_into(self, Y, C):
+        for i, c in enumerate(C):
+            Y[i, self.char_indices[c]] = 1
+
     def encode_into(self, X, C):
         for i, c in enumerate(C):
-            X[i, self.char_indices[c]] = 1
+            if self.embedding:
+                X[i] = self.char_indices[c]
+            else:
+                X[i, self.char_indices[c]] = 1
 
     def encode(self, C, maxlen=None):
         maxlen = maxlen if maxlen else self.maxlen
@@ -245,14 +256,16 @@ class CharacterTable(object):
                 config.char_bag, config.context_length,
                 config.get_intermediate_info('rare_character_bag'),
                 config.uppercase_character_optimization,
-                padding_character=config.padding_character)
+                padding_character=config.padding_character,
+                embedding=config.embedding_layer)
 
         return CharacterTable(config.char_bag, config.context_length,
-                              padding_character=config.padding_character)
+                              padding_character=config.padding_character,
+                              embedding=config.embedding_layer)
 
 class OptimizingCharacterTable(CharacterTable):
     def __init__(self, chars, maxlen, rare_characters, uppercase,
-                 padding_character=None):
+                 embedding=False, padding_character=None):
         # pylint: disable=too-many-branches
         if uppercase:
             self.rare_characters = ''.join(
@@ -284,7 +297,7 @@ class OptimizingCharacterTable(CharacterTable):
                         "expected %s to be in %s" % (c.lower(), chars))
 
                 self.rare_character_preimage[c.lower()] = [c, c.lower()]
-        super().__init__(char_bag, maxlen, padding_character)
+        super().__init__(char_bag, maxlen, embedding, padding_character)
         for key in self.rare_dict:
             self.char_indices[key] = self.char_indices[self.rare_dict[key]]
         translate_table = {}
@@ -350,6 +363,7 @@ class TokenizingCharacterTable(DelegatingCharacterTable):
         self.vocab_size = len(self.char_list)
         self.indices_char = {}
         self.char_indices = {}
+        self.embedding = config.embedding_layer if config.embedding_layer else False
         for i, token in enumerate(self.token_list):
             self.indices_char[i] = token
             self.char_indices[token] = i
@@ -366,7 +380,10 @@ class TokenizingCharacterTable(DelegatingCharacterTable):
 
     def encode_many(self, string_list, maxlen=None):
         maxlen = maxlen if maxlen else self.maxlen
-        x_vec = np.zeros((len(string_list), maxlen, self.vocab_size),
+        if self.embedding:
+            x_vec = np.zeros(shape=(len(string_list), maxlen), dtype=np.int8)
+        else:
+            x_vec = np.zeros((len(string_list), maxlen, self.vocab_size),
                          dtype=np.bool)
         for i, xstr in enumerate(string_list):
             self.encode_into(x_vec[i], xstr)
@@ -383,17 +400,26 @@ class TokenizingCharacterTable(DelegatingCharacterTable):
         if isinstance(C, str):
             C = self.tokenizer.tokenize(self.real_ctable.translate(C))
         for i, token in enumerate(C[-self.maxlen:]):
-            X[i, self.get_char_index(token)] = 1
+            if self.embedding:
+                X[i] = self.get_char_index(token)
+            else:
+                X[i, self.get_char_index(token)] = 1
         if len(C) < X.shape[0]:
             for j in range(len(C), self.maxlen):
-                X[j, self.get_char_index(PASSWORD_END)] = 1
+                if self.embedding:
+                    X[j] = self.get_char_index(PASSWORD_END)
+                else:
+                    X[j, self.get_char_index(PASSWORD_END)] = 1
 
     def translate(self, pwd):
         return self.real_ctable.translate(''.join(pwd))
 
     def encode(self, ystr, maxlen=None):
         maxlen = maxlen if maxlen else self.maxlen
-        X = np.zeros((maxlen, self.vocab_size), dtype=np.bool)
+        if self.embedding:
+            X = np.zeros((maxlen), dtype=np.int8)
+        else:
+            X = np.zeros((maxlen, self.vocab_size), dtype=np.bool)
         self.encode_into(X, ystr)
         return X
 
@@ -588,6 +614,8 @@ class ModelDefaults(object):
     freq_format = 'hex'
     padding_character = False
     convolutional_kernel_size = 3
+    embedding_layer = False
+    embedding_size = 8
 
     def __init__(self, adict=None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -686,6 +714,11 @@ class ModelDefaults(object):
             logging.warning(
                 'Without rare_character_optimization_guessing setting,'
                 ' output guesses may ignore case or special characters')
+
+        if self.embedding_layer:
+            if not self.embedding_size:
+                raise ConfigurationException(
+                    'Expected embedding_size when using embedding_layer=True')
 
         if self.guess_serialization_method not in serializer_type_list:
             raise ConfigurationException(
@@ -906,7 +939,7 @@ class Trainer(object):
         else:
             y_vec = np.zeros((len(y_str_list), self.ctable.vocab_size),
                              dtype=np.bool)
-            self.ctable.encode_into(y_vec, y_str_list)
+            self.ctable.y_encode_into(y_vec, y_str_list)
         return y_vec
 
     def _make_layer(self, **kwargs):
@@ -936,11 +969,21 @@ class Trainer(object):
     def _return_model(self):
         model = Sequential()
 
-        # Add the first input layer
-        self.feature_layers.append(
-            self._make_layer(
-                input_shape=(
-                    self.config.context_length, self.ctable.vocab_size)))
+        # Add the first input layer. If embedding is enabled, we add a different
+        # layer which does not have the input_shape defined
+        if self.config.embedding_layer:
+            self.feature_layers.append(
+                Embedding(
+                    self.ctable.vocab_size,
+                    self.config.embedding_size,
+                    input_length=self.config.context_length))
+
+            self.feature_layers.append(self._make_layer())
+        else:
+            self.feature_layers.append(
+                self._make_layer(
+                    input_shape=(
+                        self.config.context_length, self.ctable.vocab_size)))
 
         # Add the main model layers. These layers will not be trainable during
         # secondary training.
