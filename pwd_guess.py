@@ -284,11 +284,9 @@ class ModelDefaults(object):
     save_always = True
     save_model_versioned = False
     randomize_training_order = True
-    toc_chunk_size = 1000
     model_optimizer = 'adam'
     guesser_intermediate_directory = 'guesser_files'
     cleanup_guesser_files = True
-    use_mmap = True
     early_stopping = False
     early_stopping_patience = 10000
     compute_stats = False
@@ -306,7 +304,6 @@ class ModelDefaults(object):
     pwd_list_weights = {}
     dropouts = False
     dropout_ratio = .25
-    fuzzy_training_smoothing = False
     tensorboard = False
     tensorboard_dir = "."
     context_length = None
@@ -691,7 +688,8 @@ class Trainer(object):
         # Add any additional classification layers. These layers may be
         # trainable during secondary training.
         for _ in range(self.config.dense_layers):
-            self.classification_layers.append(Dense(self.config.hidden_size))
+            self.classification_layers.append(
+                Dense(self.config.dense_hidden_size))
 
         # Append the final layer which has the correct dimensions for the output
         self.classification_layers.append(
