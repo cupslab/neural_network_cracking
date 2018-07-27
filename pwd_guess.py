@@ -72,120 +72,6 @@ def grouper(iterable, num, fillvalue=None):
                # pylint: disable=E1101
                itertools.zip_longest(*args, fillvalue=fillvalue))
 
-class BaseTrie(object):
-    def increment(self, aword, weight=1):
-        raise NotImplementedError()
-
-    def iterate(self, serial_type):
-        raise NotImplementedError()
-
-    def finish(self):
-        pass
-
-    config_keys = {}
-
-    @staticmethod
-    def fromConfig(config):
-        try:
-            return BaseTrie.config_keys[config.trie_implementation](config)
-        except KeyError:
-            logging.error('Cannot find trie type %s.',
-                          config.trie_implementation)
-
-BaseTrie.config_keys[None] = lambda _: BaseTrie()
-
-class NodeTrie(BaseTrie):
-    def __init__(self):
-        self.nodes = collections.defaultdict(NodeTrie)
-        self.weight = 0
-        self._size = 0
-
-    @staticmethod
-    def increment_optimized(anode, aword, weight=1):
-        root = anode
-        inc_str = aword
-        root.weight += weight
-        while len(inc_str) != 0:
-            next_char, inc_str = inc_str[0], inc_str[1:]
-            root.weight += weight
-            root = root.nodes[next_char]
-        root.weight += weight
-
-    def increment(self, aword, weight=1):
-        NodeTrie.increment_optimized(self, aword, weight)
-
-    def random_iterate(self, cur=''):
-        if cur != '':
-            yield (cur, self.weight)
-        for key in self.nodes:
-            others = self.nodes[key].random_iterate(cur + key)
-            for item in others:
-                yield item
-
-    def set(self, key, value):
-        node = self
-        for char in key:
-            node = node.nodes[char]
-        node.weight = value
-
-    def set_append(self, key, value):
-        node = self
-        for char in key:
-            node = node.nodes[char]
-        if isinstance(node.weight, list):
-            node.weight.append(value)
-        else:
-            node.weight = [value]
-
-    def get_completions(self, key):
-        answers = []
-        node = self
-        for char in key:
-            values = node.weight
-            if isinstance(values, list):
-                answers += values
-            if char in node.nodes:
-                node = node.nodes[char]
-            elif len(char) != 1:
-                for k in char:
-                    if k in node.nodes:
-                        node = node.nodes[k]
-                    else:
-                        return answers
-            else:
-                return answers
-        values = node.weight
-        if isinstance(values, list):
-            answers += values
-        return answers
-
-    def get_longest_prefix(self, key):
-        node = self
-        value, accum = 0, 0
-        for i, char in enumerate(key):
-            if char in node.nodes:
-                node = node.nodes[char]
-                if node.weight != 0:
-                    value, accum = node.weight, i + 1
-            else:
-                break
-        return key[:accum], value
-
-    def sampled_training(self, value=''):
-        node_children = [(k, self.nodes[k].weight)
-                         for k in sorted(self.nodes.keys())]
-        if len(node_children) == 0:
-            return
-        yield (value, node_children)
-        for key in self.nodes:
-            for item in self.nodes[key].sampled_training(value + key):
-                yield item
-
-    def iterate(self, serial_type):
-        if serial_type == 'fuzzy':
-            return self.sampled_training()
-
-        return self.random_iterate()
 
 class CharacterTable(object):
     def __init__(self, chars, maxlen, embedding=False, padding_character=False):
@@ -231,14 +117,13 @@ class CharacterTable(object):
 
     def encode(self, C, maxlen=None):
         maxlen = maxlen if maxlen else self.maxlen
-        X = np.zeros((maxlen, len(self.chars)))
+        if self.embedding:
+            X = np.zeros((maxlen), dtype=np.int8)
+        else:
+            X = np.zeros((maxlen, len(self.chars)))
+
         self.encode_into(X, C)
         return X
-
-    def decode(self, X, calc_argmax=True):
-        if calc_argmax:
-            X = X.argmax(axis=-1)
-        return ''.join(self.indices_char[x] for x in X)
 
     def get_char_index(self, character):
         return self.char_indices[character]
@@ -247,10 +132,8 @@ class CharacterTable(object):
         return astring
 
     @staticmethod
-    def fromConfig(config, tokenizer=True):
-        if tokenizer and config.tokenize_words:
-            return TokenizingCharacterTable(config)
-        elif (config.uppercase_character_optimization or
+    def fromConfig(config):
+        if (config.uppercase_character_optimization or
               config.rare_character_optimization):
             return OptimizingCharacterTable(
                 config.char_bag, config.context_length,
@@ -319,171 +202,6 @@ class OptimizingCharacterTable(CharacterTable):
     def translate(self, astring):
         return astring.translate(self.translate_table)
 
-class DelegatingCharacterTable(object):
-    def __init__(self, ctable):
-        self.real_ctable = ctable
-        self.chars = self.real_ctable.chars
-        self.vocab_size = len(self.chars)
-        self.char_list = self.chars
-
-    def encode_into(self, X, C):
-        return self.real_ctable.encode_into(X, C)
-
-    def encode(self, ystr, maxlen=None):
-        return self.real_ctable.encode(ystr, maxlen)
-
-    def get_char_index(self, char):
-        return self.real_ctable.get_char_index(char)
-
-    def decode(self, X, argmax=True):
-        return self.real_ctable.decode(X, argmax)
-
-    def translate(self, pwd):
-        return self.real_ctable.translate(pwd)
-
-    def encode_many(self, string_list, maxlen=None):
-        return self.real_ctable.encode_many(string_list, maxlen=maxlen)
-
-class TokenizingCharacterTable(DelegatingCharacterTable):
-    def __init__(self, config):
-        super().__init__(CharacterTable.fromConfig(config, False))
-        self.token_list = list(map(
-            self.real_ctable.translate,
-            config.get_intermediate_info('most_common_tokens')))
-        assert (len(self.token_list) > 0 and
-                len(self.token_list) <= config.most_common_token_count)
-        assert len(set(self.token_list)) == len(self.token_list)
-        if len(self.token_list) < config.most_common_token_count:
-            logging.warning(('Token list is smaller than specified. This can '
-                             'happen if the training set does not have enough '
-                             'tokens. Size is %s but expected %s. '),
-                            len(self.token_list),
-                            config.most_common_token_count)
-        self.char_list = self.token_list + list(self.chars)
-        self.vocab_size = len(self.char_list)
-        self.indices_char = {}
-        self.char_indices = {}
-        self.embedding = config.embedding_layer if config.embedding_layer else False
-        for i, token in enumerate(self.token_list):
-            self.indices_char[i] = token
-            self.char_indices[token] = i
-        for idx in self.real_ctable.indices_char:
-            self.indices_char[idx + len(self.token_list)] = (
-                self.real_ctable.indices_char[idx])
-        self.maxlen = self.real_ctable.maxlen
-        self.tokenizer = SpecificTokenizer(self.token_list)
-
-    def decode(self, X, argmax=True):
-        if argmax:
-            X = X.argmax(axis=-1)
-        return ''.join(self.indices_char[x] for x in X)
-
-    def encode_many(self, string_list, maxlen=None):
-        maxlen = maxlen if maxlen else self.maxlen
-        if self.embedding:
-            x_vec = np.zeros(shape=(len(string_list), maxlen), dtype=np.int8)
-        else:
-            x_vec = np.zeros((len(string_list), maxlen, self.vocab_size),
-                         dtype=np.bool)
-        for i, xstr in enumerate(string_list):
-            self.encode_into(x_vec[i], xstr)
-        return x_vec
-
-    def get_char_index(self, char):
-        char = self.real_ctable.translate(char)
-        if len(char) == 1:
-            return self.real_ctable.get_char_index(char) + len(self.token_list)
-
-        return self.char_indices[char]
-
-    def encode_into(self, X, C):
-        if isinstance(C, str):
-            C = self.tokenizer.tokenize(self.real_ctable.translate(C))
-        for i, token in enumerate(C[-self.maxlen:]):
-            if self.embedding:
-                X[i] = self.get_char_index(token)
-            else:
-                X[i, self.get_char_index(token)] = 1
-        if len(C) < X.shape[0]:
-            for j in range(len(C), self.maxlen):
-                if self.embedding:
-                    X[j] = self.get_char_index(PASSWORD_END)
-                else:
-                    X[j, self.get_char_index(PASSWORD_END)] = 1
-
-    def translate(self, pwd):
-        return self.real_ctable.translate(''.join(pwd))
-
-    def encode(self, ystr, maxlen=None):
-        maxlen = maxlen if maxlen else self.maxlen
-        if self.embedding:
-            X = np.zeros((maxlen), dtype=np.int8)
-        else:
-            X = np.zeros((maxlen, self.vocab_size), dtype=np.bool)
-        self.encode_into(X, ystr)
-        return X
-
-class ScheduledSamplingCharacterTable(DelegatingCharacterTable):
-    def __init__(self, config):
-        super().__init__(CharacterTable.fromConfig(config))
-        self.probability_calculator = None
-        self.sigma = 0
-        self.generation_size = 0
-        self.generation_counter = 0
-        self.total_size = 0
-        self.generation = 0
-        # pylint: disable=access-member-before-definition
-        self.generations = self.config.generations
-        self.config = config
-        self.steepness_value = 0.0
-
-    def init_model(self, model):
-        self.probability_calculator = Guesser(model, self.config, io.StringIO())
-
-    def end_generation(self):
-        if self.generation == 0:
-            self.generation_size = self.generation_counter
-            self.total_size = self.config.generations * self.generation_size
-            self.steepness_value = - (2 / self.total_size) * math.log(
-                1 / self.config.final_schedule_ratio  - 1)
-        self.generation += 1
-        self.generation_counter = 0
-        self.set_sigma()
-        logging.info('Scheduled sampling sigma %s', self.sigma)
-
-    def set_sigma(self):
-        if self.generation != 0:
-            cur_value = (self.generation * self.generation_size +
-                         self.generation_counter)
-            self.sigma = 1 - (1 / (1 + math.exp(- self.steepness_value * (
-                cur_value - (self.total_size / 2)))))
-
-    def generate_replacements(self, strs):
-        cond_probs = self.probability_calculator.batch_prob(strs)
-        choices = self.chars
-        for cond_prob_list in cond_probs:
-            cp = cond_prob_list[0]
-            yield np.random.choice(choices, p=cp / np.sum(cp))
-
-    def encode_many(self, string_list, maxlen=None):
-        assert self.probability_calculator is not None
-        answer = self.real_ctable.encode_many(string_list, maxlen=maxlen)
-        replacements = np.random.binomial(1, self.sigma, size=len(string_list))
-        replacement_strs, replacement_idx = [], []
-        for i, astring in enumerate(string_list):
-            if replacements[i] and len(astring) > 0:
-                replacement_strs.append(astring[:-1])
-                replacement_idx.append(i)
-        self.generation_counter += len(string_list)
-        self.set_sigma()
-        if len(replacement_strs) == 0:
-            return answer
-        replacements = self.generate_replacements(replacement_strs)
-        for idx, char in enumerate(replacements):
-            answer[replacement_idx[idx]][len(
-                replacement_strs[idx])] = self.real_ctable.encode(
-                char, maxlen=1)
-        return answer
 
 class ModelSerializer(object):
     def __init__(self, archfile=None, weightfile=None, versioned=False):
@@ -510,8 +228,6 @@ class ModelSerializer(object):
         logging.info('Done saving model')
 
     def load_model(self):
-        # To be able to load models
-
         # This is for unittesting
         def mock_predict_smart_parallel(distribution, input_vec, **_):
             answer = []
@@ -593,8 +309,6 @@ class ModelDefaults(object):
     fuzzy_training_smoothing = False
     tensorboard = False
     tensorboard_dir = "."
-    scheduled_sampling = False
-    final_schedule_ratio = .05
     context_length = None
     train_backwards = False
     dense_layers = 0
@@ -602,9 +316,6 @@ class ModelDefaults(object):
     secondary_training = False
     secondary_train_sets = {}
     training_main_memory_chunksize = 1000000
-    tokenize_words = False
-    tokenize_guessing = True
-    most_common_token_count = 2000
     probability_striation = False
     prob_striation_step = 0.05
     freeze_feature_layers_during_secondary_training = True
@@ -803,15 +514,9 @@ class Preprocessor(BasePreprocessor):
         super().__init__(config)
         self.chunk = 0
         self.resetable_pwd_list = None
-        self.tokenize_words = config.tokenize_words
         self.pwd_whole_list = None
         self.pwd_freqs = None
         self.chunked_pwd_list = None
-        if self.tokenize_words:
-            self.ctable = CharacterTable.fromConfig(config, False)
-            self.tokenizer = SpecificTokenizer(list(map(
-                self.ctable.translate,
-                config.get_intermediate_info('most_common_tokens'))))
 
     def begin(self, pwd_list):
         self.pwd_whole_list = list(pwd_list)
@@ -832,8 +537,6 @@ class Preprocessor(BasePreprocessor):
     def train_from_pwds(self, pwd_tuples):
         self.pwd_freqs = dict(pwd_tuples)
         pwds = list(map(lambda x: x[0], pwd_tuples))
-        if self.tokenize_words:
-            pwds = list(map(tuple, map(self.tokenizer.tokenize, pwds)))
         return (itertools.chain.from_iterable(map(self.all_prefixes, pwds)),
                 itertools.chain.from_iterable(map(self.all_suffixes, pwds)),
                 itertools.chain.from_iterable(map(self.repeat_weight, pwds)))
@@ -909,11 +612,8 @@ class Trainer(object):
             self.callback = None
             self.train_log_names = None
             self.test_log_names = None
-        if config.scheduled_sampling:
-            logging.info('Using scheduled sampling')
-            self.ctable = ScheduledSamplingCharacterTable(self.config)
-        else:
-            self.ctable = CharacterTable.fromConfig(self.config)
+
+        self.ctable = CharacterTable.fromConfig(self.config)
         self.feature_layers = []
         self.classification_layers = []
 
@@ -930,16 +630,9 @@ class Trainer(object):
         return self.ctable.encode_many(x_strs)
 
     def prepare_y_data(self, y_str_list):
-        # The version of keras introduced non-backward compatible changes...
-        if keras.__version__ == '0.2.0':
-            y_vec = np.zeros((len(y_str_list), 1, self.ctable.vocab_size),
-                             dtype=np.bool)
-            for i, ystr in enumerate(y_str_list):
-                y_vec[i] = self.ctable.encode(ystr, maxlen=1)
-        else:
-            y_vec = np.zeros((len(y_str_list), self.ctable.vocab_size),
-                             dtype=np.bool)
-            self.ctable.y_encode_into(y_vec, y_str_list)
+        y_vec = np.zeros((len(y_str_list), self.ctable.vocab_size),
+                         dtype=np.bool)
+        self.ctable.y_encode_into(y_vec, y_str_list)
         return y_vec
 
     def _make_layer(self, **kwargs):
@@ -1051,8 +744,6 @@ class Trainer(object):
     def train_model(self, serializer):
         prev_accuracy = 0
         max_accuracy = 0
-        if self.config.scheduled_sampling:
-            self.ctable.init_model(self.model)
         if self.config.tensorboard:
             self.callback.set_model(self.model)
 
@@ -1073,8 +764,6 @@ class Trainer(object):
                              accuracy - prev_accuracy)
                 break
             prev_accuracy = accuracy
-            if self.config.scheduled_sampling:
-                self.ctable.end_generation()
 
     def test_set(self, x_all, y_all, w_all):
         split_at = len(x_all) - max(
@@ -1355,12 +1044,6 @@ class Filterer(object):
         self.min_len = config.min_len
         self.uniquify = uniquify
         self.seen = set()
-        self.count_tokens = config.tokenize_words
-        self.most_common_token_count = config.most_common_token_count
-        self.token_counter = collections.Counter()
-        self.tokenizer = Tokenizer(
-            config.char_bag, config.uppercase_character_optimization)
-        self.not_equal_to_one = lambda x: len(x) != 1
 
     @staticmethod
     def inc_frequencies(adict, pwd):
@@ -1386,10 +1069,6 @@ class Filterer(object):
             Filterer.inc_frequencies(self.frequencies, pwd)
             Filterer.inc_frequencies(self.beg_frequencies, pwd[0])
             Filterer.inc_frequencies(self.end_frequencies, pwd[-1])
-            if self.count_tokens:
-                self.token_counter.update(
-                    filter(self.not_equal_to_one,
-                           self.tokenizer.tokenize(pwd)))
         else:
             self.filtered_out += 1
         self.total += 1
@@ -1411,17 +1090,14 @@ class Filterer(object):
         char_freqs = {}
         for key in self.frequencies:
             char_freqs[key] = self.frequencies[key] / self.total_characters
+
         if save_stats:
             self.config.set_intermediate_info(
                 'rare_character_bag', self.rare_characters())
             logging.info('Rare characters: %s', self.rare_characters())
             logging.info('Longest pwd is : %s characters long',
                          self.longest_pwd)
-            if self.count_tokens:
-                self.config.set_intermediate_info(
-                    'most_common_tokens',
-                    [x[0] for x in self.token_counter.most_common(
-                        self.most_common_token_count)])
+
         if save_freqs:
             self.config.set_intermediate_info(
                 'character_frequencies', self.frequencies)
@@ -1616,7 +1292,7 @@ class ProbabilityCalculator(object):
 class PasswordTemplateSerializer(DelegatingSerializer):
     def __init__(self, config, serializer=None, lower_prob_threshold=None):
         super().__init__(serializer)
-        ctable = CharacterTable.fromConfig(config, False)
+        ctable = CharacterTable.fromConfig(config)
         assert isinstance(ctable, OptimizingCharacterTable)
         self.preimage = ctable.rare_character_preimage
         self.char_frequencies = config.get_intermediate_info(
@@ -1854,94 +1530,6 @@ policy_list = {
     'one_uppercase' : OneUppercasePolicy(3)
 }
 
-class Tokenizer(object):
-    digits = set(string.digits)
-    uppercase = set(string.ascii_uppercase)
-    lowercase = set(string.ascii_lowercase)
-    upper_and_lowercase = set(string.ascii_uppercase + string.ascii_lowercase)
-    non_symbols = set(
-        string.digits + string.ascii_uppercase + string.ascii_lowercase)
-
-    def __init__(self, char_bag, ignore_uppercase):
-        self.ignore_uppercase = ignore_uppercase
-        if ignore_uppercase:
-            self.tokenize_classes = [
-                self.digits, self.lowercase,
-                set(char_bag).difference(self.non_symbols)]
-        else:
-            self.tokenize_classes = [
-                self.digits, self.uppercase, self.lowercase,
-                set(char_bag).difference(self.non_symbols)]
-        self.class_map = {}
-        for c in char_bag:
-            for i in range(len(self.tokenize_classes)):
-                if c in self.tokenize_classes[i]:
-                    self.class_map[c] = i
-
-    def tokenize(self, password):
-        prev_class = -1
-        tokens = []
-        accum = ''
-        if self.ignore_uppercase:
-            password = password.lower()
-        for c in password:
-            if prev_class < 0:
-                accum += c
-                prev_class = self.class_map[c]
-            elif c in self.tokenize_classes[prev_class]:
-                accum += c
-            else:
-                tokens.append(accum)
-                accum = c
-                prev_class = self.class_map[c]
-        if accum != '':
-            tokens.append(accum)
-        return tokens
-
-class SpecificTokenizer(object):
-    def __init__(self, token_list):
-        self.token_to_index = NodeTrie()
-        self.token_list = token_list
-        for token in self.token_list:
-            self.token_to_index.set(token, 1)
-
-    def tokenize(self, pwd):
-        real_token_indexes = []
-        while len(pwd) != 0:
-            key, _ = self.token_to_index.get_longest_prefix(pwd)
-            if key != '':
-                real_token_indexes.append(key)
-                pwd = pwd[len(key):]
-            else:
-                real_token_indexes.append(pwd[0])
-                pwd = pwd[1:]
-        return real_token_indexes
-
-class TokenCompleter(object):
-    def __init__(self, token_list):
-        self.tokenizer = SpecificTokenizer(token_list)
-        self.token_completer = NodeTrie()
-        self.token_lengths = collections.defaultdict(list)
-        for token in token_list:
-            self.token_completer.set_append(token[:-1][::-1], token[-1])
-        for token in token_list:
-            for i in range(1, len(token) + 1):
-                self.token_lengths[i].append(token)
-
-    def longer_than(self, nchars):
-        if nchars in self.token_lengths:
-            return self.token_lengths[nchars]
-
-        return []
-
-    def completions(self, pwd):
-        def rev_item(item):
-            return item[::-1]
-        if isinstance(pwd, tuple):
-            return self.token_completer.get_completions(
-                map(rev_item, pwd[::-1]))
-
-        return self.token_completer.get_completions(pwd[::-1])
 
 class PasswordPolicyEnforcingSerializer(DelegatingSerializer):
     def __init__(self, policy, serializer):
@@ -1954,25 +1542,11 @@ class PasswordPolicyEnforcingSerializer(DelegatingSerializer):
         else:
             self.serializer.serialize(pwd, 0)
 
-class TokenizingSerializer(DelegatingSerializer):
-    def __init__(self, tokenizer, serializer):
-        super().__init__(serializer)
-        self.tokenizer = tokenizer
-
-    def serialize(self, pwd, prob):
-        assert isinstance(pwd, tuple)
-        real_pwd = ''.join(pwd)
-        if tuple(self.tokenizer.tokenize(real_pwd)) == pwd:
-            self.serializer.serialize(real_pwd, prob)
-        else:
-            self.serializer.serialize(real_pwd, 0)
 
 class Guesser(object):
     def __init__(self, model, config, ostream, prob_cache=None):
         self.model = model
         self.config = config
-        self.tokenized_guessing = (
-            config.tokenize_words and config.tokenize_guessing)
         self.max_len = config.max_len
         self.char_bag = config.char_bag
         self.max_gpu_prediction_size = config.max_gpu_prediction_size
@@ -1981,8 +1555,6 @@ class Guesser(object):
             config.relevel_not_matching_passwords)
         self.generated = 0
         self.ctable = CharacterTable.fromConfig(self.config)
-        if self.config.tokenize_words:
-            self.token_completer = TokenCompleter(self.common_tokens())
         self.filterer = Filterer(self.config)
         self.chunk_size_guesser = self.config.chunk_size_guesser
         self.ostream = ostream
@@ -1992,11 +1564,6 @@ class Guesser(object):
             self._should_make_guesses_rare_char_optimizer())
         self.output_serializer = self.make_serializer()
         self.pwd_end_idx = self.chars_list.index(PASSWORD_END)
-
-    def common_tokens(self):
-        return list(map(
-            self.ctable.translate,
-            self.config.get_intermediate_info('most_common_tokens')))
 
     def read_test_passwords(self):
         logging.info('Reading password calculator test set...')
@@ -2046,9 +1613,7 @@ class Guesser(object):
         if make_rare:
             logging.info('Using template converting password serializer')
             answer = PasswordTemplateSerializer(self.config, answer)
-        if self.tokenized_guessing:
-            answer = TokenizingSerializer(
-                SpecificTokenizer(self.common_tokens()), answer)
+
         return answer
 
     def relevel_prediction(self, preds, astring):
@@ -2066,21 +1631,14 @@ class Guesser(object):
             multiply[pwd_end_idx] = 1
             preds[pwd_end_idx] = 1
             preds = np.multiply(preds, multiply, preds)
-        if self.tokenized_guessing:
-            # 0 out duplicating a token with letters and tokens that would be
-            # too long for the current string
-            for c in self.token_completer.completions(astring):
-                preds[self.ctable.get_char_index(c)] = 0
-            for c in self.token_completer.longer_than(
-                    self.max_len - astring_joined_len + 1):
-                preds[self.ctable.get_char_index(c)] = 0
+
         sum_per = sum(preds)
         for i, v in enumerate(preds):
             preds[i] = v / sum_per
 
     def relevel_prediction_many(self, pred_list, str_list):
         if (self.filterer.pwd_is_valid(str_list[0], quick=True) and
-            len(str_list[0]) != self.max_len and not self.tokenized_guessing):
+            len(str_list[0]) != self.max_len):
             return
         for i, pred_item in enumerate(pred_list):
             self.relevel_prediction(pred_item[0], str_list[i])
@@ -2124,10 +1682,7 @@ class Guesser(object):
                 self.output_serializer.serialize(astring, chain_prob)
                 self.generated += 1
             else:
-                if self.tokenized_guessing:
-                    chain_pass = astring + (char,)
-                else:
-                    chain_pass = astring + char
+                chain_pass = astring + char
                 answer.append((chain_pass, chain_prob))
         return answer
 
@@ -2170,12 +1725,6 @@ class Guesser(object):
         self.super_node_recur([(astring, prob)])
 
     def starting_node(self, default_value):
-        if self.tokenized_guessing:
-            if default_value == '':
-                return tuple()
-
-            return default_value
-
         return default_value
 
     def guess(self, astring='', prob=1):
@@ -2219,8 +1768,6 @@ class RandomWalkGuesser(Guesser):
         self.expander = self.output_serializer
         self.next_node_fn = generator.next_nodes_random_walk
         self.estimates = []
-        if self.tokenized_guessing:
-            self.next_node_fn = RandomWalkGuesser.next_nodes_random_walk_tuple
 
     def next_nodes_random_walk_tuple(self, astring, prob, prediction):
         if len(astring) > 0 and astring[-1] == PASSWORD_END:
