@@ -4,3 +4,4 @@ Cython
 Keras
 scikit-learn
 tensorflow-gpu
+pyyaml

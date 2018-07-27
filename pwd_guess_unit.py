@@ -25,6 +25,8 @@ import sys
 import glob
 from tensorflow.python.client import device_lib
 
+import yaml
+
 import pwd_guess
 import generator
 
@@ -413,6 +415,28 @@ class ModelDefaultsTest(unittest.TestCase):
             tfile.write('{"test" : ["value2"]}'.encode('utf8'))
             tfile.flush()
             self.assertListEqual(m.get_intermediate_info('test'), ['value2'])
+
+    def test_load_infer_type(self):
+        with tempfile.NamedTemporaryFile(
+                dir=TMPDIR, suffix='.json', mode='w') as tfile:
+            json.dump({'hidden_size' : 42}, tfile)
+            tfile.flush()
+            m = pwd_guess.ModelDefaults.fromFile(tfile.name)
+            self.assertEqual(m.hidden_size, 42)
+
+        with tempfile.NamedTemporaryFile(
+                dir=TMPDIR, suffix='.yaml', mode='w') as tfile:
+            yaml.dump({'hidden_size' : 42}, tfile)
+            tfile.flush()
+            m = pwd_guess.ModelDefaults.fromFile(tfile.name)
+            self.assertEqual(m.hidden_size, 42)
+
+        with tempfile.NamedTemporaryFile(
+                dir=TMPDIR, suffix='.cfg', mode='w') as tfile:
+            json.dump({'hidden_size' : 42}, tfile)
+            tfile.flush()
+            m = pwd_guess.ModelDefaults.fromFile(tfile.name)
+            self.assertEqual(m.hidden_size, 42)
 
 
 class PwdListTest(unittest.TestCase):

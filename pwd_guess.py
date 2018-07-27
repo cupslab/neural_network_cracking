@@ -387,13 +387,31 @@ class ModelDefaults(object):
     def fromFile(afile):
         if afile is None:
             return ModelDefaults()
+
+        filename, fileext = os.path.splitext(afile)
+        if fileext == '.json':
+            file_format = json.load
+        elif fileext == '.yaml':
+            try:
+                import yaml
+            except ImportError as e:
+                logging.error(
+                    'python yaml library is required for yaml configs. '
+                    'Run: pip install yaml')
+                raise
+
+            file_format = yaml.safe_load
+        else:
+            logging.warning(
+                'Unknown config format: %s. Defaulting to JSON', fileext)
+            file_format = json.load
+
         with open(afile, 'r') as f:
             try:
-                answer = ModelDefaults(json.load(f))
+                answer = ModelDefaults(file_format(f))
             except ValueError as e:
-                logging.error(('Error loading config. Config file is not valid'
-                               ' JSON format. %s'), str(e))
-                return None
+                raise
+
         return answer
 
     def validate(self):
