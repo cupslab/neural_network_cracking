@@ -256,6 +256,35 @@ serializer_type_list = {}
 class ConfigurationException(Exception):
     pass
 
+
+def read_config_file(afile):
+    filename, fileext = os.path.splitext(afile)
+    if fileext == '.json':
+        file_format = json.load
+    elif fileext == '.yaml':
+        try:
+            import yaml
+        except ImportError as e:
+            logging.error(
+                'python yaml library is required for yaml configs. '
+                'Run: pip install yaml')
+            raise
+
+        file_format = yaml.safe_load
+    else:
+        logging.warning(
+            'Unknown config format: %s. Defaulting to JSON', fileext)
+        file_format = json.load
+
+    with open(afile, 'r') as f:
+        try:
+            answer = file_format(f)
+        except ValueError as e:
+            raise
+
+    return answer
+
+
 class ModelDefaults(object):
     char_bag = (string.ascii_lowercase + string.ascii_uppercase +
                 string.digits + '~!@#$%^&*(),.<>/?\'"{}[]\\|-_=+;: `' +
@@ -270,10 +299,10 @@ class ModelDefaults(object):
     chunk_print_interval = 1000
     lower_probability_threshold = 10**-5
     relevel_not_matching_passwords = True
-    training_accuracy_threshold = 10**-10
+    training_accuracy_threshold = -1.0
     train_test_ratio = 10
     parallel_guessing = False
-    fork_length = 2
+    fork_length = 0
     rare_character_optimization = False
     rare_character_optimization_guessing = False
     uppercase_character_optimization = False
@@ -388,31 +417,7 @@ class ModelDefaults(object):
         if afile is None:
             return ModelDefaults()
 
-        filename, fileext = os.path.splitext(afile)
-        if fileext == '.json':
-            file_format = json.load
-        elif fileext == '.yaml':
-            try:
-                import yaml
-            except ImportError as e:
-                logging.error(
-                    'python yaml library is required for yaml configs. '
-                    'Run: pip install yaml')
-                raise
-
-            file_format = yaml.safe_load
-        else:
-            logging.warning(
-                'Unknown config format: %s. Defaulting to JSON', fileext)
-            file_format = json.load
-
-        with open(afile, 'r') as f:
-            try:
-                answer = ModelDefaults(file_format(f))
-            except ValueError as e:
-                raise
-
-        return answer
+        return ModelDefaults(read_config_file(afile))
 
     def validate(self):
         if self.fork_length >= self.min_len:
@@ -966,10 +971,7 @@ class TsvList(TsvListParent):
             pwd, freq = self.interpret_row(row)
             if pwd is not None:
                 for _ in range(freq):
-                    # pylint: disable=no-member
-                    #
-                    # sys does have the intern method
-                    yield (sys.intern(pwd), 1)
+                    yield (pwd, 1)
 
 class TsvSimulatedList(TsvListParent):
     def as_list_iter(self, agen):
@@ -2405,15 +2407,11 @@ def guess(args, config):
         guesser.complete_guessing()
 
 def read_config_args(args):
-    config_arg_file = open(args['config_args'], 'r')
     try:
-        config_args = json.load(config_arg_file)
+        config_args = read_config_file(args['config_args'])
     except ValueError as e:
-        sys.stderr.write('Config file %s is not valid JSON format. %s\n' % (
-            args['config_args'], str(e)))
-        raise e
-    finally:
-        config_arg_file.close()
+        raise
+
     arg_ret = args.copy()
     arg_ret.update(config_args['args'])
     if 'profile' in config_args['args']:
