@@ -3,6 +3,7 @@ import argparse
 import os.path
 from collections import Counter
 import numpy as np
+
 def create_output(args):
     prob = "0x0.1p-1"
     max_guess = 0
@@ -41,12 +42,15 @@ def create_output(args):
     perplexity = calc_perplexity(probs)
     sampling_at_guess_num = [1e3, 1e6, 1e9, 1e12, 1e15, 1e18, 1e21, 1e24]
     percentile = fraction_guessed(guess_list, sampling_at_guess_num)
+
     out = "Perplexity : {} Entropy: {:.6f}\nFraction Guessed Percentiles\n".format(
         perplexity, np.log2(perplexity))
     for guess_num in sampling_at_guess_num:
         out += "{:.0E} -> {:.2f}%\n".format(guess_num, percentile[guess_num])
-    with open(os.path.join(args.op_dir, "performance_results.txt"), "w") as out_file:
+    with open(os.path.join(args.op_dir, "performance_results.{}".
+            format(args.condition)), "w") as out_file:
         out_file.write(out)
+
 def calc_perplexity(probs):
     return 2 ** (-(1/len(probs))*np.sum(np.log2(probs)))
 
@@ -61,6 +65,7 @@ def fraction_guessed(guess_list,guess_sampling):
     for idx in figured_idx:
         figured_idx[idx] = 100*figured_idx[idx]/len(guess_list)
     return figured_idx
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=("Convert the output of guesser enum_ofile to the input required by graphing Rscript"))
     parser.add_argument('inp_file')
