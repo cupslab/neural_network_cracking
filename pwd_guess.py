@@ -1161,7 +1161,7 @@ class ManyToManyPreprocessor(Preprocessor):
         super().__init__(config)
 
     def all_prefixes(self, pwd):
-        return [PASSWORD_START+ pwd]
+        return [PASSWORD_START + pwd]
 
     def all_suffixes(self, pwd):
         return [pwd + PASSWORD_END]
@@ -2316,7 +2316,7 @@ class RandomWalkGuesser(Guesser):
 
     def seed_data(self):
         for _ in range(self.config.random_walk_seed_num):
-            yield self.starting_node(''), 1, 1, 0
+            yield self.starting_node('\t'), 1, 1, 0
 
     def calc_error(self):
         return self.config.random_walk_confidence_bound_z_value * (
