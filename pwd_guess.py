@@ -63,6 +63,7 @@ import tensorflow as tf
 import generator
 
 PASSWORD_END = '\n'
+PASSWORD_START = '\t'
 
 FNAME_PREFIX_SUBPROCESS_CONFIG = 'child_process.'
 FNAME_PREFIX_PROCESS_LOG = 'log.child_process.'
@@ -552,7 +553,7 @@ if hasattr(recurrent, 'JZS1'):
 class ModelDefaults(object):
     char_bag = (string.ascii_lowercase + string.ascii_uppercase +
                 string.digits + '~!@#$%^&*(),.<>/?\'"{}[]\\|-_=+;: `' +
-                PASSWORD_END)
+                PASSWORD_END+ PASSWORD_START)
     model_type = 'JZS1'
     hidden_size = 128
     layers = 1
@@ -1160,10 +1161,10 @@ class ManyToManyPreprocessor(Preprocessor):
         super().__init__(config)
 
     def all_prefixes(self, pwd):
-        return [pwd]
+        return [PASSWORD_START+ pwd]
 
     def all_suffixes(self, pwd):
-        return [pwd[1:]+ PASSWORD_END]
+        return [pwd + PASSWORD_END]
 
     def repeat_weight(self, pwd):
         return [self.password_weight(pwd)]
@@ -1578,7 +1579,7 @@ class ProbabilityCalculator(object):
             probs = self.guesser.batch_prob(x_strings)
             assert len(probs) == len(x_strings)
             for i, y_idx in enumerate(y_indices):
-                yield x_strings[i], y_strings[i], probs[i][0][y_idx]
+                yield x_strings[i], y_strings[i], np.asscalar(probs[i][0][y_idx])
             x_strings, y_strings, _ = self.preproc.next_chunk()
 
     def calc_probabilities(self, pwd_list):
@@ -1614,7 +1615,7 @@ class ManyToManyProbabilityCalculator(ProbabilityCalculator):
                 for j, y_idx in enumerate(y_indices[i]):
                     if j == len(x_strings[i]):
                         break
-                    yield x_strings[i], y_strings[i][j], probs[i][j][y_idx]
+                    yield x_strings[i], y_strings[i][j], np.asscalar(probs[i][j][y_idx])
             x_strings, y_strings, _ = self.preproc.next_chunk()
 
 class PasswordTemplateSerializer(DelegatingSerializer):
@@ -2282,7 +2283,7 @@ class RandomWalkGuesser(Guesser):
         for i, cur_node in enumerate(real_node_list):
             astring, prob = cur_node[0], cur_node[1]
             poss_next = self.next_node_fn(
-                self, astring, prob, predictions[i][0])
+                self, astring, prob, predictions[i][len(astring)])
             if len(poss_next) == 0:
                 self.spinoff_node(cur_node)
                 continue
