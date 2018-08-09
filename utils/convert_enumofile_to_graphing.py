@@ -43,7 +43,7 @@ def create_output(args):
     sampling_at_guess_num = [1e3, 1e6, 1e9, 1e12, 1e15, 1e18, 1e21, 1e24]
     percentile = fraction_guessed(guess_list, sampling_at_guess_num)
 
-    out = "Perplexity : {} Entropy: {:.6f}\nFraction Guessed Percentiles\n".format(
+    out = "Perplexity : {} Entropy: {:.6f}\nGuess number -> Fraction of passwords guessed\n".format(
         perplexity, np.log2(perplexity))
     for guess_num in sampling_at_guess_num:
         out += "{:.0E} -> {:.2f}%\n".format(guess_num, percentile[guess_num])
