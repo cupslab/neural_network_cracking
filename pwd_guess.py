@@ -2283,7 +2283,7 @@ class RandomWalkGuesser(Guesser):
         for i, cur_node in enumerate(real_node_list):
             astring, prob = cur_node[0], cur_node[1]
             poss_next = self.next_node_fn(
-                self, astring, prob, predictions[i][len(astring)])
+                self, astring, prob, predictions[i][len(astring)-1])
             if len(poss_next) == 0:
                 self.spinoff_node(cur_node)
                 continue
