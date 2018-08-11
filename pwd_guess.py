@@ -2449,7 +2449,7 @@ class DelAmicoCalculator(GuessSerializer):
         for i in range(len(self.pwds), 0, -1):
             idx = i - 1
             yield [
-                self.pwds[idx], self.probs[idx], out_guess_numbers[idx],
+                self.pwds[idx].lstrip('\t'), self.probs[idx], out_guess_numbers[idx],
                 out_stdev[idx], num_guess, out_error[idx]]
 
     def finish(self):
