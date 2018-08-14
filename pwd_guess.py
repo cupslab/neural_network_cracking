@@ -757,7 +757,7 @@ class Trainer(object):
         assert len(self.classification_layers) == 0
         assert len(self.feature_layers) == 0
         for layer in self.model.layers:
-            if isinstance(layer, (TimeDistributed, Activation)):
+            if isinstance(layer, (TimeDistributed, Activation, Dense)):
                 self.classification_layers.append(layer)
             else:
                 self.feature_layers.append(layer)
