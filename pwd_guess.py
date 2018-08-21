@@ -1115,15 +1115,17 @@ class ManyToManyTrainer(Trainer):
 
     def return_model(self):
         model = keras.models.Sequential()
-        self.feature_layers.append(keras.layers.Embedding(self.ctable.vocab_size, 6, input_length=self.config.context_length))
+        self.feature_layers.append(keras.layers.Embedding(self.ctable.vocab_size, 12, input_length=self.config.context_length))
 
         #model.add()
 
-        self.feature_layers.append(keras.layers.LSTM(2048, return_sequences=True))
+        self.feature_layers.append(keras.layers.LSTM(1000, return_sequences=True))
         if self.config.dropouts:
             self.feature_layers.append(keras.layers.Dropout(0.4))
-        self.feature_layers.append(keras.layers.LSTM(512, return_sequences=True))
-
+        self.feature_layers.append(keras.layers.LSTM(1000, return_sequences=True))
+        if self.config.dropouts:
+            self.feature_layers.append(keras.layers.Dropout(0.4))
+        self.feature_layers.append(keras.layers.LSTM(1000, return_sequences=True))
         for _ in range(self.config.dense_layers):
             self.classification_layers.append(keras.layers.TimeDistributed(keras.layers.Dense(
                 self.config.hidden_size)))
