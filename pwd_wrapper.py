@@ -55,7 +55,7 @@ if __name__ == "__main__":
         raise FileNotFoundError("Couldn't find the pwd_guess.py script at {}".format(pwd_guess))
     statvfs = os.statvfs(args.rundir)
     free_bytes = statvfs.f_frsize * statvfs.f_bfree
-    if free_bytes < 500000000:
+    if free_bytes < 200000000:
         raise OSError("Minimum disk space of 500MB required to reliably run this code")
 
     #Make training attempt
