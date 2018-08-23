@@ -5,6 +5,7 @@ import os.path
 import shutil
 import subprocess
 import json
+root_dir = os.path.dirname(os.path.abspath(__file__))
 def parse_args():
     p = argparse.ArgumentParser(description="Script to automate a training and guess runs with specified config files" )
     p.add_argument("--rundir", default=".", help="Specify the directory from where the run will be launched"
@@ -35,10 +36,17 @@ def validate_args(args):
     if args.train_only and args.guess_config:
         print("Guess config will be ignored as the run is train only")
 
+def get_current_commit():
+    try:
+        with open(os.path.join(root_dir, "commit.hash"),"r") as commit:
+            hash = commit.read()
+            hash.strip()
+            return hash
+    except:
+        return None
 
 if __name__ == "__main__":
     args = parse_args()
-    root_dir = os.path.dirname(os.path.abspath(__file__))
     pwd_guess = os.path.join(root_dir, "pwd_guess.py")
     convert_py = os.path.join(root_dir, "utils", "convert_enumofile_to_graphing.py")
     try:
@@ -48,9 +56,13 @@ if __name__ == "__main__":
 
     validate_args(args)
     os.chdir(args.rundir)
+    commit = get_current_commit()
     if args.reason:
-        with open("reason.txt","w") as readme:
+        with open("reason.txt", "w") as readme:
             readme.write(args.reason)
+    if commit:
+        with open("commit.hash", "w") as commit_file:
+            commit_file.write(commit)
     if not os.path.exists(pwd_guess):
         raise FileNotFoundError("Couldn't find the pwd_guess.py script at {}".format(pwd_guess))
     statvfs = os.statvfs(args.rundir)
