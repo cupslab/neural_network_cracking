@@ -38,11 +38,13 @@ def validate_args(args):
 
 def get_current_commit():
     try:
-        commit_run = subprocess.run("git rev-parse HEAD", shell=True, check=True)
+        commit_run = subprocess.run("git rev-parse HEAD", shell=True, check=True,
+                                    stdout=subprocess.PIPE, universal_newlines=True)
         commit_hash = commit_run.stdout.strip()
         return commit_hash
     except subprocess.CalledProcessError:
         return None
+
 
 if __name__ == "__main__":
     args = parse_args()
