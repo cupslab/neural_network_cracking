@@ -69,7 +69,7 @@ if __name__ == "__main__":
     statvfs = os.statvfs(args.rundir)
     free_bytes = statvfs.f_frsize * statvfs.f_bfree
     if free_bytes < 200000000:
-        raise OSError("Minimum disk space of 500MB required to reliably run this code")
+        raise OSError("Minimum disk space of 200MB required to reliably run this code")
 
     #Make training attempt
     if not args.start_secondary and not args.start_guessing:

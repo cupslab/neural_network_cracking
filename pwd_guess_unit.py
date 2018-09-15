@@ -1192,10 +1192,10 @@ class ProbabilityCalculatorTest(unittest.TestCase):
             min_len = 3, max_len = 3, char_bag = 'ab\n',
             relevel_not_matching_passwords = False)
         mock_guesser.batch_prob = MagicMock(
-            return_value=[[[0, 0.5, 0.5]],
+            return_value=np.array([[[0, 0.5, 0.5]],
                           [[0, 0.5, 0.5]],
                           [[0, 0.5, 0.5]],
-                          [[1, 0, 0]]])
+                          [[1, 0, 0]]]))
         mock_guesser.should_make_guesses_rare_char_optimizer = False
         p = pwd_guess.ProbabilityCalculator(mock_guesser)
         self.assertEqual(list(p.calc_probabilities([('aaa', 1)])),
@@ -1208,14 +1208,14 @@ class ProbabilityCalculatorTest(unittest.TestCase):
             relevel_not_matching_passwords = False)
         mock_guesser.should_make_guesses_rare_char_optimizer = False
         mock_guesser.batch_prob = MagicMock(
-            return_value=[[[0, 0.5, 0.5]],
+            return_value=np.array([[[0, 0.5, 0.5]],
                           [[0, 0.5, 0.5]],
                           [[0, 0.5, 0.5]],
                           [[1, 0, 0]],
                           [[0, 0.5, 0.5]],
                           [[0, 0.5, 0.5]],
                           [[0, 0.5, 0.5]],
-                          [[1, 0, 0]]])
+                          [[1, 0, 0]]]))
         p = pwd_guess.ProbabilityCalculator(mock_guesser)
         self.assertEqual(set(p.calc_probabilities([('aaa', 1), ('abb', 1)])),
                          set([('aaa', 0.125), ('abb', 0.125)]))
@@ -1227,14 +1227,14 @@ class ProbabilityCalculatorTest(unittest.TestCase):
             relevel_not_matching_passwords = False)
         mock_guesser.should_make_guesses_rare_char_optimizer = False
         mock_guesser.batch_prob = MagicMock(
-            return_value=[[[0, 0.5, 0.5]],
+            return_value=np.array([[[0, 0.5, 0.5]],
                           [[0, 0.4, 0.6]],
                           [[0, 0.5, 0.5]],
                           [[.5, .25, .25]],
                           [[0, 0.5, 0.5]],
                           [[0, 0.4, 0.6]],
                           [[0, 0.5, 0.5]],
-                          [[.5, .25, .25]]])
+                          [[.5, .25, .25]]]))
         p = pwd_guess.ProbabilityCalculator(mock_guesser, prefixes = True)
         self.assertEqual(set(p.calc_probabilities([('aaa', 1), ('abb', 1)])),
                          set([('aaa', 0.1), ('abb', 0.15)]))
@@ -1261,12 +1261,12 @@ class ProbabilityCalculatorTest(unittest.TestCase):
             mock_guesser.config = config
             mock_guesser.should_make_guesses_rare_char_optimizer = True
             mock_guesser.batch_prob = MagicMock(
-                return_value=[[[0, 0.5, 0.5]],
+                return_value=np.array([[[0, 0.5, 0.5]],
                               [[0, 0.5, 0.5]],
                               [[1, 0, 0]],
                               [[0, 0.5, 0.5]],
                               [[0, 0.5, 0.5]],
-                              [[1, 0, 0]]])
+                              [[1, 0, 0]]]))
             p = pwd_guess.ProbabilityCalculator(mock_guesser)
             self.assertEqual(set(p.calc_probabilities(
                 [('aa', 1), ('bB', 1)])),
@@ -1942,6 +1942,46 @@ class PolicyTests(unittest.TestCase):
         self.assertFalse(policy.pwd_complies('999Apple*'))
         self.assertTrue(policy.pwd_complies('111*jjjJ'))
 
+    def test_3class12(self):
+        config = Mock()
+        config.enforced_policy = '3class12'
+        policy = pwd_guess.BasePasswordPolicy.fromConfig(config)
+        self.assertTrue(type(policy), pwd_guess.SemiComplexPolicy)
+
+        self.assertTrue(policy.has_group('asdf', policy.lowercase))
+        self.assertFalse(policy.has_group('1', policy.lowercase))
+        self.assertTrue(policy.has_group('10', policy.digits))
+        self.assertFalse(policy.has_group('a', policy.digits))
+        self.assertTrue(policy.has_group('A', policy.uppercase))
+        self.assertFalse(policy.has_group('a', policy.uppercase))
+        self.assertTrue(policy.all_from_group('asdf0A', policy.non_symbols))
+        self.assertFalse(policy.all_from_group('asdf*', policy.non_symbols))
+        self.assertTrue(policy.passes_blacklist('asdf*'))
+        self.assertFalse(policy.pwd_complies('asdf'))
+        self.assertFalse(policy.pwd_complies('asdfasd'))
+        self.assertFalse(policy.pwd_complies(''))
+        self.assertFalse(policy.pwd_complies('asdf' * 30))
+        self.assertFalse(policy.pwd_complies('asdfasdf'))
+        self.assertFalse(policy.pwd_complies('asdfasdfasdfasdf'))
+        self.assertFalse(policy.pwd_complies('1Aa*asdf'))
+        self.assertFalse(policy.pwd_complies('1Aa*'))
+        self.assertFalse(policy.pwd_complies('1A*'))
+        self.assertTrue(policy.pwd_complies('111*asdf12345'))
+        self.assertTrue(policy.pwd_complies('1Aasdfasdfasdfasdf'))
+        self.assertTrue(policy.pwd_complies('1Aasdfasdfasdfasdf*'))
+
+        self.assertTrue(policy.pwd_complies('999Apple*!@#'))
+        self.assertTrue(policy.pwd_complies('111*Asdfasdfg'))
+        self.assertTrue(policy.pwd_complies('111*jjjJ12345'))
+        self.assertTrue(policy.pwd_complies('abcdefgh1234Z'))
+        with tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR) as temp_bl:
+            temp_bl.write('asdf\n')
+            temp_bl.write('apple\n')
+            temp_bl.flush()
+            policy.load_blacklist(temp_bl.name)
+        self.assertFalse(policy.pwd_complies('11199999*Asdf'))
+        self.assertFalse(policy.pwd_complies('00011999Apple*'))
+        self.assertTrue(policy.pwd_complies('111*jjjJ12345'))
 class PasswordPolicyEnforcingSerializerTest(unittest.TestCase):
     def test_serializer(self):
         config = Mock()
