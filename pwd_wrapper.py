@@ -5,6 +5,8 @@ import os.path
 import shutil
 import subprocess
 import json
+import time
+
 root_dir = os.path.dirname(os.path.abspath(__file__))
 def parse_args():
     p = argparse.ArgumentParser(description="Script to automate a training and guess runs with specified config files" )
@@ -54,7 +56,7 @@ if __name__ == "__main__":
         os.mkdir(args.rundir)
     except FileExistsError:
         print("Path already exists, will use the existing directory")
-
+    time_string = ""
     validate_args(args)
     os.chdir(args.rundir)
     commit = get_current_commit()
@@ -80,7 +82,10 @@ if __name__ == "__main__":
 
         train_cmd = "python3 {} --config-args \"{}\" |& tee training.log".format(pwd_guess, os.path.basename(args.train_config))
         print(train_cmd)
+        t_start = time.time()
         ret = subprocess.call(train_cmd, shell=True, executable='/bin/bash')
+        train_time = time.time() - t_start
+        time_string += "Training time = {} seconds\n".format(train_time)
         train_conf = json.load(open(os.path.basename(args.train_config), "r"))
         try:
             shutil.copy(train_conf['args']['weight_file'],
@@ -98,7 +103,9 @@ if __name__ == "__main__":
         secondary_cmd = "python3 {} --config-args \"{}\" |& tee secondary.log".\
             format(pwd_guess, os.path.basename(args.secondary_config))
         print(secondary_cmd)
+        t_start = time.time()
         ret = subprocess.call(secondary_cmd, shell=True, executable='/bin/bash')
+        time_string += "Secondary Training Time = {} seconds\n".format(time.time() - t_start)
         if ret != 0:
             raise RuntimeError("The secondary training process returned non-zero error code."
                                "Look in the secondary.log for more information")
@@ -112,10 +119,15 @@ if __name__ == "__main__":
 
     guess_cmd = "python3 {} --config-args \"{}\" |& tee guess.log".format(pwd_guess, os.path.basename(args.guess_config))
     print(guess_cmd)
-    ret = subprocess.call(guess_cmd, shell=True,executable='/bin/bash')
+    t_start = time.time()
+    ret = subprocess.call(guess_cmd, shell=True, executable='/bin/bash')
+    time_string += "Guessing Time = {} seconds\n".format(time.time() -t_start)
     if ret != 0:
         raise RuntimeError("The guessing process returned non-zero error code. Look in guess.log for more information")
     guess_conf = json.load(open(os.path.basename(args.guess_config), "r"))
+
+    with open("timing.txt", "w") as time_f:
+        time_f.write(time_string)
 
     #Convert to format for plotting
     guess_op_file = guess_conf['args']['enumerate_ofile']
