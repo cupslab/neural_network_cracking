@@ -1392,10 +1392,7 @@ class ProbabilityCalculator(object):
         self.guesser = guesser
         self.ctable = CharacterTable.fromConfig(guesser.config)
         self.config = guesser.config
-        if self.config.sequence_model == Sequence.MANY_TO_MANY:
-            self.preproc = ManyToManyPreprocessor(guesser.config)
-        elif self.config.sequence_model == Sequence.MANY_TO_ONE:
-            self.preproc = Preprocessor(guesser.config)
+        self.preproc = BasePreprocessor.fromConfig(self.config)
         self.template_probs = False
         self.prefixes = prefixes
 
