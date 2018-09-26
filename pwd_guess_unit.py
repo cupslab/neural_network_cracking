@@ -81,6 +81,30 @@ class CharacterTableTest(unittest.TestCase):
         self.assertEqual(ctable.translate('aba'), 'aba')
         self.assertEqual(ctable.translate('aba'), 'aba')
 
+    def test_encode_many_chunks(self):
+        ctable = pwd_guess.CharacterTable('abc', 4, embedding=True,
+                                          sequence_model=pwd_guess.Sequence.MANY_TO_ONE)
+        indices, strings = ctable.encode_many_chunks(['abcabc', 'aaabbb'], 6)
+        np.testing.assert_array_equal(indices, np.array([[0, 1, 2, 0], [2, 0, 1, 2],
+                                                        [0, 0, 0, 1], [0, 1, 1, 1]]))
+        self.assertListEqual(strings, ['abca', 'cabc', 'aaab', 'abbb'])
+        zero = [True, False, False]
+        one = [False, True, False]
+        two = [False, False, True]
+        ctable = pwd_guess.CharacterTable('abc', 4, embedding=False,
+                                          sequence_model=pwd_guess.Sequence.MANY_TO_ONE)
+        indices, strings = ctable.encode_many_chunks(['abcabc', 'aaabbb'], 6)
+        np.testing.assert_array_equal(indices, np.array([[zero, one, two, zero], [two, zero, one, two],
+                                                       [zero, zero, zero, one], [zero, one, one, one]]))
+        self.assertListEqual(strings, ['abca', 'cabc', 'aaab', 'abbb'])
+
+        ctable = pwd_guess.CharacterTable('abc', 4, embedding=True,
+                                          sequence_model=pwd_guess.Sequence.MANY_TO_MANY)
+        indices, strings = ctable.encode_many_chunks(['abcabc', 'aaabbb'], 6)
+        np.testing.assert_array_equal(indices, np.array([[0, 1, 2, 0], [2, 0, 1, 2],
+                                                        [0, 0, 0, 1], [0, 1, 1, 1]]))
+        self.assertListEqual(strings, ['abca', 'cabc', 'aaab', 'abbb'] )
+
 class OptimizingTableTest(unittest.TestCase):
     def test_table(self):
         ctable = pwd_guess.OptimizingCharacterTable('abcd', 2, 'ab', False)
@@ -232,6 +256,7 @@ class TrainerTest(unittest.TestCase):
 
     def test_train_model(self):
         config = pwd_guess.ModelDefaults(max_len = 5, generations = 20)
+        config.sequence_model = pwd_guess.Sequence.MANY_TO_ONE
         pre = pwd_guess.Preprocessor(config)
         pre.begin([('pass', 1)])
         t = pwd_guess.Trainer(pre, config=config)
@@ -247,11 +272,57 @@ class TrainerTest(unittest.TestCase):
         self.assertNotEqual(None, t.ctable)
         t.ctable.encode('1234' + ('\n' * 36), 40)
 
-    def test_output_as_np(self):
-        pre = pwd_guess.Preprocessor()
+    def test_output_as_np_many_one_no_embedding(self):
+        config = pwd_guess.ModelDefaults(max_len=5, generations=20)
+        config.sequence_model = pwd_guess.Sequence.MANY_TO_ONE
+        config.embedding_layer = False
+        pre = pwd_guess.Preprocessor(config)
         pre.begin([('pass', 1)])
-        t = pwd_guess.Trainer(pre)
-        t.next_train_set_as_np()
+
+        t = pwd_guess.Trainer(pre, config=config)
+        x_vec, y_vec, weight_vec = t.next_train_set_as_np()
+        self.assertTupleEqual(x_vec.shape, (5, t.config.max_len, len(t.config.char_bag)))
+        self.assertTupleEqual(y_vec.shape, (5, len(t.config.char_bag)))
+
+    def test_output_as_np_many_one_embedding(self):
+        config = pwd_guess.ModelDefaults(max_len=5, generations=20)
+        config.sequence_model = pwd_guess.Sequence.MANY_TO_ONE
+        config.embedding_layer = True
+        config.embedding_size = 20
+        pre = pwd_guess.Preprocessor(config)
+        pre.begin([('pass', 1)])
+
+        t = pwd_guess.Trainer(pre, config=config)
+        x_vec, y_vec, weight_vec = t.next_train_set_as_np()
+        self.assertTupleEqual(x_vec.shape, (5, t.config.max_len))
+        self.assertTupleEqual(y_vec.shape, (5, len(t.config.char_bag)))
+
+    def test_output_as_np_many_many_embedding(self):
+        config = pwd_guess.ModelDefaults(max_len=5, generations=20)
+        config.sequence_model = pwd_guess.Sequence.MANY_TO_MANY
+        config.embedding_layer = True
+        config.embedding_size = 20
+        config.sequence_model_updates()
+        pre = pwd_guess.ManyToManyPreprocessor(config)
+        pre.begin([('pass', 1)])
+
+        t = pwd_guess.ManyToManyTrainer(pre, config=config)
+        x_vec, y_vec, weight_vec = t.next_train_set_as_np()
+        self.assertTupleEqual(x_vec.shape, (1, t.config.max_len))
+        self.assertTupleEqual(y_vec.shape, (1, t.config.max_len, len(t.config.char_bag)))
+
+    def test_output_as_np_many_many_no_embedding(self):
+        config = pwd_guess.ModelDefaults(max_len=5, generations=20)
+        config.sequence_model = pwd_guess.Sequence.MANY_TO_MANY
+        config.embedding_layer = False
+        config.sequence_model_updates()
+        pre = pwd_guess.ManyToManyPreprocessor(config)
+        pre.begin([('pass', 1)])
+
+        t = pwd_guess.ManyToManyTrainer(pre, config=config)
+        x_vec, y_vec, weight_vec = t.next_train_set_as_np()
+        self.assertTupleEqual(x_vec.shape, (1, t.config.max_len, len(t.config.char_bag)))
+        self.assertTupleEqual(y_vec.shape, (1, t.config.max_len, len(t.config.char_bag)))
 
     def test_build_model(self):
         t = pwd_guess.Trainer(['pass'], config=pwd_guess.ModelDefaults(

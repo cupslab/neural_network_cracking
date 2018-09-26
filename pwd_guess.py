@@ -99,10 +99,10 @@ class CharacterTable(object):
             return astring + (PASSWORD_END * (maxlen - len(astring)))
         return astring
 
-    def encode_many(self, string_list, maxlen=None):
+    def encode_many(self, string_list, maxlen=None, y_vec=False):
         maxlen = maxlen if maxlen else self.maxlen
         x_str_list = map(lambda x: self.pad_to_len(x, maxlen), string_list)
-        if self.sequence_model != Sequence.MANY_TO_MANY and self.embedding:
+        if self.embedding and not y_vec:
             x_vec = np.zeros(shape=(len(string_list), maxlen), dtype=np.int8)
         else:
             x_vec = np.zeros((len(string_list), maxlen, self.vocab_size),
@@ -133,10 +133,12 @@ class CharacterTable(object):
 
     def encode_into(self, X, C):
         for i, c in enumerate(C):
-            if self.sequence_model != Sequence.MANY_TO_MANY and self.embedding:
+            if len(X.shape) == 1:
                 X[i] = self.char_indices[c]
-            else:
+            elif len(X.shape) == 2:
                 X[i, self.char_indices[c]] = 1
+            else:
+                raise Exception("Code should never reach here, dimension of X can only be 1 or 2")
 
     def encode(self, C, maxlen=None):
         maxlen = maxlen if maxlen else self.maxlen
@@ -147,11 +149,6 @@ class CharacterTable(object):
 
         self.encode_into(X, C)
         return X
-
-    def decode(self, X, calc_argmax=True):
-        if calc_argmax:
-            X = X.argmax(axis=-1)
-        return ''.join(self.indices_char[x] for x in X)
 
     def get_char_index(self, character):
         return self.char_indices[character]
@@ -696,10 +693,7 @@ class Trainer(object):
     def prepare_y_data(self, y_str_list):
         y_vec = np.zeros((len(y_str_list), self.ctable.vocab_size),
                          dtype=np.bool)
-        if self.config.sequence_model == Sequence.MANY_TO_ONE:
-            self.ctable.y_encode_into(y_vec, y_str_list)
-        if self.config.sequence_model == Sequence.MANY_TO_MANY:
-            self.ctable.encode_into(y_vec, y_str_list)
+        self.ctable.y_encode_into(y_vec, y_str_list)
         return y_vec
 
     def _make_layer(self, **kwargs):
@@ -997,14 +991,15 @@ class ManyToManyTrainer(Trainer):
     def next_train_set_as_np(self):
         x_strs, y_str_list, weight_list = self.pwd_list.next_chunk()
         x_vec = self.prepare_x_data(x_strs)
-        if self.config.embedding_layer:
-            x_vec = np.argmax(x_vec, axis=2)
-        y_vec = self.prepare_x_data(y_str_list)
+        y_vec = self.prepare_y_data(y_str_list)
         weight_vec = np.zeros((len(weight_list)))
         for i, weight in enumerate(weight_list):
             weight_vec[i] = weight
         return shuffle(x_vec, y_vec, weight_vec)
 
+    def prepare_y_data(self, y_str_list):
+        y_vec = self.ctable.encode_many(y_str_list, y_vec=True)
+        return y_vec
 
 class ManyToManyPreprocessor(Preprocessor):
     def __init__(self, config=ModelDefaults()):
@@ -1675,7 +1670,7 @@ class SemiComplexPolicy(ComplexPasswordPolicy):
             count += 1
         if self.has_group(pwd, self.lowercase):
             count += 1
-        if self.has_group(pwd, self.symbols):
+        if not self.all_from_group(pwd, self.non_symbols):
             count += 1
         return self.passes_blacklist(pwd) and count >= 3
 
@@ -1816,7 +1811,6 @@ class Guesser(object):
     def conditional_probs_many(self, astring_list):
         if self.config.sequence_model == Sequence.MANY_TO_MANY:
             predict_strings, _ = self.ctable.encode_many_chunks(astring_list, self.config.max_len)
-            predict_strings = np.argmax(predict_strings, axis=2) # Possibility of future optimization
             answer = self.model.predict(predict_strings,
                                     verbose=0,
                                     batch_size=self.chunk_size_guesser)
