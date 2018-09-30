@@ -49,6 +49,7 @@ def get_current_commit():
 
 
 if __name__ == "__main__":
+    _200MB = 200000000
     args = parse_args()
     pwd_guess = os.path.join(root_dir, "pwd_guess.py")
     convert_py = os.path.join(root_dir, "utils", "convert_enumofile_to_graphing.py")
@@ -70,7 +71,7 @@ if __name__ == "__main__":
         raise FileNotFoundError("Couldn't find the pwd_guess.py script at {}".format(pwd_guess))
     statvfs = os.statvfs(args.rundir)
     free_bytes = statvfs.f_frsize * statvfs.f_bfree
-    if free_bytes < 200000000:
+    if free_bytes < _200MB:
         raise OSError("Minimum disk space of 200MB required to reliably run this code")
 
     #Make training attempt

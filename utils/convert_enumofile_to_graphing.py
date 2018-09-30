@@ -2,7 +2,7 @@
 import argparse
 import os.path
 from collections import Counter
-import numpy as np
+import math
 
 def create_output(args):
     prob = "0x0.1p-1"
@@ -44,7 +44,7 @@ def create_output(args):
     percentile = fraction_guessed(guess_list, sampling_at_guess_num)
 
     out = "Perplexity : {} Entropy: {:.6f}\nGuess number -> Fraction of passwords guessed\n".format(
-        perplexity, np.log2(perplexity))
+        perplexity, math.log(perplexity, 2))
     for guess_num in sampling_at_guess_num:
         out += "{:.0E} -> {:.2f}%\n".format(guess_num, percentile[guess_num])
     with open(os.path.join(args.op_dir, "performance_results.{}".
@@ -52,7 +52,7 @@ def create_output(args):
         out_file.write(out)
 
 def calc_perplexity(probs):
-    return 2 ** (-(1/len(probs))*np.sum(np.log2(probs)))
+    return 2 ** ((-1/len(probs)) * sum([math.log(x, 2) for x in probs]))
 
 def fraction_guessed(guess_list,guess_sampling):
     guess_list = sorted(guess_list)

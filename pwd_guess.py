@@ -8,7 +8,6 @@ import cProfile
 import collections
 import csv
 import gzip
-import io
 import itertools
 import json
 import logging
@@ -111,21 +110,22 @@ class CharacterTable(object):
             self.encode_into(x_vec[i], xstr)
         return x_vec
 
-    def encode_many_chunks(self, string_list, max_input_str_len, maxlen=None):
+    def encode_many_chunks(self, string_list, max_input_str_len, maxlen=None, y_vec=False):
         maxlen = maxlen if maxlen else self.maxlen
         chunks_str_list = []
         iters = list(range(maxlen, max_input_str_len, maxlen // 2))
         iters.append(max_input_str_len)
-        for str in string_list:
+        for a_string in string_list:
             prev_iter = 0
             for i in iters:
-                if prev_iter >= len(str) and (len(str) != 0) or (len(str) == 0 and prev_iter != 0):
+                if prev_iter >= len(a_string) and (len(a_string) != 0) or\
+                        (len(a_string) == 0 and prev_iter != 0):
                     break
-                chunk = str[i-maxlen:i]
+                chunk = a_string[i-maxlen:i]
                 chunks_str_list.append(chunk)
                 prev_iter = i
 
-        return self.encode_many(chunks_str_list, maxlen), chunks_str_list
+        return self.encode_many(chunks_str_list, maxlen, y_vec=y_vec), chunks_str_list
 
     def y_encode_into(self, Y, C):
         for i, c in enumerate(C):
@@ -169,7 +169,8 @@ class CharacterTable(object):
 
         return CharacterTable(config.char_bag, config.context_length,
                               padding_character=config.padding_character,
-                              embedding=config.embedding_layer, sequence_model = config.sequence_model)
+                              embedding=config.embedding_layer,
+                              sequence_model=config.sequence_model)
 
 class OptimizingCharacterTable(CharacterTable):
     def __init__(self, chars, maxlen, rare_characters, uppercase,
@@ -283,7 +284,7 @@ class ConfigurationException(Exception):
 
 
 def read_config_file(afile):
-    filename, fileext = os.path.splitext(afile)
+    _, fileext = os.path.splitext(afile)
     if fileext == '.json':
         file_format = json.load
     elif fileext == '.yaml':
@@ -304,7 +305,7 @@ def read_config_file(afile):
     with open(afile, 'r') as f:
         try:
             answer = file_format(f)
-        except ValueError as e:
+        except ValueError:
             raise
 
     return answer
@@ -499,9 +500,11 @@ class ModelDefaults(object):
                 (not self.secondary_training_save_freqs)):
                 raise ConfigurationException(
                     'Expected secondary_training and secondary_training_save_freqs')
-        if self.sequence_model != Sequence.MANY_TO_MANY and self.sequence_model != Sequence.MANY_TO_ONE:
+        if self.sequence_model != Sequence.MANY_TO_MANY and\
+                self.sequence_model != Sequence.MANY_TO_ONE:
             raise ConfigurationException(
-                "Configuration parameter 'sequence_model' can only be 'many_to_many' or 'many_to_one'")
+                "Configuration parameter 'sequence_model' can only be "
+                "'many_to_many' or 'many_to_one'")
 
     def as_dict(self):
         answer = dict(vars(ModelDefaults).copy())
@@ -1175,6 +1178,9 @@ class Filterer(object):
         self.config = config
         self.longest_pwd = 0
         self.char_bag = config.char_bag
+        if config.sequence_model == Sequence.MANY_TO_MANY:
+            # Replace so that you don't accept passwords with tab character in them
+            self.char_bag = self.char_bag.replace("\t", "")
         self.max_len = config.max_len
         self.min_len = config.min_len
         self.uniquify = uniquify
@@ -1435,10 +1441,11 @@ class ManyToManyProbabilityCalculator(ProbabilityCalculator):
         logging.debug('Initial probabilities: %s, %s', x_strings, y_strings)
         while len(x_strings) != 0:
             probs = self.guesser.batch_prob(x_strings)
-            y_indices, y_strings = self.ctable.encode_many_chunks(y_strings, self.config.max_len)
+            y_indices, y_strings = self.ctable.encode_many_chunks(y_strings,
+                                                                  self.config.max_len, y_vec=True)
             _, x_strings = self.ctable.encode_many_chunks(x_strings, self.config.max_len)
             assert len(probs) == len(y_indices) == len(y_strings) == len(x_strings)
-            for i, y_str in enumerate(y_strings):
+            for i, _ in enumerate(y_strings):
                 for j, y_idx in enumerate(y_indices[i]):
                     if j == len(x_strings[i]):
                         break
@@ -1807,7 +1814,8 @@ class Guesser(object):
 
     def conditional_probs_many(self, astring_list):
         if self.config.sequence_model == Sequence.MANY_TO_MANY:
-            predict_strings, _ = self.ctable.encode_many_chunks(astring_list, self.config.max_len)
+            predict_strings, astring_list = self.ctable.encode_many_chunks(astring_list,
+                                                                           self.config.max_len)
             answer = self.model.predict(predict_strings,
                                     verbose=0,
                                     batch_size=self.chunk_size_guesser)
@@ -1824,7 +1832,8 @@ class Guesser(object):
         if len(answer.shape) == 2:
             answer = np.expand_dims(answer, axis=1)
         if self.config.sequence_model == Sequence.MANY_TO_MANY:
-            assert answer.shape == (len(predict_strings), self.config.context_length, self.ctable.vocab_size)
+            assert answer.shape == (len(predict_strings),
+                                    self.config.context_length, self.ctable.vocab_size)
         else:
             assert answer.shape == (len(astring_list), 1, self.ctable.vocab_size)
         if self.relevel_not_matching_passwords:
@@ -2579,7 +2588,7 @@ def guess(args, config):
 def read_config_args(args):
     try:
         config_args = read_config_file(args['config_args'])
-    except ValueError as e:
+    except ValueError:
         raise
 
     arg_ret = args.copy()

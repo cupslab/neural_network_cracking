@@ -265,7 +265,7 @@ class TrainerTest(unittest.TestCase):
         mock_model.test_on_batch = MagicMock(return_value = (0.5, 0.5))
         t.model = mock_model
         t.train_model(pwd_guess.ModelSerializer())
-        self.assertEqual(t.generation, 2)
+        self.assertEqual(t.generation, 20)
 
     def test_char_table_no_error(self):
         t = pwd_guess.Trainer(None)
@@ -1275,8 +1275,8 @@ class ProbabilityCalculatorTest(unittest.TestCase):
     def test_calc_two(self):
         mock_guesser = Mock()
         mock_guesser.config = pwd_guess.ModelDefaults(
-            min_len = 3, max_len = 3, char_bag = 'ab\n',
-            relevel_not_matching_passwords = False)
+            min_len=3, max_len=3, char_bag='ab\n',
+            relevel_not_matching_passwords=False)
         mock_guesser.should_make_guesses_rare_char_optimizer = False
         mock_guesser.batch_prob = MagicMock(
             return_value=np.array([[[0, 0.5, 0.5]],
@@ -1290,6 +1290,22 @@ class ProbabilityCalculatorTest(unittest.TestCase):
         p = pwd_guess.ProbabilityCalculator(mock_guesser)
         self.assertEqual(set(p.calc_probabilities([('aaa', 1), ('abb', 1)])),
                          set([('aaa', 0.125), ('abb', 0.125)]))
+
+    def test_calc_ManyToMany(self):
+        mock_guesser = Mock()
+        mock_guesser.config = pwd_guess.ModelDefaults(
+            sequence_model=pwd_guess.Sequence.MANY_TO_MANY,
+            min_len=4, max_len=4, char_bag='ab\n\t', context_length=4,
+            relevel_not_matching_passwords=False)
+        mock_guesser.batch_prob = MagicMock(
+            return_value=np.array([[[0, 0, 0.5, 0.5],
+                                   [0, 0, 0.5, 0.5],
+                                   [0, 0, 0.5, 0.5],
+                                   [0, 1, 0, 0]]]))
+        mock_guesser.should_make_guesses_rare_char_optimizer = False
+        p = pwd_guess.ManyToManyProbabilityCalculator(mock_guesser)
+        self.assertEqual(list(p.calc_probabilities([('aaa', 1)])),
+                         [('\taaa', 0.125)])
 
     def test_calc_prefix(self):
         mock_guesser = Mock()
@@ -2277,6 +2293,57 @@ class TestMainConfigurations(unittest.TestCase):
                 "tensorboard" : False,
                 "tensorboard_dir" : self.test_dir
             }
+        })
+
+    @unittest.skipIf(not RUN_SLOW_TESTS, "skipping slow tests")
+    def test_many_to_many(self):
+        self._run_with_config({
+            "args": {},
+            "config": {
+                "training_chunk": 10,
+                "training_main_memory_chunk": 10000000,
+                "min_len": 1,
+                "fork_length": 0,
+                "max_len": 30,
+                "context_length": 20,
+                "chunk_print_interval": 100,
+                "layers": 2,
+                "hidden_size": 32,
+                "generations": 5,
+                "training_accuracy_threshold": -1,
+                "train_test_ratio": 10,
+                "model_type": "LSTM",
+                "tokenize_words": False,
+                "most_common_token_count": 2000,
+                "sequence_model" : "many_to_many",
+                "bidirectional_rnn": False,
+                "train_backwards": True,
+
+                "dense_layers": 1,
+                "dense_hidden_size": 512,
+                "secondary_training": False,
+                "simulated_frequency_optimization": False,
+
+                "randomize_training_order": False,
+                "uppercase_character_optimization": False,
+                "rare_character_optimization": False,
+
+                "rare_character_optimization_guessing": False,
+                "parallel_guessing": False,
+                "lower_probability_threshold": 1e-7,
+                "chunk_size_guesser": 40000,
+                "random_walk_seed_num": 100000,
+                "max_gpu_prediction_size": 10000,
+                "random_walk_seed_iterations": 1,
+                "no_end_word_cache": True,
+                "save_model_versioned": False,
+                "early_stopping": False,
+                "embedding_layer": True,
+                "embedding_size": 8,
+                "tensorboard": False
+            }
+        
+
         })
 
 
