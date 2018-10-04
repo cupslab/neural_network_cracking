@@ -81,6 +81,30 @@ class CharacterTableTest(unittest.TestCase):
         self.assertEqual(ctable.translate('aba'), 'aba')
         self.assertEqual(ctable.translate('aba'), 'aba')
 
+    def test_encode_many_chunks(self):
+        ctable = pwd_guess.CharacterTable('abc', 4, embedding=True,
+                                          sequence_model=pwd_guess.Sequence.MANY_TO_ONE)
+        indices, strings = ctable.encode_many_chunks(['abcabc', 'aaabbb'], 6)
+        np.testing.assert_array_equal(indices, np.array([[0, 1, 2, 0], [2, 0, 1, 2],
+                                                        [0, 0, 0, 1], [0, 1, 1, 1]]))
+        self.assertListEqual(strings, ['abca', 'cabc', 'aaab', 'abbb'])
+        zero = [True, False, False]
+        one = [False, True, False]
+        two = [False, False, True]
+        ctable = pwd_guess.CharacterTable('abc', 4, embedding=False,
+                                          sequence_model=pwd_guess.Sequence.MANY_TO_ONE)
+        indices, strings = ctable.encode_many_chunks(['abcabc', 'aaabbb'], 6)
+        np.testing.assert_array_equal(indices, np.array([[zero, one, two, zero], [two, zero, one, two],
+                                                       [zero, zero, zero, one], [zero, one, one, one]]))
+        self.assertListEqual(strings, ['abca', 'cabc', 'aaab', 'abbb'])
+
+        ctable = pwd_guess.CharacterTable('abc', 4, embedding=True,
+                                          sequence_model=pwd_guess.Sequence.MANY_TO_MANY)
+        indices, strings = ctable.encode_many_chunks(['abcabc', 'aaabbb'], 6)
+        np.testing.assert_array_equal(indices, np.array([[0, 1, 2, 0], [2, 0, 1, 2],
+                                                        [0, 0, 0, 1], [0, 1, 1, 1]]))
+        self.assertListEqual(strings, ['abca', 'cabc', 'aaab', 'abbb'] )
+
 class OptimizingTableTest(unittest.TestCase):
     def test_table(self):
         ctable = pwd_guess.OptimizingCharacterTable('abcd', 2, 'ab', False)
@@ -232,6 +256,7 @@ class TrainerTest(unittest.TestCase):
 
     def test_train_model(self):
         config = pwd_guess.ModelDefaults(max_len = 5, generations = 20)
+        config.sequence_model = pwd_guess.Sequence.MANY_TO_ONE
         pre = pwd_guess.Preprocessor(config)
         pre.begin([('pass', 1)])
         t = pwd_guess.Trainer(pre, config=config)
@@ -240,18 +265,64 @@ class TrainerTest(unittest.TestCase):
         mock_model.test_on_batch = MagicMock(return_value = (0.5, 0.5))
         t.model = mock_model
         t.train_model(pwd_guess.ModelSerializer())
-        self.assertEqual(t.generation, 2)
+        self.assertEqual(t.generation, 20)
 
     def test_char_table_no_error(self):
         t = pwd_guess.Trainer(None)
         self.assertNotEqual(None, t.ctable)
         t.ctable.encode('1234' + ('\n' * 36), 40)
 
-    def test_output_as_np(self):
-        pre = pwd_guess.Preprocessor()
+    def test_output_as_np_many_one_no_embedding(self):
+        config = pwd_guess.ModelDefaults(max_len=5, generations=20)
+        config.sequence_model = pwd_guess.Sequence.MANY_TO_ONE
+        config.embedding_layer = False
+        pre = pwd_guess.Preprocessor(config)
         pre.begin([('pass', 1)])
-        t = pwd_guess.Trainer(pre)
-        t.next_train_set_as_np()
+
+        t = pwd_guess.Trainer(pre, config=config)
+        x_vec, y_vec, weight_vec = t.next_train_set_as_np()
+        self.assertTupleEqual(x_vec.shape, (5, t.config.max_len, len(t.config.char_bag)))
+        self.assertTupleEqual(y_vec.shape, (5, len(t.config.char_bag)))
+
+    def test_output_as_np_many_one_embedding(self):
+        config = pwd_guess.ModelDefaults(max_len=5, generations=20)
+        config.sequence_model = pwd_guess.Sequence.MANY_TO_ONE
+        config.embedding_layer = True
+        config.embedding_size = 20
+        pre = pwd_guess.Preprocessor(config)
+        pre.begin([('pass', 1)])
+
+        t = pwd_guess.Trainer(pre, config=config)
+        x_vec, y_vec, weight_vec = t.next_train_set_as_np()
+        self.assertTupleEqual(x_vec.shape, (5, t.config.max_len))
+        self.assertTupleEqual(y_vec.shape, (5, len(t.config.char_bag)))
+
+    def test_output_as_np_many_many_embedding(self):
+        config = pwd_guess.ModelDefaults(max_len=5, generations=20)
+        config.sequence_model = pwd_guess.Sequence.MANY_TO_MANY
+        config.embedding_layer = True
+        config.embedding_size = 20
+        config.sequence_model_updates()
+        pre = pwd_guess.ManyToManyPreprocessor(config)
+        pre.begin([('pass', 1)])
+
+        t = pwd_guess.ManyToManyTrainer(pre, config=config)
+        x_vec, y_vec, weight_vec = t.next_train_set_as_np()
+        self.assertTupleEqual(x_vec.shape, (1, t.config.max_len))
+        self.assertTupleEqual(y_vec.shape, (1, t.config.max_len, len(t.config.char_bag)))
+
+    def test_output_as_np_many_many_no_embedding(self):
+        config = pwd_guess.ModelDefaults(max_len=5, generations=20)
+        config.sequence_model = pwd_guess.Sequence.MANY_TO_MANY
+        config.embedding_layer = False
+        config.sequence_model_updates()
+        pre = pwd_guess.ManyToManyPreprocessor(config)
+        pre.begin([('pass', 1)])
+
+        t = pwd_guess.ManyToManyTrainer(pre, config=config)
+        x_vec, y_vec, weight_vec = t.next_train_set_as_np()
+        self.assertTupleEqual(x_vec.shape, (1, t.config.max_len, len(t.config.char_bag)))
+        self.assertTupleEqual(y_vec.shape, (1, t.config.max_len, len(t.config.char_bag)))
 
     def test_build_model(self):
         t = pwd_guess.Trainer(['pass'], config=pwd_guess.ModelDefaults(
@@ -1192,10 +1263,10 @@ class ProbabilityCalculatorTest(unittest.TestCase):
             min_len = 3, max_len = 3, char_bag = 'ab\n',
             relevel_not_matching_passwords = False)
         mock_guesser.batch_prob = MagicMock(
-            return_value=[[[0, 0.5, 0.5]],
+            return_value=np.array([[[0, 0.5, 0.5]],
                           [[0, 0.5, 0.5]],
                           [[0, 0.5, 0.5]],
-                          [[1, 0, 0]]])
+                          [[1, 0, 0]]]))
         mock_guesser.should_make_guesses_rare_char_optimizer = False
         p = pwd_guess.ProbabilityCalculator(mock_guesser)
         self.assertEqual(list(p.calc_probabilities([('aaa', 1)])),
@@ -1204,21 +1275,37 @@ class ProbabilityCalculatorTest(unittest.TestCase):
     def test_calc_two(self):
         mock_guesser = Mock()
         mock_guesser.config = pwd_guess.ModelDefaults(
-            min_len = 3, max_len = 3, char_bag = 'ab\n',
-            relevel_not_matching_passwords = False)
+            min_len=3, max_len=3, char_bag='ab\n',
+            relevel_not_matching_passwords=False)
         mock_guesser.should_make_guesses_rare_char_optimizer = False
         mock_guesser.batch_prob = MagicMock(
-            return_value=[[[0, 0.5, 0.5]],
+            return_value=np.array([[[0, 0.5, 0.5]],
                           [[0, 0.5, 0.5]],
                           [[0, 0.5, 0.5]],
                           [[1, 0, 0]],
                           [[0, 0.5, 0.5]],
                           [[0, 0.5, 0.5]],
                           [[0, 0.5, 0.5]],
-                          [[1, 0, 0]]])
+                          [[1, 0, 0]]]))
         p = pwd_guess.ProbabilityCalculator(mock_guesser)
         self.assertEqual(set(p.calc_probabilities([('aaa', 1), ('abb', 1)])),
                          set([('aaa', 0.125), ('abb', 0.125)]))
+
+    def test_calc_ManyToMany(self):
+        mock_guesser = Mock()
+        mock_guesser.config = pwd_guess.ModelDefaults(
+            sequence_model=pwd_guess.Sequence.MANY_TO_MANY,
+            min_len=4, max_len=4, char_bag='ab\n\t', context_length=4,
+            relevel_not_matching_passwords=False)
+        mock_guesser.batch_prob = MagicMock(
+            return_value=np.array([[[0, 0, 0.5, 0.5],
+                                   [0, 0, 0.5, 0.5],
+                                   [0, 0, 0.5, 0.5],
+                                   [0, 1, 0, 0]]]))
+        mock_guesser.should_make_guesses_rare_char_optimizer = False
+        p = pwd_guess.ManyToManyProbabilityCalculator(mock_guesser)
+        self.assertEqual(list(p.calc_probabilities([('aaa', 1)])),
+                         [('\taaa', 0.125)])
 
     def test_calc_prefix(self):
         mock_guesser = Mock()
@@ -1227,14 +1314,14 @@ class ProbabilityCalculatorTest(unittest.TestCase):
             relevel_not_matching_passwords = False)
         mock_guesser.should_make_guesses_rare_char_optimizer = False
         mock_guesser.batch_prob = MagicMock(
-            return_value=[[[0, 0.5, 0.5]],
+            return_value=np.array([[[0, 0.5, 0.5]],
                           [[0, 0.4, 0.6]],
                           [[0, 0.5, 0.5]],
                           [[.5, .25, .25]],
                           [[0, 0.5, 0.5]],
                           [[0, 0.4, 0.6]],
                           [[0, 0.5, 0.5]],
-                          [[.5, .25, .25]]])
+                          [[.5, .25, .25]]]))
         p = pwd_guess.ProbabilityCalculator(mock_guesser, prefixes = True)
         self.assertEqual(set(p.calc_probabilities([('aaa', 1), ('abb', 1)])),
                          set([('aaa', 0.1), ('abb', 0.15)]))
@@ -1261,12 +1348,12 @@ class ProbabilityCalculatorTest(unittest.TestCase):
             mock_guesser.config = config
             mock_guesser.should_make_guesses_rare_char_optimizer = True
             mock_guesser.batch_prob = MagicMock(
-                return_value=[[[0, 0.5, 0.5]],
+                return_value=np.array([[[0, 0.5, 0.5]],
                               [[0, 0.5, 0.5]],
                               [[1, 0, 0]],
                               [[0, 0.5, 0.5]],
                               [[0, 0.5, 0.5]],
-                              [[1, 0, 0]]])
+                              [[1, 0, 0]]]))
             p = pwd_guess.ProbabilityCalculator(mock_guesser)
             self.assertEqual(set(p.calc_probabilities(
                 [('aa', 1), ('bB', 1)])),
@@ -1942,6 +2029,46 @@ class PolicyTests(unittest.TestCase):
         self.assertFalse(policy.pwd_complies('999Apple*'))
         self.assertTrue(policy.pwd_complies('111*jjjJ'))
 
+    def test_3class12(self):
+        config = Mock()
+        config.enforced_policy = '3class12'
+        policy = pwd_guess.BasePasswordPolicy.fromConfig(config)
+        self.assertTrue(type(policy), pwd_guess.SemiComplexPolicy)
+
+        self.assertTrue(policy.has_group('asdf', policy.lowercase))
+        self.assertFalse(policy.has_group('1', policy.lowercase))
+        self.assertTrue(policy.has_group('10', policy.digits))
+        self.assertFalse(policy.has_group('a', policy.digits))
+        self.assertTrue(policy.has_group('A', policy.uppercase))
+        self.assertFalse(policy.has_group('a', policy.uppercase))
+        self.assertTrue(policy.all_from_group('asdf0A', policy.non_symbols))
+        self.assertFalse(policy.all_from_group('asdf*', policy.non_symbols))
+        self.assertTrue(policy.passes_blacklist('asdf*'))
+        self.assertFalse(policy.pwd_complies('asdf'))
+        self.assertFalse(policy.pwd_complies('asdfasd'))
+        self.assertFalse(policy.pwd_complies(''))
+        self.assertFalse(policy.pwd_complies('asdf' * 30))
+        self.assertFalse(policy.pwd_complies('asdfasdf'))
+        self.assertFalse(policy.pwd_complies('asdfasdfasdfasdf'))
+        self.assertFalse(policy.pwd_complies('1Aa*asdf'))
+        self.assertFalse(policy.pwd_complies('1Aa*'))
+        self.assertFalse(policy.pwd_complies('1A*'))
+        self.assertTrue(policy.pwd_complies('111*asdf12345'))
+        self.assertTrue(policy.pwd_complies('1Aasdfasdfasdfasdf'))
+        self.assertTrue(policy.pwd_complies('1Aasdfasdfasdfasdf*'))
+
+        self.assertTrue(policy.pwd_complies('999Apple*!@#'))
+        self.assertTrue(policy.pwd_complies('111*Asdfasdfg'))
+        self.assertTrue(policy.pwd_complies('111*jjjJ12345'))
+        self.assertTrue(policy.pwd_complies('abcdefgh1234Z'))
+        with tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR) as temp_bl:
+            temp_bl.write('asdf\n')
+            temp_bl.write('apple\n')
+            temp_bl.flush()
+            policy.load_blacklist(temp_bl.name)
+        self.assertFalse(policy.pwd_complies('11199999*Asdf'))
+        self.assertFalse(policy.pwd_complies('00011999Apple*'))
+        self.assertTrue(policy.pwd_complies('111*jjjJ12345'))
 class PasswordPolicyEnforcingSerializerTest(unittest.TestCase):
     def test_serializer(self):
         config = Mock()
@@ -2166,6 +2293,57 @@ class TestMainConfigurations(unittest.TestCase):
                 "tensorboard" : False,
                 "tensorboard_dir" : self.test_dir
             }
+        })
+
+    @unittest.skipIf(not RUN_SLOW_TESTS, "skipping slow tests")
+    def test_many_to_many(self):
+        self._run_with_config({
+            "args": {},
+            "config": {
+                "training_chunk": 10,
+                "training_main_memory_chunk": 10000000,
+                "min_len": 1,
+                "fork_length": 0,
+                "max_len": 30,
+                "context_length": 20,
+                "chunk_print_interval": 100,
+                "layers": 2,
+                "hidden_size": 32,
+                "generations": 5,
+                "training_accuracy_threshold": -1,
+                "train_test_ratio": 10,
+                "model_type": "LSTM",
+                "tokenize_words": False,
+                "most_common_token_count": 2000,
+                "sequence_model" : "many_to_many",
+                "bidirectional_rnn": False,
+                "train_backwards": True,
+
+                "dense_layers": 1,
+                "dense_hidden_size": 512,
+                "secondary_training": False,
+                "simulated_frequency_optimization": False,
+
+                "randomize_training_order": False,
+                "uppercase_character_optimization": False,
+                "rare_character_optimization": False,
+
+                "rare_character_optimization_guessing": False,
+                "parallel_guessing": False,
+                "lower_probability_threshold": 1e-7,
+                "chunk_size_guesser": 40000,
+                "random_walk_seed_num": 100000,
+                "max_gpu_prediction_size": 10000,
+                "random_walk_seed_iterations": 1,
+                "no_end_word_cache": True,
+                "save_model_versioned": False,
+                "early_stopping": False,
+                "embedding_layer": True,
+                "embedding_size": 8,
+                "tensorboard": False
+            }
+        
+
         })
 
 

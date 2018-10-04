@@ -5,6 +5,9 @@ import os.path
 import shutil
 import subprocess
 import json
+import time
+
+root_dir = os.path.dirname(os.path.abspath(__file__))
 def parse_args():
     p = argparse.ArgumentParser(description="Script to automate a training and guess runs with specified config files" )
     p.add_argument("--rundir", default=".", help="Specify the directory from where the run will be launched"
@@ -35,28 +38,41 @@ def validate_args(args):
     if args.train_only and args.guess_config:
         print("Guess config will be ignored as the run is train only")
 
+def get_current_commit():
+    try:
+        commit_run = subprocess.run("git rev-parse HEAD", shell=True, check=True,
+                                    stdout=subprocess.PIPE, universal_newlines=True)
+        commit_hash = commit_run.stdout.strip()
+        return commit_hash
+    except subprocess.CalledProcessError:
+        return None
+
 
 if __name__ == "__main__":
+    _200MB = 200000000
     args = parse_args()
-    root_dir = os.path.dirname(os.path.abspath(__file__))
     pwd_guess = os.path.join(root_dir, "pwd_guess.py")
     convert_py = os.path.join(root_dir, "utils", "convert_enumofile_to_graphing.py")
     try:
         os.mkdir(args.rundir)
     except FileExistsError:
         print("Path already exists, will use the existing directory")
-
+    time_string = ""
     validate_args(args)
     os.chdir(args.rundir)
+    commit = get_current_commit()
     if args.reason:
-        with open("reason.txt","w") as readme:
+        with open("reason.txt", "w") as readme:
             readme.write(args.reason)
+    if commit:
+        with open("commit.hash", "w") as commit_file:
+            commit_file.write(commit)
     if not os.path.exists(pwd_guess):
         raise FileNotFoundError("Couldn't find the pwd_guess.py script at {}".format(pwd_guess))
     statvfs = os.statvfs(args.rundir)
     free_bytes = statvfs.f_frsize * statvfs.f_bfree
-    if free_bytes < 500000000:
-        raise OSError("Minimum disk space of 500MB required to reliably run this code")
+    if free_bytes < _200MB:
+        raise OSError("Minimum disk space of 200MB required to reliably run this code")
 
     #Make training attempt
     if not args.start_secondary and not args.start_guessing:
@@ -67,7 +83,10 @@ if __name__ == "__main__":
 
         train_cmd = "python3 {} --config-args \"{}\" |& tee training.log".format(pwd_guess, os.path.basename(args.train_config))
         print(train_cmd)
+        t_start = time.time()
         ret = subprocess.call(train_cmd, shell=True, executable='/bin/bash')
+        train_time = time.time() - t_start
+        time_string += "Training time = {} seconds\n".format(train_time)
         train_conf = json.load(open(os.path.basename(args.train_config), "r"))
         try:
             shutil.copy(train_conf['args']['weight_file'],
@@ -85,7 +104,9 @@ if __name__ == "__main__":
         secondary_cmd = "python3 {} --config-args \"{}\" |& tee secondary.log".\
             format(pwd_guess, os.path.basename(args.secondary_config))
         print(secondary_cmd)
+        t_start = time.time()
         ret = subprocess.call(secondary_cmd, shell=True, executable='/bin/bash')
+        time_string += "Secondary Training Time = {} seconds\n".format(time.time() - t_start)
         if ret != 0:
             raise RuntimeError("The secondary training process returned non-zero error code."
                                "Look in the secondary.log for more information")
@@ -99,10 +120,15 @@ if __name__ == "__main__":
 
     guess_cmd = "python3 {} --config-args \"{}\" |& tee guess.log".format(pwd_guess, os.path.basename(args.guess_config))
     print(guess_cmd)
-    ret = subprocess.call(guess_cmd, shell=True,executable='/bin/bash')
+    t_start = time.time()
+    ret = subprocess.call(guess_cmd, shell=True, executable='/bin/bash')
+    time_string += "Guessing Time = {} seconds\n".format(time.time() -t_start)
     if ret != 0:
         raise RuntimeError("The guessing process returned non-zero error code. Look in guess.log for more information")
     guess_conf = json.load(open(os.path.basename(args.guess_config), "r"))
+
+    with open("timing.txt", "w") as time_f:
+        time_f.write(time_string)
 
     #Convert to format for plotting
     guess_op_file = guess_conf['args']['enumerate_ofile']
