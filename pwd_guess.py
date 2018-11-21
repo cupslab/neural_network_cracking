@@ -63,9 +63,12 @@ FNAME_PREFIX_PROCESS_OUT = 'out.child_process.'
 FORKED_FLAG = 'forked'
 
 MEMORY_ONLY = ':memory:'
+
 class Sequence(IntEnum):
     MANY_TO_ONE = 0
+    many_to_one = 0
     MANY_TO_MANY = 1
+    many_to_many = 1
 
 # From: https://docs.python.org/3.4/library/itertools.html
 def grouper(iterable, num, fillvalue=None):
@@ -77,7 +80,7 @@ def grouper(iterable, num, fillvalue=None):
                itertools.zip_longest(*args, fillvalue=fillvalue))
 
 
-class CharacterTable(object):
+class CharacterTable():
     def __init__(self, chars, maxlen, embedding=False, padding_character=False,
                  sequence_model=Sequence.MANY_TO_ONE):
         self.chars = sorted(set(chars))
@@ -188,8 +191,8 @@ class OptimizingCharacterTable(CharacterTable):
             char_bag = char_bag.replace(r, '')
         if len(rare_characters):
             char_bag += self.rare_characters[0]
-            self.rare_dict = dict([(char, self.rare_characters[0])
-                                   for char in self.rare_characters])
+            self.rare_dict = {
+                char : self.rare_characters[0] for char in self.rare_characters}
             self.rare_character_preimage = {
                 self.rare_characters[0] : list(self.rare_characters)}
         else:
@@ -229,7 +232,7 @@ class OptimizingCharacterTable(CharacterTable):
         return astring.translate(self.translate_table)
 
 
-class ModelSerializer(object):
+class ModelSerializer():
     def __init__(self, archfile=None, weightfile=None, versioned=False):
         self.archfile = archfile
         self.weightfile = weightfile
@@ -290,7 +293,7 @@ def read_config_file(afile):
     elif fileext == '.yaml':
         try:
             import yaml
-        except ImportError as e:
+        except ImportError:
             logging.error(
                 'python yaml library is required for yaml configs. '
                 'Run: pip install yaml')
@@ -303,15 +306,12 @@ def read_config_file(afile):
         file_format = json.load
 
     with open(afile, 'r') as f:
-        try:
-            answer = file_format(f)
-        except ValueError:
-            raise
+        answer = file_format(f)
 
     return answer
 
 
-class ModelDefaults(object):
+class ModelDefaults():
     char_bag = (string.ascii_lowercase + string.ascii_uppercase +
                 string.digits + SYMBOLS +
                 PASSWORD_END)
@@ -388,11 +388,9 @@ class ModelDefaults(object):
 
         if self.context_length is None:
             self.context_length = self.max_len
+
         if isinstance(self.sequence_model, str):
-            if self.sequence_model.lower() == "many_to_many":
-                self.sequence_model = Sequence.MANY_TO_MANY
-            elif self.sequence_model.lower() == "many_to_one":
-                self.sequence_model = Sequence.MANY_TO_ONE
+            self.sequence_model = Sequence[self.sequence_model]
 
         self._read_intermediate_data_time = None
         self._intermediate_data = self._read_intermediate_data()
@@ -428,7 +426,7 @@ class ModelDefaults(object):
             return
 
         mod_time = os.path.getmtime(self.intermediate_fname)
-        assert self._read_intermediate_data_time != None
+        assert self._read_intermediate_data_time is not None
         if mod_time >= self._read_intermediate_data_time:
             self._intermediate_data = self._read_intermediate_data()
 
@@ -509,9 +507,10 @@ class ModelDefaults(object):
     def as_dict(self):
         answer = dict(vars(ModelDefaults).copy())
         answer.update(self.adict)
-        return dict([(key, value) for key, value in answer.items() if (
-            key[0] != '_' and not hasattr(value, '__call__')
-            and not isinstance(value, staticmethod))])
+        return {
+            key: value for key, value in answer.items() if (
+                key[0] != '_' and not hasattr(value, '__call__')
+                and not isinstance(value, staticmethod))}
 
     def set_intermediate_info(self, key, value):
         self._intermediate_data[key] = value
@@ -539,7 +538,7 @@ class ModelDefaults(object):
         if self.sequence_model == Sequence.MANY_TO_MANY:
             self.char_bag += PASSWORD_START
 
-class BasePreprocessor(object):
+class BasePreprocessor():
     def __init__(self, config=ModelDefaults()):
         self.config = config
 
@@ -569,8 +568,11 @@ class BasePreprocessor(object):
     def fromConfig(config):
         if config.sequence_model == Sequence.MANY_TO_MANY:
             return ManyToManyPreprocessor(config)
-        elif config.sequence_model == Sequence.MANY_TO_ONE:
+
+        if config.sequence_model == Sequence.MANY_TO_ONE:
             return Preprocessor(config)
+
+        raise ValueError('unknown sequence model: %s' % config.sequence_model)
 
 
 class Preprocessor(BasePreprocessor):
@@ -655,7 +657,7 @@ class Preprocessor(BasePreprocessor):
             random.shuffle(self.pwd_whole_list)
 
 
-class Trainer(object):
+class Trainer():
     def __init__(self, pwd_list, config=ModelDefaults(), multi_gpu=1):
         self.config = config
         self.chunk = 0
@@ -709,13 +711,15 @@ class Trainer(object):
                 return_sequences=True,
                 go_backwards=recurrent_train_backwards,
                 **kwargs)
-        elif model_type == 'LSTM':
+
+        if model_type == 'LSTM':
             return recurrent.LSTM(
                 hidden_size,
                 return_sequences=True,
                 go_backwards=recurrent_train_backwards,
                 **kwargs)
-        elif model_type == 'Conv1D':
+
+        if model_type == 'Conv1D':
             return Conv1D(
                 hidden_size,
                 self.config.convolutional_kernel_size,
@@ -943,9 +947,6 @@ class Trainer(object):
 
 
 class ManyToManyTrainer(Trainer):
-    def __init__(self, pwd_list, config=ModelDefaults(), multi_gpu=1):
-        super().__init__(pwd_list, config, multi_gpu)
-
     def _return_model(self):
         model = Sequential()
 
@@ -1005,9 +1006,6 @@ class ManyToManyTrainer(Trainer):
         return y_vec
 
 class ManyToManyPreprocessor(Preprocessor):
-    def __init__(self, config=ModelDefaults()):
-        super().__init__(config)
-
     def all_prefixes(self, pwd):
         return [PASSWORD_START + pwd]
 
@@ -1017,7 +1015,7 @@ class ManyToManyPreprocessor(Preprocessor):
     def repeat_weight(self, pwd):
         return [self.password_weight(pwd)]
 
-class PwdList(object):
+class PwdList():
     class NoListTypeException(Exception):
         pass
 
@@ -1054,7 +1052,7 @@ class PwdList(object):
 
             return lambda flist: TsvList(flist[0])
 
-        elif file_formats[0] == 'list':
+        if file_formats[0] == 'list':
             return lambda flist: PwdList(flist[0])
 
         raise PwdList.NoListTypeException(
@@ -1100,7 +1098,7 @@ class TsvSimulatedList(TsvListParent):
             if pwd is not None:
                 yield (pwd, value)
 
-class ConcatenatingList(object):
+class ConcatenatingList():
     CONFIG_IM_KEY = 'empirical_weighting'
 
     def __init__(self, config, file_list, file_formats):
@@ -1167,7 +1165,7 @@ class ConcatenatingList(object):
             answer.append(map(fn, self.get_iterable(atuple)))
         return itertools.chain.from_iterable(answer)
 
-class Filterer(object):
+class Filterer():
     def __init__(self, config, uniquify=False):
         self.filtered_out = 0
         self.total = 0
@@ -1250,7 +1248,7 @@ class Filterer(object):
     def filter(self, alist, quick=False):
         return filter(lambda x: self.pwd_is_valid(x[0], quick=quick), alist)
 
-class ResetablePwdList(object):
+class ResetablePwdList():
     def __init__(self, pwd_file, pwd_format, config):
         self.pwd_file = pwd_file
         self.pwd_format = pwd_format
@@ -1276,7 +1274,7 @@ class ResetablePwdList(object):
     def as_iterator(self, quick=False):
         return (pwd for pwd in self.create_new(quick))
 
-class GuessSerializer(object):
+class GuessSerializer():
     TOTAL_COUNT_RE = re.compile('Total count: (\\d*)\n')
     TOTAL_COUNT_FORMAT = 'Total count: %s\n'
 
@@ -1310,7 +1308,7 @@ class GuessSerializer(object):
         self.ostream.flush()
         self.ostream.close()
 
-class DelegatingSerializer(object):
+class DelegatingSerializer():
     def __init__(self, serializer):
         self.serializer = serializer
 
@@ -1393,7 +1391,7 @@ class GuessNumberGenerator(GuessSerializer):
     def get_stats(self):
         raise NotImplementedError()
 
-class ProbabilityCalculator(object):
+class ProbabilityCalculator():
     def __init__(self, guesser, prefixes=False):
         self.guesser = guesser
         self.ctable = CharacterTable.fromConfig(guesser.config)
@@ -1432,9 +1430,6 @@ class ProbabilityCalculator(object):
                 prev_prob = 1
 
 class ManyToManyProbabilityCalculator(ProbabilityCalculator):
-    def __init__(self, guesser, prefixes=False):
-        super().__init__(guesser, prefixes)
-
     def probability_stream(self, pwd_list):
         self.preproc.begin(pwd_list)
         x_strings, y_strings, _ = self.preproc.next_chunk()
@@ -1565,7 +1560,7 @@ class PasswordTemplateSerializer(DelegatingSerializer):
 # Initialized later
 policy_list = {}
 
-class BasePasswordPolicy(object):
+class BasePasswordPolicy():
     def pwd_complies(self, pwd):
         raise NotImplementedError()
 
@@ -1706,7 +1701,7 @@ class PasswordPolicyEnforcingSerializer(DelegatingSerializer):
             self.serializer.serialize(pwd, 0)
 
 
-class Guesser(object):
+class Guesser():
     def __init__(self, model, config, ostream, prob_cache=None):
         self.model = model
         self.config = config
@@ -1745,8 +1740,12 @@ class Guesser(object):
         logging.info('Calculating test set probabilities')
         if self.config.sequence_model == Sequence.MANY_TO_MANY:
             return ManyToManyProbabilityCalculator(self).calc_probabilities(pwds)
-        elif self.config.sequence_model == Sequence.MANY_TO_ONE:
+
+        if self.config.sequence_model == Sequence.MANY_TO_ONE:
             return ProbabilityCalculator(self).calc_probabilities(pwds)
+
+        raise ValueError(
+            'unknown sequence_model: %s' % self.config.sequence_model)
 
     def calculate_probs_from_file(self):
         if self._calc_prob_cache is None:
@@ -1946,6 +1945,9 @@ class RandomWalkGuesser(Guesser):
         if self.enforced_policy:
             self.policy = BasePasswordPolicy.fromConfig(self.config)
         self.expander = self.output_serializer
+
+         # pylint: disable=I1101
+         # generator has this field
         self.next_node_fn = generator.next_nodes_random_walk
         self.estimates = []
 
@@ -2196,7 +2198,7 @@ class DelAmicoCalculator(GuessSerializer):
 class GuesserBuilderError(Exception):
     pass
 
-class GuesserBuilder(object):
+class GuesserBuilder():
     special_class_builder_map = {
         'random_walk' : RandomWalkGuesser,
         'delamico_random_walk' : RandomWalkDelAmico,
@@ -2586,10 +2588,7 @@ def guess(args, config):
         guesser.complete_guessing()
 
 def read_config_args(args):
-    try:
-        config_args = read_config_file(args['config_args'])
-    except ValueError:
-        raise
+    config_args = read_config_file(args['config_args'])
 
     arg_ret = args.copy()
     arg_ret.update(config_args['args'])
