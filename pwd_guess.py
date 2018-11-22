@@ -60,8 +60,6 @@ FNAME_PREFIX_SUBPROCESS_CONFIG = 'child_process.'
 FNAME_PREFIX_PROCESS_LOG = 'log.child_process.'
 FNAME_PREFIX_PROCESS_OUT = 'out.child_process.'
 
-FORKED_FLAG = 'forked'
-
 MEMORY_ONLY = ':memory:'
 
 class Sequence(IntEnum):
@@ -257,24 +255,12 @@ class ModelSerializer():
         logging.info('Done saving model')
 
     def load_model(self):
-        # This is for unittesting
-        def mock_predict_smart_parallel(distribution, input_vec, **_):
-            answer = []
-            for _ in range(len(input_vec)):
-                answer.append([distribution.copy()])
-            return answer
         logging.info('Loading model architecture')
         with open(self.archfile, 'r') as arch:
             arch_data = arch.read()
             as_json = json.loads(arch_data)
-            if 'mock_model' in as_json:
-                model = unittest.mock.Mock() # pylint: disable=no-member
-                model.predict = lambda x, **kwargs: mock_predict_smart_parallel(
-                    as_json['mock_model'], x, **kwargs)
-                logging.info(
-                    'Using mock model. You should not see this in production. ')
-                return model
             model = self.model_creator_from_json(arch_data)
+
         logging.info('Loading model weights')
         model.load_weights(self.weightfile)
         logging.info('Done loading model')
@@ -310,9 +296,9 @@ def read_config_file(afile):
 
 
 class ModelDefaults():
-    char_bag = (string.ascii_lowercase + string.ascii_uppercase +
-                string.digits + SYMBOLS +
-                PASSWORD_END)
+    char_bag = (
+        string.ascii_lowercase + string.ascii_uppercase + string.digits +
+        SYMBOLS + PASSWORD_END)
     model_type = 'LSTM'
     sequence_model = Sequence.MANY_TO_ONE
     hidden_size = 128
@@ -326,8 +312,6 @@ class ModelDefaults():
     relevel_not_matching_passwords = True
     training_accuracy_threshold = -1.0
     train_test_ratio = 10
-    parallel_guessing = False
-    fork_length = 0
     rare_character_optimization = False
     rare_character_optimization_guessing = False
     uppercase_character_optimization = False
@@ -348,7 +332,6 @@ class ModelDefaults():
     chunk_size_guesser = 1000
     random_walk_seed_num = 1000
     max_gpu_prediction_size = 25000
-    gpu_fork_bias = 2
     cpu_limit = 8
     random_walk_confidence_bound_z_value = 1.96
     random_walk_confidence_percent = 5
@@ -447,9 +430,6 @@ class ModelDefaults():
         return ModelDefaults(read_config_file(afile))
 
     def validate(self):
-        if self.fork_length >= self.min_len:
-            raise ConfigurationException('expected fork_length < min_len')
-
         if self.max_len > 255:
             raise ConfigurationException('expected max_len <= 255')
 
@@ -1583,7 +1563,7 @@ class ComplexPasswordPolicy(BasePasswordPolicy):
     upper_and_lowercase = set(string.ascii_uppercase + string.ascii_lowercase)
     non_symbols = set(
         string.digits + string.ascii_uppercase + string.ascii_lowercase)
-    symbols = set(SYMBOLS)
+
     def __init__(self, required_length=8):
         self.blacklist = set()
         self.required_length = required_length
@@ -1748,6 +1728,7 @@ class Guesser():
         if self._calc_prob_cache is None:
             logging.info('Calculating pwd prob from file for the first time')
             self._calc_prob_cache = list(self.do_calculate_probs_from_file())
+
         return self._calc_prob_cache
 
     def _should_make_guesses_rare_char_optimizer(self):
@@ -2210,7 +2191,6 @@ class GuesserBuilder():
         self.serializer = None
         self.ostream = None
         self.ofile_path = None
-        self.parallel = self.config.parallel_guessing
         self.seed_probs = None
 
     def add_model(self, model):
@@ -2236,33 +2216,25 @@ class GuesserBuilder():
         self.ofile_path = path
         return self.add_stream(os.fdopen(handle, 'w'))
 
-    def add_parallel_setting(self, setting):
-        self.parallel = setting
-        return self
-
     def add_seed_probs(self, probs):
         self.seed_probs = probs
         return self
 
     def build(self):
-        if self.parallel:
-            model_or_serializer = self.serializer
-        else:
-            model_or_serializer = self.model
-            if self.serializer is not None and self.model is None:
-                model_or_serializer = self.serializer.load_model()
+        model_or_serializer = self.model
+        if self.serializer is not None and self.model is None:
+            model_or_serializer = self.serializer.load_model()
+
         if model_or_serializer is None:
             raise GuesserBuilderError('Cannot build without model')
         if self.ostream is None:
             raise GuesserBuilderError('Cannot build without ostream')
         assert self.config is not None
-        class_builder = ParallelGuesser if self.parallel else Guesser
+        class_builder = Guesser
         guess_serialization_method = self.config.guess_serialization_method
         if guess_serialization_method in self.special_class_builder_map:
             class_builder = self.special_class_builder_map[
                 guess_serialization_method]
-            if self.parallel:
-                class_builder = ParallelRandomWalker
         if self.config.guesser_class in self.other_class_builders:
             class_builder = self.other_class_builders[self.config.guesser_class]
         if self.seed_probs is not None:
@@ -2272,206 +2244,6 @@ class GuesserBuilder():
             answer = class_builder(
                 model_or_serializer, self.config, self.ostream)
         return answer
-
-# This is initialized with values later
-fork_starting_point_map = {}
-
-def fork_starting_point(args, name):
-    config_dict, serializer_args = args['config'], args['model']
-    nodes, ofname, probs = args['nodes'], args['ofile'], args['probs']
-    generated_list = []
-    ofile_path_list = []
-    entry_point = fork_starting_point_map[name]
-    for node in nodes:
-        generated, ofile_path = entry_point(
-            ModelSerializer(*serializer_args).load_model(),
-            ModelDefaults(**config_dict),
-            node, probs)
-        generated_list.append(generated)
-        ofile_path_list.append(ofile_path)
-    with open(ofname, 'w') as outdata:
-        json.dump(list(zip(generated_list, ofile_path_list)), outdata)
-
-def mp_fork_starting_point(args):
-    return ParallelGuesser.run_cmd_process(args)
-
-def mp_fork_starting_point_random_walker(args):
-    return ParallelRandomWalker.run_cmd_process(args)
-
-class ParallelGuesser(Guesser):
-    def __init__(self, serializer, config, ostream):
-        self.tempOstream = tempfile.NamedTemporaryFile(mode='w', delete=False)
-        model = serializer.load_model()
-        super().__init__(model, config, self.tempOstream)
-        self.fork_points = []
-        self.intermediate_files = []
-        self.serializer = serializer
-        self.real_output = ostream
-
-    def super_node_recur(self, node_list):
-        continue_nodes = []
-        for node in node_list:
-            if len(node[0]) == self.config.fork_length:
-                self.fork_points.append(node)
-            else:
-                continue_nodes.append(node)
-        super().super_node_recur(continue_nodes)
-
-    def guess(self, astring='', prob=1):
-        self.recur(self.starting_node(astring), prob)
-        self.do_forking()
-
-    def arg_list(self):
-        return self.fork_points
-
-    def collect_answer(self, file_name_list):
-        for file_name in file_name_list:
-            with open(file_name, 'r') as istream:
-                logging.info('Collecting guesses from %s', file_name)
-                self.output_serializer.collect_answer(self.real_output, istream)
-            if self.config.cleanup_guesser_files:
-                os.remove(file_name)
-        self.output_serializer.finish_collecting(self.real_output)
-        if self.config.cleanup_guesser_files:
-            try:
-                os.rmdir(self.config.guesser_intermediate_directory)
-            except OSError as e:
-                logging.warning('Cannot remove %s because it is not empty? %s',
-                                self.config.guesser_intermediate_directory,
-                                str(e))
-
-    @classmethod
-    def subp_command(cls, argfname, logfile):
-        return [sys.executable, os.path.realpath(__file__),
-                '--' + FORKED_FLAG, 'guesser',
-                '--config-args', argfname,
-                '--log-file', logfile]
-
-    @classmethod
-    def run_cmd_process(cls, args):
-        argfname, logfile, output_fname = args
-        logging.info('Launching process: %s', args)
-        env = os.environ.copy()
-        subp.check_call(cls.subp_command(argfname, logfile), env=env)
-        with open(output_fname, 'r') as data:
-            return json.load(data)
-
-    def config_modify(self, pool_count, _):
-        config_mod = self.config.as_dict()
-        config_mod['max_gpu_prediction_size'] = math.floor(
-            self.config.max_gpu_prediction_size / (
-                pool_count * self.config.gpu_fork_bias))
-        return config_mod
-
-    def map_pool(self, arglist, pool_size, pool_count):
-        logging.info('Mapping %s in each of %s pools', pool_size, pool_count)
-        prefix_sb_conf = os.path.join(
-            self.config.guesser_intermediate_directory,
-            FNAME_PREFIX_SUBPROCESS_CONFIG)
-        prefix_pl_conf = os.path.join(
-            self.config.guesser_intermediate_directory,
-            FNAME_PREFIX_PROCESS_LOG)
-        prefix_output = os.path.join(
-            self.config.guesser_intermediate_directory,
-            FNAME_PREFIX_PROCESS_OUT)
-        logging.info('Preparing subprocess data')
-        def prepare(args, pnum):
-            argfname = prefix_sb_conf + pnum
-            ofile = prefix_output + pnum
-            with open(argfname, 'w') as config_fname:
-                json.dump({
-                    'nodes' : args,
-                    'ofile' : ofile,
-                    'probs' : self._calc_prob_cache,
-                    'config' : self.config_modify(pool_count, pnum),
-                    'model' : [
-                        self.serializer.archfile, self.serializer.weightfile
-                    ]}, config_fname)
-            return (argfname, prefix_pl_conf + pnum, ofile)
-        subarglist = []
-        random.shuffle(arglist)
-        for i, arg_chunk in enumerate(grouper(arglist, pool_size)):
-            subarglist.append(prepare(list(arg_chunk), str(i + 1)))
-        return subarglist
-
-    def pool_count(self):
-        return min(mp.cpu_count(), self.config.cpu_limit)
-
-    def do_map(self, pool, args):
-        return pool.map_async(mp_fork_starting_point, args)
-
-    def do_forking(self):
-        arg_list = self.arg_list()
-        # Check that the path exists before forking otherwise there are race
-        # conditions
-        if not os.path.exists(self.config.guesser_intermediate_directory):
-            os.mkdir(self.config.guesser_intermediate_directory)
-        pool_count = min(len(arg_list), self.pool_count())
-        pool = mp.Pool(pool_count)
-        per_pool = math.ceil(len(arg_list) / pool_count)
-        result = self.do_map(pool, self.map_pool(
-            arg_list, per_pool, pool_count))
-        try:
-            pool.close()
-            pool.join()
-            answer = result.get(timeout=1)
-            generated = []
-            files = []
-            for chunk in answer:
-                for num_nodes in chunk:
-                    generated.append(num_nodes[0])
-                    files.append(num_nodes[1])
-            self.generated = sum(generated) + self.generated
-            self.collect_answer(files)
-        except KeyboardInterrupt:
-            logging.error('Received keyboard interrupt. Stopping...')
-            pool.terminate()
-
-    @staticmethod
-    def fork_entry_point(model, config, node, probs=None):
-        builder = (GuesserBuilder(config).add_model(model).add_temp_file()
-                   .add_parallel_setting(False))
-        if probs is not None:
-            builder.add_seed_probs(probs)
-        guesser = builder.build()
-        start_str, start_prob = node
-        guesser.complete_guessing(start_str, start_prob)
-        return guesser.generated, builder.ofile_path
-
-class ParallelRandomWalker(ParallelGuesser):
-    def do_map(self, pool, args):
-        return pool.map_async(mp_fork_starting_point_random_walker, args)
-
-    def guess(self, astring='', prob=1):
-        self.do_forking()
-
-    def arg_list(self):
-        pwds = self.calculate_probs_from_file()
-        random.shuffle(pwds)
-        return [list(group) for group in grouper(pwds, math.ceil(
-            len(pwds) / min(self.pool_count(), len(pwds))))]
-
-    @staticmethod
-    def fork_entry_point(model, config, node, _=None):
-        builder = (GuesserBuilder(config).add_model(model)
-                   .add_temp_file().add_parallel_setting(False))
-        guesser = builder.build()
-        logging.info('Starting with probabilities: %s', node)
-        guesser.random_walk(node)
-        builder.ostream.close()
-        return guesser.generated, builder.ofile_path
-
-    @classmethod
-    def subp_command(cls, argfname, logfile):
-        return [sys.executable, os.path.realpath(__file__),
-                '--' + FORKED_FLAG, 'random_walker',
-                '--config-args', argfname,
-                '--log-file', logfile]
-
-fork_starting_point_map = {
-    'guesser' : ParallelGuesser.fork_entry_point,
-    'random_walker' : ParallelRandomWalker.fork_entry_point
-}
 
 log_level_map = {
     'info' : logging.INFO,
@@ -2595,19 +2367,10 @@ def read_config_args(args):
     config = ModelDefaults(config_args['config'])
     return config, arg_ret
 
-def read_fork_args(argfile):
-    with open(argfile, 'r') as args:
-        return json.load(args)
-
 def main(args):
     if args['version']:
         sys.stdout.write(get_version_string() + '\n')
         sys.exit(0)
-    if args[FORKED_FLAG]:
-        init_logging(args)
-        fork_starting_point(
-            read_fork_args(args['config_args']), args[FORKED_FLAG])
-        return
     if args['config_args']:
         config, args = read_config_args(args)
     else:
@@ -2678,9 +2441,6 @@ def make_parser():
                               'stats. '))
     parser.add_argument('--config-args',
                         help='File with both configuration and arguments. ')
-    parser.add_argument('--' + FORKED_FLAG,
-                        choices=sorted(fork_starting_point_map.keys()),
-                        help='Internal use only. ')
     parser.add_argument('--calc-probability-only', action='store_true',
                         help='Only output password probabilities')
     parser.add_argument('--train-secondary-only', action='store_true',

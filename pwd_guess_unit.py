@@ -1062,101 +1062,6 @@ def mock_predict_smart_parallel_skewed(input_vec, **kwargs):
         answer.append([[0.5, 0.1, 0.4].copy()])
     return answer
 
-class ParallelGuesserTest(unittest.TestCase):
-    mock_model = Mock()
-
-    def setUp(self):
-        self.mock_model.predict = mock_predict_smart_parallel
-        self.intermediate_dir = tempfile.mkdtemp(dir=TMPDIR)
-        self.config = pwd_guess.ModelDefaults(
-            min_len = 3, max_len = 3, char_bag = 'ab\n', fork_length = 2,
-            guesser_intermediate_directory = self.intermediate_dir)
-        self.mock_output = io.StringIO()
-        self.archfile = tempfile.NamedTemporaryFile(
-            mode = 'w', delete = False, dir=TMPDIR)
-        self.weightfile = tempfile.NamedTemporaryFile(
-            mode = 'w', delete = False)
-        self.serializer = Mock()
-        self.serializer.archfile = self.archfile.name
-        self.serializer.weightfile = self.weightfile.name
-        self.serializer.load_model = MagicMock(return_value = self.mock_model)
-
-    def tearDown(self):
-        shutil.rmtree(self.intermediate_dir)
-        os.remove(self.archfile.name)
-        os.remove(self.weightfile.name)
-
-    def test_get_fork_points(self):
-        config_dict = self.config.as_dict()
-        config_dict['relevel_not_matching_passwords'] = False
-        parallel_guesser = pwd_guess.ParallelGuesser(
-            self.serializer, pwd_guess.ModelDefaults(**config_dict),
-            self.mock_output)
-        parallel_guesser.fork_starter = MagicMock(return_value = None)
-        parallel_guesser.recur('', 1)
-        self.assertEqual([('aa', .0625),
-                          ('ab', .0625),
-                          ('ba', .0625),
-                          ('bb', .0625)], parallel_guesser.fork_points)
-
-    @unittest.skipIf(not RUN_SLOW_TESTS, "skipping slow tests")
-    def test_forking(self):
-        parallel_guesser = pwd_guess.ParallelGuesser(
-            self.serializer, self.config, self.mock_output)
-        json.dump({
-            'mock_model' : [0.5, 0.25, 0.25]
-        }, self.archfile)
-        self.archfile.flush()
-        parallel_guesser.guess()
-        pwd_freq = [(row[0], float(row[1])) for row in
-                    csv.reader(io.StringIO(self.mock_output.getvalue()),
-                               delimiter = '\t')]
-        sort_freq = sorted(pwd_freq, key = lambda x: x[0])
-        self.assertEqual([('aaa', .125), ('aab', .125),
-                          ('aba', .125), ('abb', .125),
-                          ('baa', .125), ('bab', .125),
-                          ('bba', .125), ('bbb', .125)], sort_freq)
-        self.assertEqual(8, parallel_guesser.generated)
-
-    @unittest.skipIf(not RUN_SLOW_TESTS, "skipping slow tests")
-    def test_forking_calculator(self):
-        with tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR) as tf:
-            for s in ['aaa', 'bbb', 'aab']:
-                tf.write('%s\n' % (s))
-            tf.flush()
-            self.config.guess_serialization_method = 'calculator'
-            self.config.password_test_fname = tf.name
-            parallel_guesser = pwd_guess.ParallelGuesser(
-                self.serializer, self.config, self.mock_output,
-            )
-            json.dump({
-                'mock_model' : [0.5, 0.25, 0.25]
-            }, self.archfile)
-            self.archfile.flush()
-            parallel_guesser.guess()
-            odata_file = io.StringIO(self.mock_output.getvalue())
-            line = odata_file.readline()
-            out_data = list(csv.reader(odata_file, delimiter = '\t'))
-            pwd_freq = [(row[0], float(row[1]), int(row[2]))
-                        for row in out_data]
-            sort_freq = sorted(pwd_freq, key = lambda x: x[0])
-            self.assertEqual([('aaa', .125, 0), ('aab', .125, 0),
-                              ('bbb', .125, 0)], sort_freq)
-            self.assertEqual(8, parallel_guesser.generated)
-
-    def test_parse_cmd(self):
-        cmd = pwd_guess.ParallelGuesser.subp_command('argfname', 'logfile')
-        self.assertEqual(cmd[2:], [
-            '--forked', 'guesser', '--config-args', 'argfname', '--log-file',
-            'logfile'])
-        pwd_guess.make_parser().parse_args(cmd[2:])
-
-    def test_map_pool(self):
-        pg = pwd_guess.ParallelGuesser(
-            self.serializer, self.config, self.mock_output)
-        pg.map_pool([(
-            self.config.as_dict(), ['na', 'na'], ['aa', 0.125])], 1, 2)
-
 class GuesserBuilderTest(unittest.TestCase):
     def setUp(self):
         self.tempf = tempfile.NamedTemporaryFile(dir=TMPDIR)
@@ -1178,17 +1083,6 @@ class GuesserBuilderTest(unittest.TestCase):
         self.assertEqual(guesser.model, mock_model)
         self.assertEqual(guesser.output_serializer.ostream, mock_stream)
 
-    def test_make_parallel_guesser(self):
-        builder = pwd_guess.GuesserBuilder(
-            pwd_guess.ModelDefaults(parallel_guessing = True))
-        mock_serializer, mock_stream, mock_model = Mock(), Mock(), Mock()
-        mock_serializer.load_model = MagicMock(return_value = mock_model)
-        builder.add_serializer(mock_serializer).add_stream(mock_stream)
-        guesser = builder.build()
-        self.assertNotEqual(guesser, None)
-        self.assertEqual(guesser.model, mock_model)
-        self.assertEqual(guesser.real_output, mock_stream)
-
     def test_make_simple_guesser_file(self):
         builder = pwd_guess.GuesserBuilder(
             pwd_guess.ModelDefaults(parallel_guessing = False))
@@ -1205,7 +1099,6 @@ class GuesserBuilderTest(unittest.TestCase):
         mock_serializer, mock_stream, mock_model = Mock(), Mock(), Mock()
         mock_serializer.load_model = MagicMock(return_value = mock_model)
         builder.add_serializer(mock_serializer).add_stream(mock_stream)
-        builder.add_parallel_setting(False)
         guesser = builder.build()
         self.assertNotEqual(guesser, None)
         self.assertEqual(type(guesser), pwd_guess.Guesser)
@@ -1811,114 +1704,6 @@ class DelAmicoRandomWalkTest(RandomWalkGuesserTest):
                     self.assertAlmostEqual(
                         float(gn), 613 if pwd == 'aAaa' else 100, delta = 30)
 
-class ParallelRandomWalkGuesserTest(unittest.TestCase):
-    def setUp(self):
-        self.tempf = tempfile.NamedTemporaryFile(delete = False)
-        self.intermediate_dir = tempfile.mkdtemp(dir=TMPDIR)
-        self.archfile = tempfile.NamedTemporaryFile(
-            mode = 'w', delete = False, dir=TMPDIR)
-        self.weightfile = tempfile.NamedTemporaryFile(
-            mode = 'w', delete = False, dir=TMPDIR)
-        self.serializer = Mock()
-        self.serializer.archfile = self.archfile.name
-        self.serializer.weightfile = self.weightfile.name
-        mock_model = Mock()
-        mock_model.predict = mock_predict_smart_parallel_skewed
-        self.serializer.load_model = MagicMock(return_value = mock_model)
-
-    def tearDown(self):
-        self.tempf.close()
-        if os.path.exists(self.tempf.name):
-            os.remove(self.tempf.name)
-        shutil.rmtree(self.intermediate_dir)
-        os.remove(self.archfile.name)
-        os.remove(self.weightfile.name)
-
-    def test_arglist(self):
-        with tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR) as gf, \
-             tempfile.NamedTemporaryFile(dir=TMPDIR) as intermediatef:
-            gf.write('aaaa\nbbbBa\n')
-            gf.flush()
-            config = pwd_guess.ModelDefaults(
-                char_bag = 'abAB\n', min_len = 3, max_len = 5,
-                uppercase_character_optimization = True,
-                rare_character_optimization_guessing = True,
-                rare_character_optimization = True,
-                intermediate_fname = intermediatef.name,
-                parallel_guessing = True, password_test_fname = gf.name,
-                guess_serialization_method = 'random_walk', cpu_limit = 2)
-            builder = pwd_guess.GuesserBuilder(config)
-            json.dump({
-                'mock_model' : [0.5, 0.1, 0.4]
-            }, self.archfile)
-            self.archfile.flush()
-            config.set_intermediate_info(
-                'rare_character_bag', [])
-            freqs = {
-                'a' : .4, 'b' : .4, 'A' : .1, 'B' : .1,
-            }
-            config.set_intermediate_info('character_frequencies', freqs)
-            config.set_intermediate_info(
-                'beginning_character_frequencies', freqs)
-            config.set_intermediate_info(
-                'end_character_frequencies', freqs)
-            builder.add_serializer(self.serializer).add_file(self.tempf.name)
-            guesser = builder.build()
-            self.assertEqual(type(guesser), pwd_guess.ParallelRandomWalker)
-            arg_list = list(guesser.arg_list())
-            self.assertEqual(len(arg_list), 2)
-            self.assertEqual(set(itertools.chain.from_iterable(arg_list)),
-                             set([('bbbBa', 0.0016777216000000014),
-                                  ('aaaa', 0.00016384000000000011)]))
-
-    @unittest.skipIf(not RUN_SLOW_TESTS, "skipping slow tests")
-    def test_guess_simulated(self):
-        with tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR) as gf, \
-             tempfile.NamedTemporaryFile(dir=TMPDIR) as intermediatef:
-            gf.write('aaaa\nbbbBa\n')
-            gf.flush()
-            pw = pwd_guess.PwdList(gf.name)
-            self.assertEqual(list(pw.as_list()), [('aaaa', 1), ('bbbBa', 1)])
-            config = pwd_guess.ModelDefaults(
-                parallel_guessing = True, char_bag = 'abAB\n', min_len = 3,
-                max_len = 5, password_test_fname = gf.name,
-                uppercase_character_optimization = True,
-                random_walk_seed_num = 10000,
-                rare_character_optimization_guessing = True,
-                intermediate_fname = intermediatef.name,
-                guesser_intermediate_directory = self.intermediate_dir,
-                relevel_not_matching_passwords = True,
-                cpu_limit = 2,
-                guess_serialization_method = 'random_walk')
-            config.set_intermediate_info(
-                'rare_character_bag', [])
-            freqs = {
-                'a' : .4, 'b' : .4, 'A' : .1, 'B' : .1,
-            }
-            config.set_intermediate_info('character_frequencies', freqs)
-            config.set_intermediate_info(
-                'beginning_character_frequencies', freqs)
-            config.set_intermediate_info(
-                'end_character_frequencies', freqs)
-            json.dump({
-                'mock_model' : [0.5, 0.1, 0.4]
-            }, self.archfile)
-            self.archfile.flush()
-            builder = pwd_guess.GuesserBuilder(config)
-            builder.add_serializer(self.serializer).add_file(self.tempf.name)
-            guesser = builder.build()
-            self.assertTrue(guesser.model is not None)
-            guesser.complete_guessing()
-            with open(self.tempf.name, 'r') as output:
-                reader = list(csv.reader(
-                    output, delimiter = '\t', quotechar = None))
-                self.assertEqual(len(reader), 2)
-                for row in reader:
-                    pwd, prob, gn, *_ = row
-                    self.assertTrue(pwd == 'aaaa' or pwd == 'bbbBa')
-                    self.assertAlmostEqual(float(prob), 0.00016384 if pwd == 'aaaa' else 0.0016777216)
-                    self.assertAlmostEqual(float(gn), 397 if pwd == 'aaaa' else 137, delta = 30)
-
 class PolicyTests(unittest.TestCase):
     def test_basic(self):
         config = Mock()
@@ -2069,6 +1854,8 @@ class PolicyTests(unittest.TestCase):
         self.assertFalse(policy.pwd_complies('11199999*Asdf'))
         self.assertFalse(policy.pwd_complies('00011999Apple*'))
         self.assertTrue(policy.pwd_complies('111*jjjJ12345'))
+
+
 class PasswordPolicyEnforcingSerializerTest(unittest.TestCase):
     def test_serializer(self):
         config = Mock()
