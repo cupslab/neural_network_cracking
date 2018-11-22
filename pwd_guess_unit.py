@@ -2254,6 +2254,50 @@ class TestMainConfigurations(unittest.TestCase):
         })
 
     @unittest.skipIf(not RUN_SLOW_TESTS, "skipping slow tests")
+    def test_main_probability_steps(self):
+        self._run_with_config({
+            "args" : {},
+            "config" : {
+                "training_chunk" : 10,
+                "training_main_memory_chunk": 10000000,
+                "min_len" : 1,
+                "fork_length" : 0,
+                "max_len" : 30,
+                "context_length" : 10,
+                "chunk_print_interval" : 100,
+                "layers" : 2,
+                "hidden_size" : 1000,
+                "generations" : 3,
+                "training_accuracy_threshold" : -1,
+                "train_test_ratio" : 20,
+                "model_type" : "LSTM",
+                "tokenize_words" : False,
+                "most_common_token_count" : 2000,
+                "train_backwards" : True,
+                "dense_layers" : 1,
+                "dense_hidden_size" : 512,
+                "secondary_training" : False,
+                "simulated_frequency_optimization" : False,
+                "randomize_training_order" : True,
+                "uppercase_character_optimization" : True,
+                "rare_character_optimization" : True,
+                "rare_character_optimization_guessing" : True,
+                "parallel_guessing" : False,
+                "lower_probability_threshold" : 1e-7,
+                "chunk_size_guesser" : 40000,
+                "random_walk_seed_num" : 100000,
+                "max_gpu_prediction_size" : 10000,
+                "random_walk_seed_iterations" : 1,
+                "no_end_word_cache" : True,
+                "save_model_versioned" : True,
+                "tensorboard" : False,
+                "tensorboard_dir" : self.test_dir,
+                "probability_steps" : [
+                    1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6 ]
+            }
+        })
+
+    @unittest.skipIf(not RUN_SLOW_TESTS, "skipping slow tests")
     def test_main_convolutional(self):
         self._run_with_config({
             "args" : {},
@@ -2342,7 +2386,7 @@ class TestMainConfigurations(unittest.TestCase):
                 "embedding_size": 8,
                 "tensorboard": False
             }
-        
+
 
         })
 

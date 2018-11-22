@@ -280,8 +280,6 @@ class ModelSerializer():
         logging.info('Done loading model')
         return model
 
-serializer_type_list = {}
-
 class ConfigurationException(Exception):
     pass
 
@@ -369,8 +367,7 @@ class ModelDefaults():
     secondary_training = False
     secondary_train_sets = {}
     training_main_memory_chunksize = 1000000
-    probability_striation = False
-    prob_striation_step = 0.05
+    probability_steps = False
     freeze_feature_layers_during_secondary_training = True
     secondary_training_save_freqs = False
     guessing_secondary_training = False
@@ -1733,9 +1730,9 @@ class Guesser():
         return pwds
 
     def do_calculate_probs_from_file(self):
-        if self.config.probability_striation:
-            return [(str(i), 10**(-i * self.config.prob_striation_step))
-                    for i in range(1, self.config.probability_striation + 1)]
+        if self.config.probability_steps:
+            return [(str(i), i) for i in self.config.probability_steps]
+
         pwds = self.read_test_passwords()
         logging.info('Calculating test set probabilities')
         if self.config.sequence_model == Sequence.MANY_TO_MANY:
