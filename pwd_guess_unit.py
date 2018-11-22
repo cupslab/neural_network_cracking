@@ -1050,6 +1050,38 @@ aa	0.125
 aaa	0.0625
 """, fp.read().decode('utf8'))
 
+    def test_read_guess_number_cache(self):
+        ifile = io.StringIO(
+            """_\t0.01\t15\t\n_\t0.09\t0\t\n_\t0.03\t1\t\n_\t0.02\t7\t\n""")
+        probs, guess_numbers = pwd_guess.Guesser.read_guess_number_cache(ifile)
+        self.assertEqual((0.01, 0.02, 0.03, 0.09), tuple(probs))
+        self.assertEqual((15, 7, 1, 0), tuple(guess_numbers))
+
+    def test_calculate_guess_numbers_from_cache_helper(self):
+        probs = [0.01, 0.02, 0.03, 0.09]
+        guess_numbers = [15, 7, 1, 0]
+        test_probs = [('f', 0.009),
+                      ('a', 0.01),
+                      ('b', 0.015),
+                      ('c', 0.021),
+                      ('e', 0.08),
+                      ('d', 0.09),
+                      ('', 0.1)]
+        ans = set(
+            pwd_guess.Guesser.calculate_guess_numbers_from_cache_helper(
+                (probs, guess_numbers),
+                test_probs))
+
+        self.assertEqual(len(ans), len(test_probs))
+        self.assertTrue(('f', 0.009, 15) in ans)
+        self.assertTrue(('a', 0.01, 15) in ans)
+        self.assertTrue(('b', 0.015, 7) in ans)
+        self.assertTrue(('c', 0.021, 1) in ans)
+        self.assertTrue(('d', 0.09, 0) in ans)
+        self.assertTrue(('e', 0.08, 0) in ans)
+        self.assertTrue(('', 0.1, 0) in ans)
+
+
 def mock_predict_smart_parallel(input_vec, **kwargs):
     answer = []
     for i in range(len(input_vec)):
@@ -2173,8 +2205,6 @@ class TestMainConfigurations(unittest.TestCase):
                 "embedding_size": 8,
                 "tensorboard": False
             }
-
-
         })
 
 

@@ -12,7 +12,6 @@ import itertools
 import json
 import logging
 import math
-import multiprocessing as mp
 import os
 import os.path
 import random
@@ -22,11 +21,6 @@ import subprocess as subp
 import sys
 import tempfile
 import time
-import unittest
-# pylint: disable=no-name-in-module
-#
-# mock is in the unittest module
-import unittest.mock
 
 
 # This is a hack to support multiple versions of the keras library.
@@ -258,7 +252,6 @@ class ModelSerializer():
         logging.info('Loading model architecture')
         with open(self.archfile, 'r') as arch:
             arch_data = arch.read()
-            as_json = json.loads(arch_data)
             model = self.model_creator_from_json(arch_data)
 
         logging.info('Loading model weights')
@@ -360,6 +353,7 @@ class ModelDefaults():
     convolutional_kernel_size = 3
     embedding_layer = False
     embedding_size = 8
+    previous_probability_mapping_file = None
 
     def __init__(self, adict=None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -1711,7 +1705,7 @@ class Guesser():
 
     def do_calculate_probs_from_file(self):
         if self.config.probability_steps:
-            return [(str(i), i) for i in self.config.probability_steps]
+            return self._use_probability_steps()
 
         pwds = self.read_test_passwords()
         logging.info('Calculating test set probabilities')
@@ -1723,6 +1717,9 @@ class Guesser():
 
         raise ValueError(
             'unknown sequence_model: %s' % self.config.sequence_model)
+
+    def _use_probability_steps(self):
+        return [(str(i), i) for i in self.config.probability_steps]
 
     def calculate_probs_from_file(self):
         if self._calc_prob_cache is None:
@@ -1878,14 +1875,14 @@ class Guesser():
             self.super_node_recur(node_batch)
             node_batch = []
 
-    def recur(self, astring='', prob=1):
+    def _recur(self, astring='', prob=1):
         self.super_node_recur([(astring, prob)])
 
     def starting_node(self, default_value):
         return default_value
 
     def guess(self, astring='', prob=1):
-        self.recur(self.starting_node(astring), prob)
+        self._recur(self.starting_node(astring), prob)
 
     def complete_guessing(self, start='', start_prob=1):
         logging.info('Enumerating guesses starting at %s, %s...',
@@ -1895,14 +1892,71 @@ class Guesser():
         logging.info('Generated %s guesses', self.generated)
         return self.generated
 
+    def _calculate_probs_from_file_sorted(self):
+        return sorted(
+            self.calculate_probs_from_file(), key=lambda x: x[1])
+
     def calculate_probs(self):
         logging.info('Calculating probabilities only')
         writer = csv.writer(self.ostream, delimiter='\t', quotechar=None)
-        for pwd, prob in sorted(
-                self.calculate_probs_from_file(), key=lambda x: x[1]):
+        for pwd, prob in self._calculate_probs_from_file_sorted():
             writer.writerow([pwd, prob])
         self.ostream.flush()
         self.ostream.close()
+
+    @staticmethod
+    def read_guess_number_cache_from_file(fname):
+        if fname is None:
+            raise ValueError(
+                'Must specify previous probability to guess number file')
+
+        logging.info('Reading guess number cache from %s', fname)
+        with open(fname, 'r') as cache:
+            return Guesser.read_guess_number_cache(cache)
+
+    @staticmethod
+    def read_guess_number_cache(cache):
+        logging.info('Reading guess number cache')
+        prob_table = []
+        for row in csv.reader(cache, delimiter='\t', quotechar=None):
+            prob, guess_number = float(row[1]), float(row[2])
+            prob_table.append((prob, guess_number))
+
+        prob_table.sort(key=lambda x: x[0])
+        probs = [prob for prob, _ in prob_table]
+        guess_numbers = [gn for _, gn in prob_table]
+        logging.info('Done reading guess number cache')
+        return probs, guess_numbers
+
+    @staticmethod
+    def calculate_guess_numbers_from_cache_helper(guess_numbers, test_probs):
+        probs, guess_numbers = guess_numbers
+        assert len(probs) == len(guess_numbers)
+        assert len(probs) > 0
+        for pwd, prob in test_probs:
+            idx = bisect.bisect_left(probs, prob)
+            if idx == len(guess_numbers):
+                if prob == probs[-1]:
+                    yield pwd, prob, guess_numbers[-1]
+                else:
+                    yield pwd, prob, 0
+
+            else:
+                yield pwd, prob, guess_numbers[idx]
+
+    def calculate_guess_numbers_from_cache(self, ofile):
+        cache_filename = self.config.previous_probability_mapping_file
+        logging.info('Calculating guess numbers using %s', cache_filename)
+
+        writer = csv.writer(ofile, delimiter='\t', quotechar=None)
+        answer = self.calculate_guess_numbers_from_cache_helper(
+            self.read_guess_number_cache_from_file(cache_filename),
+            self._calculate_probs_from_file_sorted())
+        for pwd, prob, guess_number in answer:
+            writer.writerow([pwd, prob, guess_number])
+
+        logging.info('Done calculating guess numbers using cache')
+
 
 class RandomWalkSerializer(GuessSerializer):
     def serialize(self, password, prob):
@@ -2353,6 +2407,9 @@ def guess(args, config):
                .add_file(args['enumerate_ofile'])).build()
     if args['calc_probability_only']:
         guesser.calculate_probs()
+    elif args["calc_guess_number_from_cache"]:
+        with open(args["calc_guess_number_from_cache"], 'w') as ofile:
+            guesser.calculate_guess_numbers_from_cache(ofile)
     else:
         guesser.complete_guessing()
 
@@ -2443,6 +2500,16 @@ def make_parser():
                         help='File with both configuration and arguments. ')
     parser.add_argument('--calc-probability-only', action='store_true',
                         help='Only output password probabilities')
+    parser.add_argument(
+        '--calc-guess-number-from-cache',
+        help=('Estimate guess numbers from previous results. This argument '
+              'expects a path to write the results of the output file. '
+              'The output is a TSV of (password, probability, guess number). '
+              'Must provide the previous_probability_mapping_file config '
+              'option. It should be a path to a TSV with columns (password, '
+              'probability, guess number). This file may be created from one '
+              'of the guessing methods, particularly with the '
+              'probability_steps configuration option. '))
     parser.add_argument('--train-secondary-only', action='store_true',
                         help='Only train on secondary data. ')
     parser.add_argument('--multi-gpu', default=1, type=int,
