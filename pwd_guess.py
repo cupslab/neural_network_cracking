@@ -2408,7 +2408,7 @@ def guess(args, config):
     if args['calc_probability_only']:
         guesser.calculate_probs()
     elif args["calc_guess_number_from_cache"]:
-        with open(args["calc_guess_number_from_cache"], 'w') as ofile:
+        with open(args["enumerate_ofile"], 'w') as ofile:
             guesser.calculate_guess_numbers_from_cache(ofile)
     else:
         guesser.complete_guessing()
@@ -2501,7 +2501,7 @@ def make_parser():
     parser.add_argument('--calc-probability-only', action='store_true',
                         help='Only output password probabilities')
     parser.add_argument(
-        '--calc-guess-number-from-cache',
+        '--calc-guess-number-from-cache', action='store_true',
         help=('Estimate guess numbers from previous results. This argument '
               'expects a path to write the results of the output file. '
               'The output is a TSV of (password, probability, guess number). '
