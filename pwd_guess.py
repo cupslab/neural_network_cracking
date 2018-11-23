@@ -225,12 +225,17 @@ class OptimizingCharacterTable(CharacterTable):
 
 
 class ModelSerializer():
-    def __init__(self, archfile=None, weightfile=None, versioned=False):
+    def __init__(self,
+                 archfile=None,
+                 weightfile=None,
+                 versioned=False,
+                 multi_gpu=1):
         self.archfile = archfile
         self.weightfile = weightfile
         self.model_creator_from_json = model_from_json
         self.versioned = versioned
         self.saved_counter = 0
+        self.multi_gpu = multi_gpu
 
     def save_model(self, model):
         if self.archfile is None or self.weightfile is None:
@@ -257,6 +262,10 @@ class ModelSerializer():
         logging.info('Loading model weights')
         model.load_weights(self.weightfile)
         logging.info('Done loading model')
+
+        if self.multi_gpu > 1:
+            model = keras.utils.multi_gpu_model(model, gpus=self.multi_gpu)
+
         return model
 
 class ConfigurationException(Exception):
@@ -1378,13 +1387,14 @@ class ProbabilityCalculator():
     def probability_stream(self, pwd_list):
         self.preproc.begin(pwd_list)
         x_strings, y_strings, _ = self.preproc.next_chunk()
-        logging.debug('Initial probabilities: %s, %s', x_strings, y_strings)
         while len(x_strings) != 0:
             y_indices = list(map(self.ctable.get_char_index, y_strings))
             probs = self.guesser.batch_prob(x_strings)
             assert len(probs) == len(x_strings)
             for i, y_idx in enumerate(y_indices):
-                yield x_strings[i], y_strings[i], np.asscalar(probs[i][0][y_idx])
+                prob = np.asscalar(probs[i][0][y_idx])
+                yield x_strings[i], y_strings[i], prob
+
             x_strings, y_strings, _ = self.preproc.next_chunk()
 
     def calc_probabilities(self, pwd_list):
@@ -1838,12 +1848,10 @@ class Guesser():
         return answer
 
     def batch_prob(self, prefixes):
-        logging.info(
-            'Super node buffer size %s, guess number %s, gpu_batch: %s',
-            len(prefixes), self.generated, self.max_gpu_prediction_size)
         if len(prefixes) > self.max_gpu_prediction_size:
             if self.config.sequence_model == Sequence.MANY_TO_MANY:
-                answer = np.zeros((0, self.config.context_length, len(self.chars_list)))
+                answer = np.zeros(
+                    (0, self.config.context_length, len(self.chars_list)))
             else:
                 answer = np.zeros((0, 1, len(self.chars_list)))
             for chunk_num in range(
@@ -2402,9 +2410,14 @@ def guess(args, config):
         sys.exit(1)
     if config.guessing_secondary_training:
         prepare_secondary_training(config)
-    guesser = (GuesserBuilder(config).add_serializer(
-        ModelSerializer(args['arch_file'], args['weight_file']))
-               .add_file(args['enumerate_ofile'])).build()
+    guesser = (GuesserBuilder(config)
+               .add_serializer(
+                   ModelSerializer(
+                       archfile=args['arch_file'],
+                       weightfile=args['weight_file'],
+                       multi_gpu=args['multi_gpu']))
+               .add_file(args['enumerate_ofile'])
+               .build())
     if args['calc_probability_only']:
         guesser.calculate_probs()
     elif args["calc_guess_number_from_cache"]:
