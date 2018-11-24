@@ -193,6 +193,21 @@ class PreprocessorTest(unittest.TestCase):
                                  ['a', 'a', 'a', '\n'])),
                          set(zip(list(prefix), list(suffix))))
 
+    def test_training_set_small_multi_use(self):
+        t = pwd_guess.Preprocessor(
+            pwd_guess.ModelDefaults(max_len = 3, min_len = 3))
+        t.begin([('aaa', 1)])
+        prefix, suffix, _ = t.next_chunk()
+        self.assertEqual(set(zip(['', 'a', 'aa', 'aaa'],
+                                 ['a', 'a', 'a', '\n'])),
+                         set(zip(list(prefix), list(suffix))))
+        t.reset()
+        t.begin([('aaa', 1)])
+        prefix, suffix, _ = t.next_chunk()
+        self.assertEqual(set(zip(['', 'a', 'aa', 'aaa'],
+                                 ['a', 'a', 'a', '\n'])),
+                         set(zip(list(prefix), list(suffix))))
+
     def test_train_construct_dict(self):
         t = pwd_guess.Preprocessor(pwd_guess.ModelDefaults(
             simulated_frequency_optimization = True))
@@ -1081,6 +1096,29 @@ aaa	0.0625
         self.assertTrue(('e', 0.08, 0) in ans)
         self.assertTrue(('', 0.1, 0) in ans)
 
+    def test_create_guess_number_cache_predictor(self):
+        with tempfile.NamedTemporaryFile(dir=TMPDIR, mode='w') as fp:
+            fp.write("""aa\t0.16\t3
+ab\t0.24\t2
+ba\t0.24\t1
+bb\t0.36\t0""")
+            fp.flush()
+            config = pwd_guess.ModelDefaults(
+                min_len = 2,
+                max_len = 2,
+                char_bag = 'ab\n',
+                previous_probability_mapping_file = fp.name,
+                relevel_not_matching_passwords = True)
+            guesser = (
+                pwd_guess.GuesserBuilder(config)
+                .add_model(self.mock_model(config, [0.2, 0.3, 0.5]))
+                .build())
+            predictor = guesser.create_guess_number_cache_predictor()
+            self.assertEqual(3, predictor('aa'))
+            self.assertEqual(2, predictor('ab'))
+            self.assertEqual(2, predictor('ba'))
+            self.assertEqual(0, predictor('bb'))
+
 
 def mock_predict_smart_parallel(input_vec, **kwargs):
     answer = []
@@ -1213,6 +1251,32 @@ class ProbabilityCalculatorTest(unittest.TestCase):
                           [[0, 0.5, 0.5]],
                           [[1, 0, 0]]]))
         p = pwd_guess.ProbabilityCalculator(mock_guesser)
+        self.assertEqual(set(p.calc_probabilities([('aaa', 1), ('abb', 1)])),
+                         set([('aaa', 0.125), ('abb', 0.125)]))
+
+    def test_calc_two_with_cache(self):
+        def _mock_batch_prob(strings):
+            if len(strings) == 0:
+                return []
+            else:
+                return np.array([[[0, 0.5, 0.5]],
+                                 [[0, 0.5, 0.5]],
+                                 [[0, 0.5, 0.5]],
+                                 [[1, 0, 0]],
+                                 [[0, 0.5, 0.5]],
+                                 [[0, 0.5, 0.5]],
+                                 [[0, 0.5, 0.5]],
+                                 [[1, 0, 0]]])
+
+        mock_guesser = Mock()
+        mock_guesser.config = pwd_guess.ModelDefaults(
+            min_len=3, max_len=3, char_bag='ab\n',
+            relevel_not_matching_passwords=False)
+        mock_guesser.should_make_guesses_rare_char_optimizer = False
+        mock_guesser.batch_prob = _mock_batch_prob
+        p = pwd_guess.ProbabilityCalculator(mock_guesser, cache_size=100)
+        self.assertEqual(set(p.calc_probabilities([('aaa', 1), ('abb', 1)])),
+                         set([('aaa', 0.125), ('abb', 0.125)]))
         self.assertEqual(set(p.calc_probabilities([('aaa', 1), ('abb', 1)])),
                          set([('aaa', 0.125), ('abb', 0.125)]))
 

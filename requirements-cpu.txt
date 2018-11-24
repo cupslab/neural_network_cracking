@@ -3,6 +3,6 @@ h5py
 Cython
 Keras
 scikit-learn
-tensorflow-gpu
+tensorflow
 pyyaml
 pylru

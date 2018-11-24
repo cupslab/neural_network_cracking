@@ -44,6 +44,8 @@ import numpy as np
 import tensorflow as tf
 from enum import IntEnum
 
+import pylru
+
 
 import generator
 
@@ -363,6 +365,7 @@ class ModelDefaults():
     embedding_layer = False
     embedding_size = 8
     previous_probability_mapping_file = None
+    probability_calculator_cache_size = 0
 
     def __init__(self, adict=None, **kwargs):
         self.adict = adict if adict is not None else dict()
@@ -1372,24 +1375,52 @@ class GuessNumberGenerator(GuessSerializer):
         raise NotImplementedError()
 
 class ProbabilityCalculator():
-    def __init__(self, guesser, prefixes=False):
+    def __init__(self, guesser, prefixes=False, cache_size=0):
         self.guesser = guesser
         self.ctable = CharacterTable.fromConfig(guesser.config)
         self.config = guesser.config
         self.preproc = BasePreprocessor.fromConfig(self.config)
         self.template_probs = False
         self.prefixes = prefixes
+        self._cache_size = cache_size
+        if cache_size > 0:
+            self._prob_batch_cache = pylru.lrucache(cache_size)
+        else:
+            self._prob_batch_cache = None
 
         if guesser.should_make_guesses_rare_char_optimizer:
             self.template_probs = True
             self.pts = PasswordTemplateSerializer(guesser.config)
+
+    def _cached_batch_prob(self, x_strings):
+        if self._cache_size == 0:
+            return self.guesser.batch_prob(x_strings)
+
+        idx_mapping = []
+        answers = [-1] * len(x_strings)
+        query_x_strings = []
+        for i, x_str in enumerate(x_strings):
+            if x_str in self._prob_batch_cache:
+                answers[i] = self._prob_batch_cache[x_str]
+            else:
+                idx_mapping.append(i)
+                query_x_strings.append(x_str)
+
+        nn_response = self.guesser.batch_prob(query_x_strings)
+        for i, nn_answer in enumerate(nn_response):
+            query_idx = idx_mapping[i]
+            query = x_strings[query_idx]
+            self._prob_batch_cache[query] = nn_answer
+            answers[query_idx] = nn_answer
+
+        return answers
 
     def probability_stream(self, pwd_list):
         self.preproc.begin(pwd_list)
         x_strings, y_strings, _ = self.preproc.next_chunk()
         while len(x_strings) != 0:
             y_indices = list(map(self.ctable.get_char_index, y_strings))
-            probs = self.guesser.batch_prob(x_strings)
+            probs = self._cached_batch_prob(x_strings)
             assert len(probs) == len(x_strings)
             for i, y_idx in enumerate(y_indices):
                 prob = np.asscalar(probs[i][0][y_idx])
@@ -1409,6 +1440,8 @@ class ProbabilityCalculator():
                         self.ctable.translate(input_string), input_string)
                 yield (input_string, prev_prob)
                 prev_prob = 1
+
+        self.preproc.reset()
 
 class ManyToManyProbabilityCalculator(ProbabilityCalculator):
     def probability_stream(self, pwd_list):
@@ -1683,7 +1716,7 @@ class PasswordPolicyEnforcingSerializer(DelegatingSerializer):
 
 
 class Guesser():
-    def __init__(self, model, config, ostream, prob_cache=None):
+    def __init__(self, model, config, ostream=None):
         self.model = model
         self.config = config
         self.max_len = config.max_len
@@ -1698,7 +1731,7 @@ class Guesser():
         self.chunk_size_guesser = self.config.chunk_size_guesser
         self.ostream = ostream
         self.chars_list = self.ctable.char_list
-        self._calc_prob_cache = prob_cache
+        self._calc_prob_cache = None
         self.should_make_guesses_rare_char_optimizer = (
             self._should_make_guesses_rare_char_optimizer())
         self.output_serializer = self.make_serializer()
@@ -1863,13 +1896,13 @@ class Guesser():
             return answer
         return self.conditional_probs_many(prefixes)
 
-    def extract_pwd_from_node(self, node_list):
+    def _extract_pwd_from_node(self, node_list):
         return map(lambda x: x[0], node_list)
 
     def super_node_recur(self, node_list):
         if len(node_list) == 0:
             return
-        pwds_list = list(self.extract_pwd_from_node(node_list))
+        pwds_list = list(self._extract_pwd_from_node(node_list))
         predictions = self.batch_prob(pwds_list)
         node_batch = []
         for i, cur_node in enumerate(node_list):
@@ -1938,32 +1971,53 @@ class Guesser():
 
     @staticmethod
     def calculate_guess_numbers_from_cache_helper(guess_numbers, test_probs):
-        probs, guess_numbers = guess_numbers
-        assert len(probs) == len(guess_numbers)
+        probs, guess_number_list = guess_numbers
+        assert len(probs) == len(guess_number_list)
         assert len(probs) > 0
         for pwd, prob in test_probs:
-            idx = bisect.bisect_left(probs, prob)
-            if idx == len(guess_numbers):
-                if prob == probs[-1]:
-                    yield pwd, prob, guess_numbers[-1]
-                else:
-                    yield pwd, prob, 0
+            gn = Guesser._calculate_guess_number_given_cache_idx(
+                prob, probs, guess_number_list)
+            yield pwd, prob, gn
 
-            else:
-                yield pwd, prob, guess_numbers[idx]
+    @staticmethod
+    def _calculate_guess_number_given_cache_idx(prob, probs, guess_numbers):
+        idx = bisect.bisect_left(probs, prob)
+        if idx == len(guess_numbers):
+            return guess_numbers[-1] if prob == probs[-1] else 0
 
-    def calculate_guess_numbers_from_cache(self, ofile):
-        cache_filename = self.config.previous_probability_mapping_file
-        logging.info('Calculating guess numbers using %s', cache_filename)
+        return guess_numbers[idx]
 
-        writer = csv.writer(ofile, delimiter='\t', quotechar=None)
+    def calculate_guess_numbers_from_cache(self):
+        logging.info('Calculating guess numbers using cache')
+        writer = csv.writer(self.ostream, delimiter='\t', quotechar=None)
         answer = self.calculate_guess_numbers_from_cache_helper(
-            self.read_guess_number_cache_from_file(cache_filename),
+            self.read_guess_number_cache_from_file(
+                self.config.previous_probability_mapping_file),
             self._calculate_probs_from_file_sorted())
         for pwd, prob, guess_number in answer:
             writer.writerow([pwd, prob, guess_number])
 
+        self.ostream.flush()
+        self.ostream.close()
         logging.info('Done calculating guess numbers using cache')
+
+    def create_guess_number_cache_predictor(self):
+        probs, guess_numbers = self.read_guess_number_cache_from_file(
+            self.config.previous_probability_mapping_file)
+        prob_calculator = ProbabilityCalculator(
+            self,
+            prefixes=False,
+            cache_size=self.config.probability_calculator_cache_size)
+
+        def _predictor(pwd):
+            prob_as_list = list(prob_calculator.calc_probabilities([(pwd, 1)]))
+            assert len(prob_as_list) == 1
+            pwd_copy, prob = prob_as_list[0]
+            assert pwd == pwd_copy
+            return Guesser._calculate_guess_number_given_cache_idx(
+                prob, probs, guess_numbers)
+
+        return _predictor
 
 
 class RandomWalkSerializer(GuessSerializer):
@@ -2039,7 +2093,7 @@ class RandomWalkGuesser(Guesser):
                 self.spinoff_node(node)
         if len(real_node_list) == 0:
             return
-        pwd_list = list(self.extract_pwd_from_node(real_node_list))
+        pwd_list = list(self._extract_pwd_from_node(real_node_list))
         predictions = self.batch_prob(pwd_list)
         next_nodes = []
         for i, cur_node in enumerate(real_node_list):
@@ -2253,7 +2307,6 @@ class GuesserBuilder():
         self.serializer = None
         self.ostream = None
         self.ofile_path = None
-        self.seed_probs = None
 
     def add_model(self, model):
         self.model = model
@@ -2278,10 +2331,6 @@ class GuesserBuilder():
         self.ofile_path = path
         return self.add_stream(os.fdopen(handle, 'w'))
 
-    def add_seed_probs(self, probs):
-        self.seed_probs = probs
-        return self
-
     def build(self):
         model_or_serializer = self.model
         if self.serializer is not None and self.model is None:
@@ -2289,8 +2338,7 @@ class GuesserBuilder():
 
         if model_or_serializer is None:
             raise GuesserBuilderError('Cannot build without model')
-        if self.ostream is None:
-            raise GuesserBuilderError('Cannot build without ostream')
+
         assert self.config is not None
         class_builder = Guesser
         guess_serialization_method = self.config.guess_serialization_method
@@ -2299,13 +2347,8 @@ class GuesserBuilder():
                 guess_serialization_method]
         if self.config.guesser_class in self.other_class_builders:
             class_builder = self.other_class_builders[self.config.guesser_class]
-        if self.seed_probs is not None:
-            answer = class_builder(
-                model_or_serializer, self.config, self.ostream, self.seed_probs)
-        else:
-            answer = class_builder(
-                model_or_serializer, self.config, self.ostream)
-        return answer
+
+        return class_builder(model_or_serializer, self.config, self.ostream)
 
 log_level_map = {
     'info' : logging.INFO,
@@ -2399,9 +2442,7 @@ def train(args, config):
         trainer.retrain_classification(
             prepare_secondary_training(config), serializer)
     if args['enumerate_ofile']:
-        (GuesserBuilder(config).add_serializer(serializer)
-         .add_model(trainer.model)
-         .add_file(args['enumerate_ofile'])).build().complete_guessing()
+        raise ValueError('Can either train or guess')
 
 def guess(args, config):
     logging.info('Loading model...')
@@ -2421,8 +2462,7 @@ def guess(args, config):
     if args['calc_probability_only']:
         guesser.calculate_probs()
     elif args["calc_guess_number_from_cache"]:
-        with open(args["enumerate_ofile"], 'w') as ofile:
-            guesser.calculate_guess_numbers_from_cache(ofile)
+        guesser.calculate_guess_numbers_from_cache()
     else:
         guesser.complete_guessing()
 
