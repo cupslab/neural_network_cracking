@@ -1406,12 +1406,13 @@ class ProbabilityCalculator():
                 idx_mapping.append(i)
                 query_x_strings.append(x_str)
 
-        nn_response = self.guesser.batch_prob(query_x_strings)
-        for i, nn_answer in enumerate(nn_response):
-            query_idx = idx_mapping[i]
-            query = x_strings[query_idx]
-            self._prob_batch_cache[query] = nn_answer
-            answers[query_idx] = nn_answer
+        if query_x_strings:
+            nn_response = self.guesser.batch_prob(query_x_strings)
+            for i, nn_answer in enumerate(nn_response):
+                query_idx = idx_mapping[i]
+                query = x_strings[query_idx]
+                self._prob_batch_cache[query] = nn_answer
+                answers[query_idx] = nn_answer
 
         return answers
 
