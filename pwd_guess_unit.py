@@ -1,13 +1,12 @@
 # -*- coding: utf-8 -*-
 # author: William Melicher
-from theano import function, config, shared, sandbox
-import theano.tensor as T
 from keras.models import Sequential, model_from_json
 from keras.layers.core import Activation, Dense, RepeatVector
 from keras.layers import recurrent
 
 import unittest
 from unittest.mock import MagicMock, Mock
+import argparse
 import tempfile
 import shutil
 import os.path
@@ -24,224 +23,31 @@ import logging
 import itertools
 import sys
 import glob
+from tensorflow.python.client import device_lib
+
+import yaml
 
 import pwd_guess
 import generator
 
-class NodeTrieSerializerTest(unittest.TestCase):
-    def setUp(self):
-        self.trie = pwd_guess.NodeTrie()
-        self.trie.increment('aaa', 1)
-        self.trie.increment('aab', 5)
-        self.tempfile = tempfile.NamedTemporaryFile()
+TMPDIR = '/tmp'
+RUN_SLOW_TESTS = False
 
-    def tearDown(self):
-        self.tempfile.close()
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--tmp-dir', help='directory temporary for tmp files', default=TMPDIR)
+    parser.add_argument(
+        '--run-slow', help='Also run slow tests', action='store_true')
+    ns, args = parser.parse_known_args(namespace=unittest)
+    return ns, sys.argv[:1] + args
 
-    def test_save_load(self):
-        s = pwd_guess.TrieSerializer.fromConfig(
-            pwd_guess.ModelDefaults(trie_fname = self.tempfile.name,
-                                    trie_serializer_type = 'reg'))
-        self.assertEqual(type(s), pwd_guess.NodeTrieSerializer)
-        s.serialize(self.trie)
-        s = pwd_guess.TrieSerializer.fromConfig(
-            pwd_guess.ModelDefaults(trie_fname = self.tempfile.name,
-                                    trie_serializer_type = 'reg'))
-        self.assertEqual(type(s), pwd_guess.NodeTrieSerializer)
-        self.assertEqual(set([('a', 6), ('aa', 6), ('aaa', 1), ('aab', 5)]),
-                         set(s.deserialize()))
+if __name__ == '__main__':
+    args, argv = parse_args()   # run this first before defining tests
+    sys.argv[:] = argv       # create cleans argv for main()
+    TMPDIR = args.tmp_dir
+    RUN_SLOW_TESTS = args.run_slow
 
-    def test_save_load_many(self):
-        s = pwd_guess.TrieSerializer.fromConfig(
-            pwd_guess.ModelDefaults(trie_fname = self.tempfile.name,
-                                    trie_serializer_type = 'reg'))
-        self.assertEqual(type(s), pwd_guess.NodeTrieSerializer)
-        for astring in itertools.permutations('abcdefg', 6):
-            self.trie.increment(''.join(astring))
-        items = list(self.trie.iterate('reg'))
-        s.serialize(self.trie)
-        s = pwd_guess.TrieSerializer.fromConfig(
-            pwd_guess.ModelDefaults(trie_fname = self.tempfile.name,
-                                    trie_serializer_type = 'reg'))
-        self.assertEqual(type(s), pwd_guess.NodeTrieSerializer)
-        inorder = list(s.deserialize())
-        randomorder = list(s.random_access())
-        self.assertEqual(set(items), set(inorder))
-        self.assertEqual(set(items), set(randomorder))
-        self.assertNotEqual(inorder, randomorder)
-
-class MemoryTrieSerializerTest(unittest.TestCase):
-    def test_save_load(self):
-        trie = pwd_guess.NodeTrie()
-        trie.increment('aaa', 1)
-        trie.increment('aab', 5)
-        s = pwd_guess.TrieSerializer.fromConfig(pwd_guess.ModelDefaults(
-            trie_fname = ':memory:', trie_serializer_type = 'reg'))
-        self.assertEqual(type(s), pwd_guess.MemoryTrieSerializer)
-        s.serialize(trie)
-        s = pwd_guess.TrieSerializer.fromConfig(pwd_guess.ModelDefaults(
-            trie_fname = ':memory:', trie_serializer_type = 'reg'))
-        self.assertEqual(type(s), pwd_guess.MemoryTrieSerializer)
-        self.assertEqual(set([('a', 6), ('aa', 6), ('aaa', 1), ('aab', 5)]),
-                         set(s.deserialize()))
-
-class TrieFuzzySerializerTest(unittest.TestCase):
-    def setUp(self):
-        self.trie = pwd_guess.NodeTrie()
-        self.trie.increment('aaa', 1)
-        self.trie.increment('aab', 5)
-        self.tempfile = tempfile.NamedTemporaryFile()
-
-    def tearDown(self):
-        self.tempfile.close()
-
-    def test_save_load(self):
-        s = pwd_guess.TrieSerializer.fromConfig(
-            pwd_guess.ModelDefaults(trie_fname = self.tempfile.name,
-                                    trie_serializer_type = 'fuzzy'))
-        self.assertEqual(type(s), pwd_guess.TrieFuzzySerializer)
-        s.serialize(self.trie)
-        s = pwd_guess.TrieSerializer.fromConfig(
-            pwd_guess.ModelDefaults(trie_fname = self.tempfile.name,
-                                    trie_serializer_type = 'fuzzy'))
-        self.assertEqual(type(s), pwd_guess.TrieFuzzySerializer)
-        self.assertEqual([('', [('a', 6)]),
-                          ('a', [('a', 6)]),
-                          ('aa', [('a', 1),
-                                  ('b', 5)])],
-                         list(s.deserialize()))
-
-    def test_save_load_many(self):
-        s = pwd_guess.TrieSerializer.fromConfig(
-            pwd_guess.ModelDefaults(trie_fname = self.tempfile.name,
-                                    trie_serializer_type = 'fuzzy'))
-        self.assertEqual(type(s), pwd_guess.TrieFuzzySerializer)
-        for astring in itertools.permutations('abcdefg', 6):
-            self.trie.increment(''.join(astring))
-        items = list(self.trie.iterate('fuzzy'))
-        s.serialize(self.trie)
-        s = pwd_guess.TrieSerializer.fromConfig(
-            pwd_guess.ModelDefaults(trie_fname = self.tempfile.name,
-                                    trie_serializer_type = 'fuzzy'))
-        self.assertEqual(type(s), pwd_guess.TrieFuzzySerializer)
-        hashable = lambda x: (x[0], tuple(x[1]))
-        inorder = list(s.deserialize())
-        randomorder = list(s.random_access())
-        self.assertEqual(set(map(hashable, items)), set(map(hashable, inorder)))
-        self.assertEqual(set(map(hashable, items)),
-                         set(map(hashable, randomorder)))
-        self.assertNotEqual(list(map(hashable, inorder)),
-                            list(map(hashable, randomorder)))
-
-class NodeTrieTest(unittest.TestCase):
-    def setUp(self):
-        self.trie = pwd_guess.NodeTrie()
-
-    def test_set(self):
-        trie = pwd_guess.NodeTrie()
-        trie.set('asdf', 1)
-        self.assertEqual(trie.get_longest_prefix('asdf'), ('asdf', 1))
-        self.assertEqual(trie.get_longest_prefix('as'), ('', 0))
-        self.assertEqual(trie.get_longest_prefix('$$$'), ('', 0))
-        self.assertEqual(trie.get_longest_prefix('asdf1'), ('asdf', 1))
-        trie.set('asdf1', 2)
-        trie.set('a', 3)
-        self.assertEqual(trie.get_longest_prefix('a999'), ('a', 3))
-        self.assertEqual(trie.get_longest_prefix('asdf1'), ('asdf1', 2))
-
-    def test_set_append(self):
-        trie = pwd_guess.NodeTrie()
-        trie.set_append('asdf', 'b')
-        self.assertEqual(trie.get_completions('asdf'), ['b'])
-        self.assertEqual(trie.get_completions('as'), [])
-        self.assertEqual(trie.get_completions('asdf99'), ['b'])
-        self.assertEqual(trie.get_completions(''), [])
-        trie.set_append('as', 'c')
-        self.assertEqual(trie.get_completions('as'), ['c'])
-        self.assertEqual(set(trie.get_completions('asdf')), set(['c', 'b']))
-
-    def test_set_append_tuple(self):
-        trie = pwd_guess.NodeTrie()
-        trie.set_append('a', 'b')
-        trie.set_append('ba', 'b')
-        trie.set_append('bb', 'b')
-        self.assertEqual(trie.get_completions('a'), ['b'])
-        self.assertEqual(trie.get_completions('ba'), ['b'])
-        self.assertEqual(trie.get_completions(('ba', )), ['b'])
-        self.assertEqual(trie.get_completions(('bbb', )), [])
-
-    def test_iterate(self):
-        self.trie.increment('aaa', 1)
-        self.assertEqual([('a', 1), ('aa', 1), ('aaa', 1)],
-                         list(self.trie.iterate('reg')))
-
-    def test_iterate_overlap(self):
-        self.trie.increment('aaa', 1)
-        self.trie.increment('aab', 5)
-        self.assertEqual(set([('a', 6), ('aa', 6), ('aaa', 1), ('aab', 5)]),
-                         set(self.trie.iterate('reg')))
-
-    def test_sampled_iterate(self):
-        self.trie.increment('aaa', 1)
-        self.trie.increment('aab', 5)
-        self.assertEqual([('', [('a', 6)]),
-                          ('a', [('a', 6)]),
-                          ('aa', [('a', 1),
-                                  ('b', 5)])],
-                         list(self.trie.iterate('fuzzy')))
-
-class DiskBackedTrieTest(unittest.TestCase):
-    def test_iterate(self):
-        self.trie = pwd_guess.DiskBackedTrie(pwd_guess.ModelDefaults(
-            fork_length = 1))
-        self.trie.increment('aaa', 1)
-        self.assertEqual(pwd_guess.MemoryTrieSerializer,
-                         type(self.trie.make_serializer()))
-        self.assertEqual(self.trie.current_branch_key, 'a')
-        self.assertTrue(self.trie.current_node is not None)
-        self.assertEqual(set(self.trie.current_node.iterate('reg')),
-                         set([('a', 1), ('aa', 1)]))
-        self.assertEqual(set([('a', 1), ('aa', 1), ('aaa', 1)]),
-                         set(self.trie.iterate('reg')))
-
-    def test_funky_chars(self):
-        self.assertFalse(os.path.exists('trie_storage'))
-        try:
-            self.trie = pwd_guess.DiskBackedTrie(pwd_guess.ModelDefaults(
-                fork_length = 1, trie_intermediate_storage = 'trie_storage'))
-            self.trie.increment('aaa', 1)
-            self.trie.increment('./a', 1)
-            self.assertEqual(pwd_guess.NodeTrieSerializer,
-                             type(self.trie.make_serializer()))
-            self.assertTrue(self.trie.current_node is not None)
-            self.assertEqual(set([('a', 1), ('aa', 1), ('aaa', 1),
-                                  ('.', 1), ('./', 1), ('./a', 1)]),
-                             set(self.trie.iterate('reg')))
-        finally:
-            shutil.rmtree('trie_storage')
-
-    def test_iterate_overlap(self):
-        self.trie = pwd_guess.DiskBackedTrie(pwd_guess.ModelDefaults())
-        self.trie.increment('aaa', 1)
-        self.trie.increment('aab', 5)
-        self.trie.increment('cab', 2)
-        self.assertEqual(set([('a', 6), ('c', 2), ('aa', 6), ('aaa', 1),
-                              ('aab', 5), ('ca', 2), ('cab', 2)]),
-                         set(self.trie.iterate('reg')))
-
-    def test_sampled_iterate(self):
-        self.trie = pwd_guess.DiskBackedTrie(pwd_guess.ModelDefaults(
-            trie_serializer_type = 'fuzzy'))
-        self.trie.increment('aaa', 1)
-        self.trie.increment('aab', 5)
-        self.trie.increment('cab', 2)
-        hashable = lambda item: (item[0], tuple(item[1]))
-        self.assertEqual(set(map(hashable, [('', [('a', 6), ('c', 2)]),
-                                            ('c', [('a', 2)]),
-                                            ('ca', [('b', 2)]),
-                                            ('a', [('a', 6)]),
-                                            ('aa', [('a', 1), ('b', 5)])])),
-                         set(map(hashable, self.trie.iterate('fuzzy'))))
 
 class CharacterTableTest(unittest.TestCase):
     def test_table(self):
@@ -252,10 +58,6 @@ class CharacterTableTest(unittest.TestCase):
         np.testing.assert_array_equal(ctable.encode('ba'),
                                       np.array([[False, True],
                                                 [True, False]]))
-        self.assertEqual(ctable.decode(np.array([[True, False],
-                                                 [True, False]])), 'aa')
-        self.assertEqual(ctable.decode(np.array([[False, True],
-                                                 [True, False]])), 'ba')
         self.assertEqual(ctable.get_char_index('a'), 0)
         self.assertEqual(ctable.get_char_index('b'), 1)
         np.testing.assert_array_equal(ctable.encode_many(['aa', 'ba']),
@@ -265,6 +67,43 @@ class CharacterTableTest(unittest.TestCase):
                                                  [True, False]]]))
         self.assertEqual(ctable.translate('aba'), 'aba')
         self.assertEqual(ctable.translate('aba'), 'aba')
+
+    def test_embedding(self):
+        ctable = pwd_guess.CharacterTable('ab', 2, embedding=True)
+        np.testing.assert_array_equal(
+            ctable.encode('aa'), np.array([0, 0]))
+        np.testing.assert_array_equal(
+            ctable.encode('ba'), np.array([1, 0]))
+        self.assertEqual(ctable.get_char_index('a'), 0)
+        self.assertEqual(ctable.get_char_index('b'), 1)
+        np.testing.assert_array_equal(
+            ctable.encode_many(['aa', 'ba']), np.array([[0, 0], [1, 0]]))
+        self.assertEqual(ctable.translate('aba'), 'aba')
+        self.assertEqual(ctable.translate('aba'), 'aba')
+
+    def test_encode_many_chunks(self):
+        ctable = pwd_guess.CharacterTable('abc', 4, embedding=True,
+                                          sequence_model=pwd_guess.Sequence.MANY_TO_ONE)
+        indices, strings = ctable.encode_many_chunks(['abcabc', 'aaabbb'], 6)
+        np.testing.assert_array_equal(indices, np.array([[0, 1, 2, 0], [2, 0, 1, 2],
+                                                        [0, 0, 0, 1], [0, 1, 1, 1]]))
+        self.assertListEqual(strings, ['abca', 'cabc', 'aaab', 'abbb'])
+        zero = [True, False, False]
+        one = [False, True, False]
+        two = [False, False, True]
+        ctable = pwd_guess.CharacterTable('abc', 4, embedding=False,
+                                          sequence_model=pwd_guess.Sequence.MANY_TO_ONE)
+        indices, strings = ctable.encode_many_chunks(['abcabc', 'aaabbb'], 6)
+        np.testing.assert_array_equal(indices, np.array([[zero, one, two, zero], [two, zero, one, two],
+                                                       [zero, zero, zero, one], [zero, one, one, one]]))
+        self.assertListEqual(strings, ['abca', 'cabc', 'aaab', 'abbb'])
+
+        ctable = pwd_guess.CharacterTable('abc', 4, embedding=True,
+                                          sequence_model=pwd_guess.Sequence.MANY_TO_MANY)
+        indices, strings = ctable.encode_many_chunks(['abcabc', 'aaabbb'], 6)
+        np.testing.assert_array_equal(indices, np.array([[0, 1, 2, 0], [2, 0, 1, 2],
+                                                        [0, 0, 0, 1], [0, 1, 1, 1]]))
+        self.assertListEqual(strings, ['abca', 'cabc', 'aaab', 'abbb'] )
 
 class OptimizingTableTest(unittest.TestCase):
     def test_table(self):
@@ -281,10 +120,6 @@ class OptimizingTableTest(unittest.TestCase):
         np.testing.assert_array_equal(ctable.encode('aa'),
                                       np.array([[True, False, False],
                                                 [True, False, False]]))
-        self.assertEqual(ctable.decode(np.array([[True, False, False],
-                                                 [True, False, False]])), 'aa')
-        self.assertEqual(ctable.decode(np.array([[False, False, True],
-                                                 [False, True, False]])), 'dc')
         self.assertEqual(ctable.get_char_index('a'), 0)
         self.assertEqual(ctable.get_char_index('b'), 0)
         self.assertEqual(ctable.get_char_index('c'), 1)
@@ -314,12 +149,6 @@ class OptimizingTableTest(unittest.TestCase):
         np.testing.assert_array_equal(ctable.encode('AA'), np.array(
             [[False, True, False, False, False],
              [False, True, False, False, False]]))
-        self.assertEqual(ctable.decode(np.array(
-            [[True, False, False, False, False],
-             [True, False, False, False, False]])), '::')
-        self.assertEqual(ctable.decode(np.array(
-            [[False, False, False, False, True],
-             [False, False, False, True, False]])), 'dc')
         self.assertEqual(ctable.get_char_index('a'), 1)
         self.assertEqual(ctable.get_char_index('b'), 2)
         self.assertEqual(ctable.get_char_index('c'), 3)
@@ -331,9 +160,6 @@ class OptimizingTableTest(unittest.TestCase):
     def test_table_upper_and_rare(self):
         ctable = pwd_guess.OptimizingCharacterTable('abcdABCD:', 2, ':A', True)
         self.assertEqual(ctable.rare_characters, ':')
-        self.assertEqual(ctable.decode(np.array(
-            [[True, False, False, False, False],
-             [True, False, False, False, False]])), '::')
 
     def test_table_context(self):
         ctable = pwd_guess.CharacterTable('abc\n', 2)
@@ -347,175 +173,6 @@ class OptimizingTableTest(unittest.TestCase):
               [False, False, True, False]],
              [[False, False, True, False],
               [False, False, False, True]]])
-
-class TokenizingTableTest(unittest.TestCase):
-    def test_create(self):
-        tokens = ['password', '123', '456']
-        config = Mock()
-        config.char_bag = (string.ascii_lowercase + string.ascii_uppercase
-                           + string.digits + ':!~')
-        config.most_common_token_count = len(tokens)
-        config.uppercase_character_optimization = False
-        config.rare_character_optimization = False
-        config.get_intermediate_info = MagicMock(return_value = tokens)
-        config.context_length = 4
-        t = pwd_guess.TokenizingCharacterTable(config)
-
-    def test_create_rare(self):
-        tokens = ['password', '123', '456']
-        rare_chars = [':', '!', '~']
-        def get_im(key):
-            if key == 'most_common_tokens':
-                return tokens
-            else:
-                return rare_chars
-        config = Mock()
-        config.char_bag = (string.ascii_lowercase + string.ascii_uppercase
-                           + string.digits + ':!~')
-        config.most_common_token_count = len(tokens)
-        config.get_intermediate_info = get_im
-        config.uppercase_character_optimization = True
-        config.rare_character_optimization = True
-        config.context_length = 4
-        t = pwd_guess.TokenizingCharacterTable(config)
-
-    def test_encode(self):
-        tokens = ['ab', 'bc']
-        config = Mock()
-        config.char_bag = 'abc\n'
-        config.most_common_token_count = len(tokens)
-        config.uppercase_character_optimization = False
-        config.rare_character_optimization = False
-        config.context_length = 2
-        config.get_intermediate_info = MagicMock(return_value = tokens)
-        t = pwd_guess.TokenizingCharacterTable(config)
-        np.testing.assert_array_equal(t.encode('abbc'),
-            [[True, False, False, False, False, False],
-             [False, True, False, False, False, False]])
-        np.testing.assert_array_equal(t.encode('ba'),
-            [[False, False, False, False, True, False],
-             [False, False, False, True, False, False]])
-        np.testing.assert_array_equal(t.encode('abc'),
-            [[True, False, False, False, False, False],
-             [False, False, False, False, False, True]])
-        np.testing.assert_array_equal(t.encode('a'),
-            [[False, False, False, True, False, False],
-             [False, False, True, False, False, False]])
-        np.testing.assert_array_equal(t.encode('abbcbc'),
-            [[False, True, False, False, False, False],
-             [False, True, False, False, False, False]])
-        self.assertEqual(
-            t.decode(np.array([[False, True, False, False, False, False],
-                               [False, True, False, False, False, False]])),
-            'bcbc')
-        self.assertEqual(
-            t.decode(np.array([[False, False, False, True, False, False],
-                               [False, False, True, False, False, False]])),
-            'a\n')
-        self.assertEqual(
-            t.decode(np.array([[True, False, False, False, False, False],
-                               [False, True, False, False, False, False]])),
-            'abbc')
-
-    def test_encode_rare(self):
-        tokens = ['ab', 'bc', '::']
-        rare_chars = [':', '!', '~']
-        def get_im(key):
-            if key == 'most_common_tokens':
-                return tokens
-            else:
-                return rare_chars
-        config = Mock()
-        config.char_bag = '\nabc:!~'
-        config.most_common_token_count = len(tokens)
-        config.get_intermediate_info = get_im
-        config.uppercase_character_optimization = False
-        config.rare_character_optimization = True
-        config.context_length = 2
-        t = pwd_guess.TokenizingCharacterTable(config)
-        np.testing.assert_array_equal(t.encode('a::'),
-            [[False, False, False, False, False, True, False, False],
-             [False, False, True, False, False, False, False, False]])
-        np.testing.assert_array_equal(t.encode('a:!'),
-            [[False, False, False, False, False, True, False, False],
-             [False, False, True, False, False, False, False, False]])
-        np.testing.assert_array_equal(t.encode('a!a'),
-            [[False, False, False, False, True, False, False, False],
-             [False, False, False, False, False, True, False, False]])
-        np.testing.assert_array_equal(t.encode('abc'),
-            [[True, False, False, False, False, False, False, False],
-             [False, False, False, False, False, False, False, True]])
-        np.testing.assert_array_equal(t.encode('a'),
-            [[False, False, False, False, False, True, False, False],
-             [False, False, False, True, False, False, False, False]])
-        self.assertEqual(t.decode(np.array(
-            [[False, False, False, False, False, True, False, False]])), 'a')
-        self.assertEqual(t.decode(np.array(
-            [[False, False, False, False, True, False, False, False]])), ':')
-        self.assertEqual(t.decode(np.array(
-            [[False, False, True, False, False, False, False, False]])), '::')
-
-class HybridPreprocessorTest(unittest.TestCase):
-    def test_begin(self):
-        pre = pwd_guess.HybridDiskPreprocessor(pwd_guess.ModelDefaults(
-            min_len = 3, intermediate_fname = ':memory:',
-            trie_implementation = 'disk'))
-        pre.begin([('aaa', 1), ('caa', 2), ('aab', 5)])
-        pre.reset()
-        prefix, suffix, weight = pre.next_chunk()
-        exp_prefix = ['', 'a', 'aa', 'aa', '', 'c', 'ca', 'aaa', 'aab', 'caa']
-        exp_suffix = ['a', 'a', 'a', 'b', 'c', 'a', 'a', '\n', '\n', '\n']
-        exp_weight = [6, 6, 1, 5, 2, 2, 2, 1, 5, 2]
-        self.assertEqual(
-            set(zip(exp_prefix, exp_suffix, exp_weight)),
-            set(zip(prefix, suffix, weight)))
-
-    def test_preprocess(self):
-        pre = pwd_guess.HybridDiskPreprocessor(pwd_guess.ModelDefaults(
-            min_len = 3, trie_serializer_type = 'fuzzy',
-            trie_implementation = 'disk', intermediate_fname = ':memory:'))
-        self.assertEqual([('aaa', 1), ('aab', 5), ('caa', 2)], list(
-            pre.preprocess([('aaa', 1), ('caa', 2), ('aab', 5)])))
-
-    def test_preprocess_disk(self):
-        tf = tempfile.mkdtemp()
-        try:
-            pre = pwd_guess.HybridDiskPreprocessor(pwd_guess.ModelDefaults(
-                min_len = 3, trie_serializer_type = 'fuzzy',
-                trie_implementation = 'disk', intermediate_fname = ':memory:',
-                trie_intermediate_storage = tf,
-                preprocess_trie_on_disk = True,
-                preprocess_trie_on_disk_buff_size = 2))
-            self.assertEqual([('aaa', 1), ('aab', 5), ('caa', 2)], list(
-                pre.preprocess([('aaa', 1), ('caa', 2), ('aab', 5)])))
-        finally:
-            shutil.rmtree(tf)
-
-class DiskPreprocessorTest(unittest.TestCase):
-    def setUp(self):
-        self.tempfile = tempfile.NamedTemporaryFile()
-        self.config = pwd_guess.ModelDefaults(trie_fname = self.tempfile.name)
-
-    def tearDown(self):
-        self.tempfile.close()
-
-    def test_train(self):
-        s = pwd_guess.TrieSerializer.fromConfig(self.config)
-        trie = pwd_guess.NodeTrie()
-        trie.increment('aaa', 1)
-        trie.increment('aab', 5)
-        s.serialize(trie)
-
-        pre = pwd_guess.DiskPreprocessor(self.config)
-        pre.begin()
-        pre.reset()
-        prefix, suffix, weight = pre.next_chunk()
-        exp_prefix = ['', 'a', 'aa', 'aa']
-        exp_suffix = ['a', 'a', 'a', 'b']
-        exp_weight = [6, 6, 1, 5]
-        self.assertEqual(
-            set(zip(exp_prefix, exp_suffix, exp_weight)),
-            set(zip(prefix, suffix, weight)))
 
 class PreprocessorTest(unittest.TestCase):
     def test_train_set(self):
@@ -536,6 +193,21 @@ class PreprocessorTest(unittest.TestCase):
                                  ['a', 'a', 'a', '\n'])),
                          set(zip(list(prefix), list(suffix))))
 
+    def test_training_set_small_multi_use(self):
+        t = pwd_guess.Preprocessor(
+            pwd_guess.ModelDefaults(max_len = 3, min_len = 3))
+        t.begin([('aaa', 1)])
+        prefix, suffix, _ = t.next_chunk()
+        self.assertEqual(set(zip(['', 'a', 'aa', 'aaa'],
+                                 ['a', 'a', 'a', '\n'])),
+                         set(zip(list(prefix), list(suffix))))
+        t.reset()
+        t.begin([('aaa', 1)])
+        prefix, suffix, _ = t.next_chunk()
+        self.assertEqual(set(zip(['', 'a', 'aa', 'aaa'],
+                                 ['a', 'a', 'a', '\n'])),
+                         set(zip(list(prefix), list(suffix))))
+
     def test_train_construct_dict(self):
         t = pwd_guess.Preprocessor(pwd_guess.ModelDefaults(
             simulated_frequency_optimization = True))
@@ -545,27 +217,6 @@ class PreprocessorTest(unittest.TestCase):
                                  ['p', 'a', 's', 's', '\n'],
                                  [1, 1, 1, 1, 1])),
                          set(zip(list(prefix), list(suffix), list(weight))))
-
-    def test_tokenized(self):
-        config = Mock()
-        config.tokenize_words = True
-        config.training_chunk = 2
-        config.training_main_memory_chunksize = 10
-        config.randomize_training_order = True
-        config.uppercase_character_optimization = False
-        config.rare_character_optimization = False
-        config.char_bag = 'abc\n'
-        config.context_length = 2
-        config.get_intermediate_info = MagicMock(return_value = ['ab', 'bc'])
-        config.most_common_token_count = 2
-        t = pwd_guess.Preprocessor(config)
-        t.begin([('abc', 1), ('bcaa', 1)])
-        x, y, z = t.next_chunk()
-        self.assertEqual(set(zip(((), ('ab',), ('ab', 'c'),
-                                  (), ('bc',), ('bc', 'a'), ('bc', 'a', 'a')),
-                                 ('ab', 'c', '\n', 'bc', 'a', 'a', '\n'),
-                                 (1, 1, 1, 1, 1, 1, 1))),
-                         set(zip(tuple(x), tuple(y), tuple(z))))
 
     def test_resetable(self):
         config = pwd_guess.ModelDefaults(
@@ -606,220 +257,113 @@ class PreprocessorTest(unittest.TestCase):
         self.assertEqual(set(zip(list(prefix), list(suffix), list(weight))),
                          set([]))
 
-class TriePreprocessorTest(unittest.TestCase):
-    def test_train_set(self):
-        config = pwd_guess.ModelDefaults(
-            max_len = 40, trie_implementation = 'trie')
-        trie_p = pwd_guess.TriePreprocessor(config)
-        trie_p.begin([('pass', 1)])
-        trie_p.reset()
-        prefix, suffix, weight = trie_p.next_chunk()
-        self.assertEqual(set(zip(['', 'p', 'pa', 'pas', 'pass'],
-                                 ['p', 'a', 's', 's', '\n'],
-                                 [1, 1, 1 ,1 , 1])),
-                         set(zip(prefix, suffix, weight)))
-
-    def test_training_set_small(self):
-        config = pwd_guess.ModelDefaults(
-            max_len = 3, min_len = 3, trie_implementation = 'trie')
-        trie_p = pwd_guess.TriePreprocessor(config)
-        trie_p.begin([('aaa', 1)])
-        trie_p.reset()
-        prefix, suffix, weight = trie_p.next_chunk()
-        self.assertEqual(set(zip(['', 'a', 'aa', 'aaa'], ['a', 'a', 'a', '\n'],
-                                 [1, 1, 1, 1])),
-                         set(zip(prefix, suffix, weight)))
-
-    def test_train_construct_dict(self):
-        config = pwd_guess.ModelDefaults(
-            simulated_frequency_optimization = True,
-            trie_implementation = 'trie')
-        p = pwd_guess.TriePreprocessor(config)
-        p.begin([('pass', 2)])
-        p.reset()
-        prefix, suffix, weight = p.next_chunk()
-        self.assertEqual(set(zip(['', 'p', 'pa', 'pas', 'pass'],
-                                 ['p', 'a', 's', 's', '\n'],
-                                 [2, 2, 2, 2, 2])),
-                         set(zip(prefix, suffix, weight)))
-
-    def test_train_trie_dict_trie(self):
-        config = pwd_guess.ModelDefaults(
-            simulated_frequency_optimization = True,
-            trie_implementation = 'trie',
-            chunk_print_interval = 1)
-        p = pwd_guess.TriePreprocessor(config)
-        p.begin([('pass', 2), ('pasw', 3)])
-        p.reset()
-        prefix, suffix, weight = p.next_chunk()
-        expected_chunks = ['', 'p', 'pa', 'pas', 'pasw', 'pas', 'pass']
-        expected_out = ['p', 'a', 's', 'w', '\n', 's', '\n']
-        expected_weight = [5, 5, 5, 3, 3, 2, 2]
-        self.assertEqual(
-            set(zip(expected_chunks, expected_out, expected_weight)),
-            set(zip(prefix, suffix, weight)))
-
-    def test_train_trie_rare_character(self):
-        self.assertFalse(os.path.exists('test.sqlite'))
-        config = pwd_guess.ModelDefaults(
-            simulated_frequency_optimization = True,
-            uppercase_character_optimization = True,
-            trie_implementation = 'trie',
-            chunk_print_interval = 1,
-            intermediate_fname = 'test.sqlite')
-        try:
-            config.set_intermediate_info('rare_character_bag', '!@#$')
-            p = pwd_guess.TriePreprocessor(config)
-            p.begin([('pass', 2), ('pasw', 3)])
-            p.reset()
-            prefix, suffix, weight = p.next_chunk()
-            expected_chunks = ['', 'p', 'pa', 'pas', 'pasw', 'pas', 'pass']
-            expected_out = ['p', 'a', 's', 'w', '\n', 's', '\n']
-            expected_weight = [5, 5, 5, 3, 3, 2, 2]
-            self.assertEqual(
-                set(zip(expected_chunks, expected_out, expected_weight)),
-                set(zip(prefix, suffix, weight)))
-        finally:
-            os.remove('test.sqlite')
-
-class SuperTrieTrainerTest(unittest.TestCase):
-    def test_y_data(self):
-        a = pwd_guess.FuzzyTrieTrainer([], pwd_guess.ModelDefaults(
-            max_len = 5, char_bag = 'abc\n'))
-        answer = a.prepare_y_data([[('a', 1), ('b', 5), ('c', 2)]])
-        expected = np.zeros((1, 1, 4))
-        expected[0, 0, 0] = 0
-        expected[0, 0, 1] = 1 / 8
-        expected[0, 0, 2] = 5 / 8
-        expected[0, 0, 3] = 2 / 8
-        np.testing.assert_array_equal(answer, expected)
-
-class FuzzyTrieSmoothing(unittest.TestCase):
-    def test_y_data(self):
-        a = pwd_guess.FuzzyTrieTrainerSmoothing([], pwd_guess.ModelDefaults(
-            max_len = 5, char_bag = 'abc\n'))
-        answer = a.prepare_y_data([[('a', 1), ('b', 5)]])
-        expected = np.zeros((1, 1, 4))
-        expected[0, 0, 0] = 1 / 10
-        expected[0, 0, 1] = 2 / 10
-        expected[0, 0, 2] = 6 / 10
-        expected[0, 0, 3] = 1 / 10
-        np.testing.assert_array_equal(answer, expected)
-
-    def test_y_data_multiple(self):
-        a = pwd_guess.FuzzyTrieTrainerSmoothing([], pwd_guess.ModelDefaults(
-            max_len = 5, char_bag = 'abc\n'))
-        answer = a.prepare_y_data([[('a', 1), ('b', 5)],
-                                   [('a', 2), ('b', 2), ('c', 3)]])
-        expected = np.zeros((2, 1, 4))
-        expected[0, 0] = [1/10, 2/10, 6/10, 1/10]
-        expected[1, 0] = [1/11, 3/11, 3/11, 4/11]
-        np.testing.assert_array_equal(answer, expected)
-
 class TrainerTest(unittest.TestCase):
     def test_accuracy(self):
         config = pwd_guess.ModelDefaults(max_len = 5)
         pre = pwd_guess.Preprocessor(config)
         pre.begin([('pass', 1)])
-        t = pwd_guess.Trainer(pre, config)
+        t = pwd_guess.Trainer(pre, config=config)
         mock_model = Mock()
         mock_model.train_on_batch = MagicMock(return_value = (0.5, 0.5))
         mock_model.test_on_batch = MagicMock(return_value = (0.5, 0.5))
         t.model = mock_model
-        self.assertEqual(0.5, t.train_model_generation())
-
-    def test_tokenize(self):
-        config = Mock()
-        config.tokenize_words = True
-        config.training_chunk = 1
-        config.training_main_memory_chunksize = 10
-        config.randomize_training_order = True
-        config.uppercase_character_optimization = False
-        config.rare_character_optimization = False
-        config.char_bag = 'abc\n'
-        config.context_length = 2
-        config.scheduled_sampling = False
-        config.most_common_token_count = 2
-        config.get_intermediate_info = MagicMock(return_value = ['ab', 'bc'])
-        pre = pwd_guess.Preprocessor(config)
-        pre.begin([('abc', 1), ('bca', 1)])
-        t = pwd_guess.Trainer(pre, config)
-        xv, yv, wv = t.next_train_set_as_np()
+        self.assertEqual((0.5, False), t.train_model_generation())
 
     def test_train_model(self):
         config = pwd_guess.ModelDefaults(max_len = 5, generations = 20)
+        config.sequence_model = pwd_guess.Sequence.MANY_TO_ONE
         pre = pwd_guess.Preprocessor(config)
         pre.begin([('pass', 1)])
-        t = pwd_guess.Trainer(pre, config)
+        t = pwd_guess.Trainer(pre, config=config)
         mock_model = Mock()
         mock_model.train_on_batch = MagicMock(return_value = (0.5, 0.5))
         mock_model.test_on_batch = MagicMock(return_value = (0.5, 0.5))
         t.model = mock_model
         t.train_model(pwd_guess.ModelSerializer())
-        self.assertEqual(t.generation, 2)
-
-    @unittest.skip('Not supported anymore')
-    def test_train_model_scheduled_sampling(self):
-        config = pwd_guess.ModelDefaults(max_len = 5, generations = 20,
-                                         scheduled_sampling = True)
-        pre = pwd_guess.Preprocessor(config)
-        pre.begin([('pass', 1)])
-        t = pwd_guess.Trainer(pre, config)
-        mock_model = Mock()
-        mock_model.train_on_batch = MagicMock(return_value = (0.5, 0.5))
-        mock_model.test_on_batch = MagicMock(return_value = (0.5, 0.5))
-        t.model = mock_model
-        t.train_model(pwd_guess.ModelSerializer())
-        self.assertEqual(t.generation, 2)
-
-    @unittest.skip('Not supported anymore')
-    def test_train_model_scheduled_sampling_high_sigma(self):
-        config = pwd_guess.ModelDefaults(max_len = 5, generations = 20,
-                                         scheduled_sampling = True)
-        pre = pwd_guess.Preprocessor(config)
-        pre.begin([('pass', 1)])
-        t = pwd_guess.Trainer(pre, config)
-        mock_model = Mock()
-        mock_model.train_on_batch = MagicMock(return_value = (0.5, 0.5))
-        mock_model.test_on_batch = MagicMock(return_value = (0.5, 0.5))
-        t.model = mock_model
-        t.train_model(pwd_guess.ModelSerializer())
-        self.assertEqual(t.generation, 2)
+        self.assertEqual(t.generation, 20)
 
     def test_char_table_no_error(self):
         t = pwd_guess.Trainer(None)
         self.assertNotEqual(None, t.ctable)
         t.ctable.encode('1234' + ('\n' * 36), 40)
 
-    def test_output_as_np(self):
-        pre = pwd_guess.Preprocessor()
+    def test_output_as_np_many_one_no_embedding(self):
+        config = pwd_guess.ModelDefaults(max_len=5, generations=20)
+        config.sequence_model = pwd_guess.Sequence.MANY_TO_ONE
+        config.embedding_layer = False
+        pre = pwd_guess.Preprocessor(config)
         pre.begin([('pass', 1)])
-        t = pwd_guess.Trainer(pre)
-        t.next_train_set_as_np()
+
+        t = pwd_guess.Trainer(pre, config=config)
+        x_vec, y_vec, weight_vec = t.next_train_set_as_np()
+        self.assertTupleEqual(x_vec.shape, (5, t.config.max_len, len(t.config.char_bag)))
+        self.assertTupleEqual(y_vec.shape, (5, len(t.config.char_bag)))
+
+    def test_output_as_np_many_one_embedding(self):
+        config = pwd_guess.ModelDefaults(max_len=5, generations=20)
+        config.sequence_model = pwd_guess.Sequence.MANY_TO_ONE
+        config.embedding_layer = True
+        config.embedding_size = 20
+        pre = pwd_guess.Preprocessor(config)
+        pre.begin([('pass', 1)])
+
+        t = pwd_guess.Trainer(pre, config=config)
+        x_vec, y_vec, weight_vec = t.next_train_set_as_np()
+        self.assertTupleEqual(x_vec.shape, (5, t.config.max_len))
+        self.assertTupleEqual(y_vec.shape, (5, len(t.config.char_bag)))
+
+    def test_output_as_np_many_many_embedding(self):
+        config = pwd_guess.ModelDefaults(max_len=5, generations=20)
+        config.sequence_model = pwd_guess.Sequence.MANY_TO_MANY
+        config.embedding_layer = True
+        config.embedding_size = 20
+        config.sequence_model_updates()
+        pre = pwd_guess.ManyToManyPreprocessor(config)
+        pre.begin([('pass', 1)])
+
+        t = pwd_guess.ManyToManyTrainer(pre, config=config)
+        x_vec, y_vec, weight_vec = t.next_train_set_as_np()
+        self.assertTupleEqual(x_vec.shape, (1, t.config.max_len))
+        self.assertTupleEqual(y_vec.shape, (1, t.config.max_len, len(t.config.char_bag)))
+
+    def test_output_as_np_many_many_no_embedding(self):
+        config = pwd_guess.ModelDefaults(max_len=5, generations=20)
+        config.sequence_model = pwd_guess.Sequence.MANY_TO_MANY
+        config.embedding_layer = False
+        config.sequence_model_updates()
+        pre = pwd_guess.ManyToManyPreprocessor(config)
+        pre.begin([('pass', 1)])
+
+        t = pwd_guess.ManyToManyTrainer(pre, config=config)
+        x_vec, y_vec, weight_vec = t.next_train_set_as_np()
+        self.assertTupleEqual(x_vec.shape, (1, t.config.max_len, len(t.config.char_bag)))
+        self.assertTupleEqual(y_vec.shape, (1, t.config.max_len, len(t.config.char_bag)))
 
     def test_build_model(self):
-        t = pwd_guess.Trainer(['pass'], pwd_guess.ModelDefaults(
+        t = pwd_guess.Trainer(['pass'], config=pwd_guess.ModelDefaults(
             hidden_size = 12, layers = 1))
         t.build_model()
         self.assertNotEqual(None, t.model)
 
+    def test_build_model_conv(self):
+        t = pwd_guess.Trainer(['pass'], config=pwd_guess.ModelDefaults(
+            layers = 2,
+            dense_layers = 1,
+            context_length = 10,
+            convolutional_kernel_size = 3,
+            model_type = 'Conv1D'))
+        t.build_model()
+        self.assertNotEqual(None, t.model)
+
     def test_build_model_deep(self):
-        t = pwd_guess.Trainer(['pass'], pwd_guess.ModelDefaults(
+        t = pwd_guess.Trainer(['pass'], config=pwd_guess.ModelDefaults(
             hidden_size = 12, layers = 1, deep_model = True))
         t.build_model()
         self.assertNotEqual(None, t.model)
 
     def test_build_model_deep_no_layers(self):
-        t = pwd_guess.Trainer(['pass'], pwd_guess.ModelDefaults(
+        t = pwd_guess.Trainer(['pass'], config=pwd_guess.ModelDefaults(
             hidden_size = 12, layers = 0, deep_model = True))
-        t.build_model()
-        self.assertNotEqual(None, t.model)
-
-    @unittest.skip('Not supporting bidirectional models')
-    def test_build_model_bidirectional(self):
-        t = pwd_guess.Trainer(['pass'], pwd_guess.ModelDefaults(
-            hidden_size = 12, layers = 1,
-            bidirectional_rnn = True))
         t.build_model()
         self.assertNotEqual(None, t.model)
 
@@ -827,12 +371,12 @@ class TrainerTest(unittest.TestCase):
         config = pwd_guess.ModelDefaults()
         pre = pwd_guess.Preprocessor(config)
         pre.begin([('pass', 1), ('word', 1)])
-        t = pwd_guess.Trainer(pre, config)
+        t = pwd_guess.Trainer(pre, config=config)
         t.next_train_set_as_np()
 
     def test_test_set(self):
         config = pwd_guess.ModelDefaults(train_test_ratio = 10)
-        t = pwd_guess.Trainer(pwd_guess.Preprocessor(config), config)
+        t = pwd_guess.Trainer(pwd_guess.Preprocessor(config), config=config)
         a = np.zeros((10, 1, 1), dtype = np.bool)
         b = np.zeros((10, 1, 1), dtype = np.bool)
         w = np.zeros((10, 1))
@@ -846,7 +390,7 @@ class TrainerTest(unittest.TestCase):
 
     def test_test_set_small(self):
         config = pwd_guess.ModelDefaults(train_test_ratio = 10)
-        t = pwd_guess.Trainer(pwd_guess.Preprocessor(config), config)
+        t = pwd_guess.Trainer(pwd_guess.Preprocessor(config), config=config)
         a = np.zeros((5, 1, 1), dtype = np.bool)
         b = np.zeros((5, 1, 1), dtype = np.bool)
         w = np.zeros((5, 1), dtype = np.bool)
@@ -858,12 +402,21 @@ class TrainerTest(unittest.TestCase):
         self.assertEqual(4, len(w_t))
         self.assertEqual(1, len(w_v))
 
-    def test_get_factory(self):
-        self.assertEqual(pwd_guess.FuzzyTrieTrainer,
-                         pwd_guess.Trainer.getFactory(pwd_guess.ModelDefaults(
-                             trie_serializer_type = 'fuzzy')))
-        self.assertEqual(pwd_guess.Trainer, pwd_guess.Trainer.getFactory(
-            pwd_guess.ModelDefaults(trie_serializer_type = 'reg')))
+    def test_early_stopping(self):
+        config = pwd_guess.ModelDefaults(early_stopping=True, early_stopping_patience=100)
+        t = pwd_guess.Trainer(pwd_guess.Preprocessor(config), config=config)
+        serializer = Mock()
+        serializer.save_model = MagicMock(return_value=None)
+        loss_function = [(x/1000)**2 - (x/1000) + 1 for x in range(0,1500)]
+        for i, loss in enumerate(loss_function):
+            stop = t.early_stopping(loss,serializer)
+            if i == 601:
+                self.assertTrue(stop)
+                break
+            else:
+                self.assertFalse(stop)
+
+
 
 class ModelDefaultsTest(unittest.TestCase):
     def test_get_default(self):
@@ -889,10 +442,6 @@ class ModelDefaultsTest(unittest.TestCase):
         m = pwd_guess.ModelDefaults()
         self.assertTrue(json.dumps(m.as_dict()) is not None)
 
-    def test_model_type(self):
-        m = pwd_guess.ModelDefaults()
-        self.assertTrue(hasattr(m.model_type_exec(), '__call__'))
-
     def test_set(self):
         m = pwd_guess.ModelDefaults()
         m.test = 1
@@ -903,7 +452,7 @@ class ModelDefaultsTest(unittest.TestCase):
         self.assertNotEqual(other.hidden_size, 444)
 
     def test_intermediate_files(self):
-        with tempfile.NamedTemporaryFile() as intermediate_file:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as intermediate_file:
             m = pwd_guess.ModelDefaults(
                 intermediate_fname = intermediate_file.name)
             m.set_intermediate_info('test', 8)
@@ -943,9 +492,42 @@ class ModelDefaultsTest(unittest.TestCase):
         self.assertEqual(10, args.context_length)
         self.assertEqual('normal', args.freq_format)
 
+    def test_concurrent_mod(self):
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as tfile:
+            m = pwd_guess.ModelDefaults(intermediate_fname=tfile.name)
+            m.set_intermediate_info('test', ['value'])
+            self.assertListEqual(m.get_intermediate_info('test'), ['value'])
+            time.sleep(.01)
+            tfile.write('{"test" : ["value2"]}'.encode('utf8'))
+            tfile.flush()
+            self.assertListEqual(m.get_intermediate_info('test'), ['value2'])
+
+    def test_load_infer_type(self):
+        with tempfile.NamedTemporaryFile(
+                dir=TMPDIR, suffix='.json', mode='w') as tfile:
+            json.dump({'hidden_size' : 42}, tfile)
+            tfile.flush()
+            m = pwd_guess.ModelDefaults.fromFile(tfile.name)
+            self.assertEqual(m.hidden_size, 42)
+
+        with tempfile.NamedTemporaryFile(
+                dir=TMPDIR, suffix='.yaml', mode='w') as tfile:
+            yaml.dump({'hidden_size' : 42}, tfile)
+            tfile.flush()
+            m = pwd_guess.ModelDefaults.fromFile(tfile.name)
+            self.assertEqual(m.hidden_size, 42)
+
+        with tempfile.NamedTemporaryFile(
+                dir=TMPDIR, suffix='.cfg', mode='w') as tfile:
+            json.dump({'hidden_size' : 42}, tfile)
+            tfile.flush()
+            m = pwd_guess.ModelDefaults.fromFile(tfile.name)
+            self.assertEqual(m.hidden_size, 42)
+
+
 class PwdListTest(unittest.TestCase):
     def setUp(self):
-        self.tempdir = tempfile.mkdtemp()
+        self.tempdir = tempfile.mkdtemp(dir=TMPDIR)
         self.fcontent = 'pass \nword\n'
 
     def make_file(self, fname, opener):
@@ -1027,7 +609,7 @@ class PwdListTest(unittest.TestCase):
             ('pass ', 1), ('word', 1), ('pass', 1), ('word', 1)])
 
     def test_concat_second_time(self):
-        with tempfile.NamedTemporaryFile() as tf:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as tf:
             fnames = [os.path.join(self.tempdir, 'test.tsv'),
                       os.path.join(self.tempdir, 'test.txt')]
             config = pwd_guess.ModelDefaults(
@@ -1049,7 +631,7 @@ class PwdListTest(unittest.TestCase):
                 ('pass ', 1), ('word', 1), ('pass', .2), ('word9', .2)])
 
     def test_concat_twice_same_weights(self):
-        with tempfile.NamedTemporaryFile() as tf:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as tf:
             config = pwd_guess.ModelDefaults(
                 intermediate_fname = tf.name,
                 simulated_frequency_optimization = False)
@@ -1069,7 +651,7 @@ class PwdListTest(unittest.TestCase):
                 ('pass ', 1), ('word', 1), ('pass', 1), ('word9', 1)])
 
     def test_concat_twice_diff_weights(self):
-        with tempfile.NamedTemporaryFile() as tf:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as tf:
             fnames = [os.path.join(self.tempdir, 'test.tsv'),
                       os.path.join(self.tempdir, 'test.txt')]
             config = pwd_guess.ModelDefaults(
@@ -1093,7 +675,7 @@ class PwdListTest(unittest.TestCase):
                 ('pass ', 1), ('word', 1), ('pass', .2), ('word9', .2)])
 
     def test_concat_three_diff_weights(self):
-        with tempfile.NamedTemporaryFile() as tf:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as tf:
             fnames = [os.path.join(self.tempdir, 'test.tsv'),
                       os.path.join(self.tempdir, 'test.txt'),
                       os.path.join(self.tempdir, 'test1.txt')]
@@ -1123,7 +705,7 @@ class PwdListTest(unittest.TestCase):
                 ('pass', 1), ('word9', 1)])
 
     def test_concat_twice_lopside(self):
-        with tempfile.NamedTemporaryFile() as tf:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as tf:
             fnames = [os.path.join(self.tempdir, 'test.tsv'),
                       os.path.join(self.tempdir, 'test.txt')]
             config = pwd_guess.ModelDefaults(
@@ -1194,7 +776,7 @@ class FiltererTest(unittest.TestCase):
         self.assertEqual([('aaa', 1)], list(f.filter([('aaa', 1)])))
 
     def test_filter_freqs(self):
-        with tempfile.NamedTemporaryFile() as tf:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as tf:
             config = pwd_guess.ModelDefaults(
                 rare_character_lowest_threshold = 2, char_bag = 'pass\n',
                 intermediate_fname = tf.name,
@@ -1209,7 +791,7 @@ class FiltererTest(unittest.TestCase):
                 set(['a', 'p']))
 
     def test_filter_freqs_non_appearing_rare_characters(self):
-        with tempfile.NamedTemporaryFile() as tf:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as tf:
             config = pwd_guess.ModelDefaults(
                 rare_character_lowest_threshold = 2, char_bag = 'pass12\n',
                 intermediate_fname = tf.name,
@@ -1228,50 +810,6 @@ class FiltererTest(unittest.TestCase):
         self.assertEqual([('pass', 1)],
                          list(f.filter([('pass', 1), ('passssss', 2)])))
 
-    def test_filter_tokens(self):
-        with tempfile.NamedTemporaryFile() as tf:
-            common_tokens = 3
-            config = pwd_guess.ModelDefaults(
-                rare_character_lowest_threshold = 2,
-                char_bag = (string.ascii_lowercase + string.ascii_uppercase
-                            + string.digits + '\n'),
-                intermediate_fname = tf.name,
-                rare_character_optimization = True,
-                tokenize_words = True,
-                most_common_token_count = common_tokens)
-            f = pwd_guess.Filterer(config)
-            self.assertEqual(f.most_common_token_count, common_tokens)
-            test_pwds = [('password123', 1), ('password45a', 1),
-                         ('Password123', 1), ('123asdf', 1),
-                         ('asdf456', 1), ('FE(CM$)', 1)]
-            self.assertEqual(test_pwds[:-1], list(f.filter(test_pwds)))
-            f.finish()
-            self.assertEqual(
-                set(config.get_intermediate_info('most_common_tokens')),
-                set(['123', 'password', 'asdf']))
-
-    def test_filter_tokens_no_singletons(self):
-        with tempfile.NamedTemporaryFile() as tf:
-            common_tokens = 3
-            config = pwd_guess.ModelDefaults(
-                rare_character_lowest_threshold = 2,
-                char_bag = (string.ascii_lowercase + string.ascii_uppercase
-                            + string.digits + '!\n'),
-                intermediate_fname = tf.name,
-                rare_character_optimization = True,
-                tokenize_words = True,
-                most_common_token_count = common_tokens)
-            f = pwd_guess.Filterer(config)
-            self.assertEqual(f.most_common_token_count, common_tokens)
-            test_pwds = [('password123!', 1), ('password45a!', 1),
-                         ('Password123!', 1), ('123asdf!', 1),
-                         ('asdf456', 1), ('FE(CM$)', 1)]
-            self.assertEqual(test_pwds[:-1], list(f.filter(test_pwds)))
-            f.finish()
-            self.assertEqual(
-                set(config.get_intermediate_info('most_common_tokens')),
-                set(['123', 'password', 'asdf']))
-
 class ModelSerializerTest(unittest.TestCase):
     def test_model_serializer(self):
         mock = Mock()
@@ -1279,8 +817,8 @@ class ModelSerializerTest(unittest.TestCase):
         mock.to_json = MagicMock(return_value = write_value)
         mock.save_weights = MagicMock()
         mock.load_weights = MagicMock()
-        with tempfile.NamedTemporaryFile() as fp:
-            with tempfile.NamedTemporaryFile() as tp:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as fp:
+            with tempfile.NamedTemporaryFile(dir=TMPDIR) as tp:
                 serializer = pwd_guess.ModelSerializer(fp.name, tp.name)
                 serializer.save_model(mock)
                 self.assertEqual(write_value, fp.read().decode('utf8'))
@@ -1295,8 +833,8 @@ class ModelSerializerTest(unittest.TestCase):
         mock.to_json = MagicMock(return_value = write_value)
         mock.save_weights = MagicMock()
         mock.load_weights = MagicMock()
-        with tempfile.NamedTemporaryFile() as fp:
-            with tempfile.NamedTemporaryFile() as tp:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as fp:
+            with tempfile.NamedTemporaryFile(dir=TMPDIR) as tp:
                 serializer = pwd_guess.ModelSerializer(fp.name, tp.name,
                                                        versioned = True)
                 serializer.save_model(mock)
@@ -1360,78 +898,8 @@ aa	0.125
 aaa	0.0625
 """, ostream.getvalue())
 
-    def test_guesser_small_chunk_tokenized(self):
-        tokens = ['ab']
-        config = Mock()
-        config.char_bag = 'ab\n'
-        config.most_common_token_count = len(tokens)
-        config.uppercase_character_optimization = False
-        config.rare_character_optimization = False
-        config.get_intermediate_info = MagicMock(return_value = tokens)
-        config.context_length = 3
-        config.min_len = 3
-        config.max_len = 3
-        config.relevel_not_match_passwords = True
-        config.chunk_size_guesser = 2
-        config.guess_serialization_method = 'human'
-        config.enforced_policy = 'basic'
-        config.max_gpu_prediction_size = 1
-        config.lower_probability_threshold = 1e-20
-        config.tokenize_words = True
-        guesser, ostream = self.make(config, [0.3, 0.2, 0.1, 0.4])
-        guesser.guess()
-        expected = {
-            'aaa': 0.03125,
-            'aab': 0.09375,
-            'aba': 0.075,
-            'abb': 0.3,
-            'baa': 0.0625,
-            'bab': 0.1875,
-            'bba': 0.05,
-            'bbb': 0.2
-        }
-        ostream.seek(0)
-        actual = list(csv.reader(ostream, delimiter = '\t'))
-        self.assertEqual(len(actual), 8)
-        for row in actual:
-            self.assertAlmostEqual(float(row[1]), expected[row[0]])
-
-    def test_guesser_larger_tokenized(self):
-        tokens = ['ab', 'bbb', 'abb']
-        config = Mock()
-        config.char_bag = 'ab\n'
-        config.most_common_token_count = len(tokens)
-        config.uppercase_character_optimization = False
-        config.rare_character_optimization = False
-        config.get_intermediate_info = MagicMock(return_value = tokens)
-        config.context_length = 3
-        config.min_len = 3
-        config.max_len = 5
-        config.relevel_not_match_passwords = True
-        config.chunk_size_guesser = 2
-        config.guess_serialization_method = 'human'
-        config.enforced_policy = 'basic'
-        config.max_gpu_prediction_size = 1
-        config.lower_probability_threshold = 1e-20
-        config.tokenize_words = True
-        guesser, ostream = self.make(config, [0.25, 0.10, 0.05, 0.3, 0.1, 0.2])
-        guesser.guess()
-        expected = {
-            'abbbb': 0.005602241,
-            'bba': 0.007535322,
-            'bbbbb': 0.011204482
-        }
-        ostream.seek(0)
-        actual = list(csv.reader(ostream, delimiter = '\t'))
-        total_prob = 0
-        for row in actual:
-            if row[0] in expected:
-                self.assertAlmostEqual(float(row[1]), expected[row[0]])
-            total_prob += float(row[1])
-        self.assertEqual(len(actual), 56)
-
     def test_guesser_bigger_rare_c(self):
-        with tempfile.NamedTemporaryFile() as intermediatef:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as intermediatef:
             config = pwd_guess.ModelDefaults(
                 parallel_guessing = False, char_bag = 'abAB\n', min_len = 3,
                 max_len = 5, uppercase_character_optimization = True,
@@ -1534,8 +1002,8 @@ aaa	0.0625
             for i in range(len(str_list)):
                 answer.append([distribution.copy()])
             return answer
-        with tempfile.NamedTemporaryFile(mode = 'w') as pwd_file, \
-             tempfile.NamedTemporaryFile(mode = 'r') as gfile:
+        with tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR) as pwd_file, \
+             tempfile.NamedTemporaryFile(mode = 'r', dir=TMPDIR) as gfile:
             password_list = ['aaa', 'abb', 'aab']
             for pwd in password_list:
                 pwd_file.write('%s\n' % pwd)
@@ -1569,23 +1037,18 @@ aaa	0.0625
             # This example is fairly sensitive to floating point rounding error
             # The GPU also computes at a rounding error higher than the original
             # computation
-            gfile_lines = gfile.read().splitlines()
-            self.assertEqual(gfile_lines[0], "Total count: 8")
+            EXPECTED_VALUES = [
+                ('abb', 0.144, 1), ('aab', 0.096, 4), ('aaa', 0.064, 7)]
 
-            line2_elements = gfile_lines[1].split("\t")
-            self.assertEqual(line2_elements[0], "abb")
-            self.assertAlmostEqual(float(line2_elements[1]), 0.144)
-            self.assertEqual(line2_elements[2], "1")
-
-            line3_elements = gfile_lines[2].split("\t")
-            self.assertEqual(line3_elements[0], "aab")
-            self.assertAlmostEqual(float(line3_elements[1]), 0.096)
-            self.assertEqual(line3_elements[2], "4")
-
-            line4_elements = gfile_lines[3].split("\t")
-            self.assertEqual(line4_elements[0], "aaa")
-            self.assertAlmostEqual(float(line4_elements[1]), 0.064)
-            self.assertEqual(line4_elements[2], "7")
+            for i, line in enumerate(gfile.readlines()):
+                if i == 0:
+                    self.assertEqual(line, "Total count: 8\n")
+                else:
+                    pwd, prob, guess_number = line.strip("\n").split("\t")
+                    expected_pwd, expected_prob, expected_guessnum = EXPECTED_VALUES[i - 1]
+                    self.assertEqual(pwd, expected_pwd)
+                    self.assertAlmostEqual(float(prob), expected_prob)
+                    self.assertEqual(int(guess_number), expected_guessnum)
 
     def test_do_guessing(self):
         config = pwd_guess.ModelDefaults(
@@ -1593,7 +1056,7 @@ aaa	0.0625
             lower_probability_threshold = 10**-2,
             relevel_not_matching_passwords = False)
         model = self.mock_model(config, [0.5, 0.5])
-        with tempfile.NamedTemporaryFile() as fp:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as fp:
             (pwd_guess.GuesserBuilder(config).add_model(model).add_file(fp.name)
              .build().complete_guessing())
             self.assertEqual("""	0.5
@@ -1601,6 +1064,61 @@ a	0.25
 aa	0.125
 aaa	0.0625
 """, fp.read().decode('utf8'))
+
+    def test_read_guess_number_cache(self):
+        ifile = io.StringIO(
+            """_\t0.01\t15\t\n_\t0.09\t0\t\n_\t0.03\t1\t\n_\t0.02\t7\t\n""")
+        probs, guess_numbers = pwd_guess.Guesser.read_guess_number_cache(ifile)
+        self.assertEqual((0.01, 0.02, 0.03, 0.09), tuple(probs))
+        self.assertEqual((15, 7, 1, 0), tuple(guess_numbers))
+
+    def test_calculate_guess_numbers_from_cache_helper(self):
+        probs = [0.01, 0.02, 0.03, 0.09]
+        guess_numbers = [15, 7, 1, 0]
+        test_probs = [('f', 0.009),
+                      ('a', 0.01),
+                      ('b', 0.015),
+                      ('c', 0.021),
+                      ('e', 0.08),
+                      ('d', 0.09),
+                      ('', 0.1)]
+        ans = set(
+            pwd_guess.Guesser.calculate_guess_numbers_from_cache_helper(
+                (probs, guess_numbers),
+                test_probs))
+
+        self.assertEqual(len(ans), len(test_probs))
+        self.assertTrue(('f', 0.009, 15) in ans)
+        self.assertTrue(('a', 0.01, 15) in ans)
+        self.assertTrue(('b', 0.015, 7) in ans)
+        self.assertTrue(('c', 0.021, 1) in ans)
+        self.assertTrue(('d', 0.09, 0) in ans)
+        self.assertTrue(('e', 0.08, 0) in ans)
+        self.assertTrue(('', 0.1, 0) in ans)
+
+    def test_create_guess_number_cache_predictor(self):
+        with tempfile.NamedTemporaryFile(dir=TMPDIR, mode='w') as fp:
+            fp.write("""aa\t0.16\t3
+ab\t0.24\t2
+ba\t0.24\t1
+bb\t0.36\t0""")
+            fp.flush()
+            config = pwd_guess.ModelDefaults(
+                min_len = 2,
+                max_len = 2,
+                char_bag = 'ab\n',
+                previous_probability_mapping_file = fp.name,
+                relevel_not_matching_passwords = True)
+            guesser = (
+                pwd_guess.GuesserBuilder(config)
+                .add_model(self.mock_model(config, [0.2, 0.3, 0.5]))
+                .build())
+            predictor = guesser.create_guess_number_cache_predictor()
+            self.assertEqual(3, predictor('aa'))
+            self.assertEqual(2, predictor('ab'))
+            self.assertEqual(2, predictor('ba'))
+            self.assertEqual(0, predictor('bb'))
+
 
 def mock_predict_smart_parallel(input_vec, **kwargs):
     answer = []
@@ -1614,101 +1132,9 @@ def mock_predict_smart_parallel_skewed(input_vec, **kwargs):
         answer.append([[0.5, 0.1, 0.4].copy()])
     return answer
 
-class ParallelGuesserTest(unittest.TestCase):
-    mock_model = Mock()
-
-    def setUp(self):
-        self.mock_model.predict = mock_predict_smart_parallel
-        self.intermediate_dir = tempfile.mkdtemp()
-        self.config = pwd_guess.ModelDefaults(
-            min_len = 3, max_len = 3, char_bag = 'ab\n', fork_length = 2,
-            guesser_intermediate_directory = self.intermediate_dir)
-        self.mock_output = io.StringIO()
-        self.archfile = tempfile.NamedTemporaryFile(mode = 'w', delete = False)
-        self.weightfile = tempfile.NamedTemporaryFile(
-            mode = 'w', delete = False)
-        self.serializer = Mock()
-        self.serializer.archfile = self.archfile.name
-        self.serializer.weightfile = self.weightfile.name
-        self.serializer.load_model = MagicMock(return_value = self.mock_model)
-
-    def tearDown(self):
-        shutil.rmtree(self.intermediate_dir)
-        os.remove(self.archfile.name)
-        os.remove(self.weightfile.name)
-
-    def test_get_fork_points(self):
-        config_dict = self.config.as_dict()
-        config_dict['relevel_not_matching_passwords'] = False
-        parallel_guesser = pwd_guess.ParallelGuesser(
-            self.serializer, pwd_guess.ModelDefaults(**config_dict),
-            self.mock_output)
-        parallel_guesser.fork_starter = MagicMock(return_value = None)
-        parallel_guesser.recur('', 1)
-        self.assertEqual([('aa', .0625),
-                          ('ab', .0625),
-                          ('ba', .0625),
-                          ('bb', .0625)], parallel_guesser.fork_points)
-
-    def test_forking(self):
-        parallel_guesser = pwd_guess.ParallelGuesser(
-            self.serializer, self.config, self.mock_output)
-        json.dump({
-            'mock_model' : [0.5, 0.25, 0.25]
-        }, self.archfile)
-        self.archfile.flush()
-        parallel_guesser.guess()
-        pwd_freq = [(row[0], float(row[1])) for row in
-                    csv.reader(io.StringIO(self.mock_output.getvalue()),
-                               delimiter = '\t')]
-        sort_freq = sorted(pwd_freq, key = lambda x: x[0])
-        self.assertEqual([('aaa', .125), ('aab', .125),
-                          ('aba', .125), ('abb', .125),
-                          ('baa', .125), ('bab', .125),
-                          ('bba', .125), ('bbb', .125)], sort_freq)
-        self.assertEqual(8, parallel_guesser.generated)
-
-    def test_forking_calculator(self):
-        with tempfile.NamedTemporaryFile(mode = 'w') as tf:
-            for s in ['aaa', 'bbb', 'aab']:
-                tf.write('%s\n' % (s))
-            tf.flush()
-            self.config.guess_serialization_method = 'calculator'
-            self.config.password_test_fname = tf.name
-            parallel_guesser = pwd_guess.ParallelGuesser(
-                self.serializer, self.config, self.mock_output,
-            )
-            json.dump({
-                'mock_model' : [0.5, 0.25, 0.25]
-            }, self.archfile)
-            self.archfile.flush()
-            parallel_guesser.guess()
-            odata_file = io.StringIO(self.mock_output.getvalue())
-            line = odata_file.readline()
-            out_data = list(csv.reader(odata_file, delimiter = '\t'))
-            pwd_freq = [(row[0], float(row[1]), int(row[2]))
-                        for row in out_data]
-            sort_freq = sorted(pwd_freq, key = lambda x: x[0])
-            self.assertEqual([('aaa', .125, 0), ('aab', .125, 0),
-                              ('bbb', .125, 0)], sort_freq)
-            self.assertEqual(8, parallel_guesser.generated)
-
-    def test_parse_cmd(self):
-        cmd = pwd_guess.ParallelGuesser.subp_command('argfname', 'logfile')
-        self.assertEqual(cmd[2:], [
-            '--forked', 'guesser', '--config-args', 'argfname', '--log-file',
-            'logfile'])
-        pwd_guess.make_parser().parse_args(cmd[2:])
-
-    def test_map_pool(self):
-        pg = pwd_guess.ParallelGuesser(
-            self.serializer, self.config, self.mock_output)
-        pg.map_pool([(
-            self.config.as_dict(), ['na', 'na'], ['aa', 0.125])], 1, 2)
-
 class GuesserBuilderTest(unittest.TestCase):
     def setUp(self):
-        self.tempf = tempfile.NamedTemporaryFile()
+        self.tempf = tempfile.NamedTemporaryFile(dir=TMPDIR)
 
     def tearDown(self):
         if self.tempf is not None:
@@ -1727,17 +1153,6 @@ class GuesserBuilderTest(unittest.TestCase):
         self.assertEqual(guesser.model, mock_model)
         self.assertEqual(guesser.output_serializer.ostream, mock_stream)
 
-    def test_make_parallel_guesser(self):
-        builder = pwd_guess.GuesserBuilder(
-            pwd_guess.ModelDefaults(parallel_guessing = True))
-        mock_serializer, mock_stream, mock_model = Mock(), Mock(), Mock()
-        mock_serializer.load_model = MagicMock(return_value = mock_model)
-        builder.add_serializer(mock_serializer).add_stream(mock_stream)
-        guesser = builder.build()
-        self.assertNotEqual(guesser, None)
-        self.assertEqual(guesser.model, mock_model)
-        self.assertEqual(guesser.real_output, mock_stream)
-
     def test_make_simple_guesser_file(self):
         builder = pwd_guess.GuesserBuilder(
             pwd_guess.ModelDefaults(parallel_guessing = False))
@@ -1754,7 +1169,6 @@ class GuesserBuilderTest(unittest.TestCase):
         mock_serializer, mock_stream, mock_model = Mock(), Mock(), Mock()
         mock_serializer.load_model = MagicMock(return_value = mock_model)
         builder.add_serializer(mock_serializer).add_stream(mock_stream)
-        builder.add_parallel_setting(False)
         guesser = builder.build()
         self.assertNotEqual(guesser, None)
         self.assertEqual(type(guesser), pwd_guess.Guesser)
@@ -1773,7 +1187,7 @@ class PreprocessingStepTest(unittest.TestCase):
     }
 
     def setUp(self):
-        self.input_file = tempfile.NamedTemporaryFile(mode = 'w')
+        self.input_file = tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR)
 
     def tearDown(self):
         self.input_file.close()
@@ -1805,67 +1219,6 @@ aaab\t3""")
             'simulated_frequency_optimization' : True
         }), 21)
 
-    def test_trie_reg(self):
-        self.assertEqual(self.do_preprocessing({
-            'simulated_frequency_optimization' : True,
-            'trie_implementation' : 'trie'
-        }), 15)
-        self.assertFalse(os.path.exists(":memory:"))
-
-    def test_trie_super(self):
-        self.assertEqual(self.do_preprocessing({
-            'simulated_frequency_optimization' : True,
-            'trie_implementation' : 'trie',
-            'trie_serializer_type' : 'fuzzy'
-        }), 12)
-        self.assertFalse(os.path.exists(":memory:"))
-
-    def test_trie_fuzzy_disk(self):
-        self.assertFalse(os.path.exists('trie_storage'))
-        try:
-            self.assertEqual(self.do_preprocessing({
-                'simulated_frequency_optimization' : True,
-                'trie_implementation' : 'disk',
-                'trie_serializer_type' : 'fuzzy',
-                'trie_fname' : 'trie_storage',
-                'trie_intermediate_storage' : 'trie_intermediate'
-            }), 12)
-            self.assertFalse(os.path.exists(":memory:"))
-            pre = pwd_guess.DiskPreprocessor(self.real_config)
-            pre.begin()
-            self.assertEqual(12, pre.stats())
-        finally:
-            shutil.rmtree('trie_intermediate')
-            os.remove('trie_storage')
-
-    def test_trie_fuzzy_disk_intermediate(self):
-        self.assertFalse(os.path.exists('trie_storage'))
-        self.assertFalse(os.path.exists('trie_intermediate'))
-        self.assertFalse(os.path.exists('intermediate_data.sqlite'))
-        try:
-            self.assertEqual(self.do_preprocessing({
-                'simulated_frequency_optimization' : True,
-                'trie_implementation' : 'disk',
-                'trie_serializer_type' : 'fuzzy',
-                'trie_fname' : 'trie_storage',
-                'trie_intermediate_storage' : 'trie_intermediate',
-                'intermediate_fname' : 'intermediate_data.sqlite',
-                'preprocess_trie_on_disk' : True,
-                'rare_character_optimization' : True,
-                'rare_character_lowest_threshold' : 1,
-                'char_bag' : 'abc\n'
-            }), 12)
-            self.assertFalse(os.path.exists(":memory:"))
-            pre = pwd_guess.BasePreprocessor.byFormat('im_trie',
-                                                      self.real_config)
-            pre.begin()
-            self.assertEqual(type(pre), pwd_guess.IntermediatePreprocessor)
-            self.assertEqual(12, pre.stats())
-        finally:
-            shutil.rmtree('trie_intermediate')
-            os.remove('trie_storage')
-            os.remove('intermediate_data.sqlite')
-
 class ProbabilityCalculatorTest(unittest.TestCase):
     def test_calc_one(self):
         mock_guesser = Mock()
@@ -1873,12 +1226,11 @@ class ProbabilityCalculatorTest(unittest.TestCase):
             min_len = 3, max_len = 3, char_bag = 'ab\n',
             relevel_not_matching_passwords = False)
         mock_guesser.batch_prob = MagicMock(
-            return_value=[[[0, 0.5, 0.5]],
+            return_value=np.array([[[0, 0.5, 0.5]],
                           [[0, 0.5, 0.5]],
                           [[0, 0.5, 0.5]],
-                          [[1, 0, 0]]])
-        mock_guesser._should_make_guesses_rare_char_optimizer = MagicMock(
-            return_value = False)
+                          [[1, 0, 0]]]))
+        mock_guesser.should_make_guesses_rare_char_optimizer = False
         p = pwd_guess.ProbabilityCalculator(mock_guesser)
         self.assertEqual(list(p.calc_probabilities([('aaa', 1)])),
                          [('aaa', 0.125)])
@@ -1886,45 +1238,85 @@ class ProbabilityCalculatorTest(unittest.TestCase):
     def test_calc_two(self):
         mock_guesser = Mock()
         mock_guesser.config = pwd_guess.ModelDefaults(
-            min_len = 3, max_len = 3, char_bag = 'ab\n',
-            relevel_not_matching_passwords = False)
-        mock_guesser._should_make_guesses_rare_char_optimizer = MagicMock(
-            return_value = False)
+            min_len=3, max_len=3, char_bag='ab\n',
+            relevel_not_matching_passwords=False)
+        mock_guesser.should_make_guesses_rare_char_optimizer = False
         mock_guesser.batch_prob = MagicMock(
-            return_value=[[[0, 0.5, 0.5]],
+            return_value=np.array([[[0, 0.5, 0.5]],
                           [[0, 0.5, 0.5]],
                           [[0, 0.5, 0.5]],
                           [[1, 0, 0]],
                           [[0, 0.5, 0.5]],
                           [[0, 0.5, 0.5]],
                           [[0, 0.5, 0.5]],
-                          [[1, 0, 0]]])
+                          [[1, 0, 0]]]))
         p = pwd_guess.ProbabilityCalculator(mock_guesser)
         self.assertEqual(set(p.calc_probabilities([('aaa', 1), ('abb', 1)])),
                          set([('aaa', 0.125), ('abb', 0.125)]))
+
+    def test_calc_two_with_cache(self):
+        def _mock_batch_prob(strings):
+            if len(strings) == 0:
+                return []
+            else:
+                return np.array([[[0, 0.5, 0.5]],
+                                 [[0, 0.5, 0.5]],
+                                 [[0, 0.5, 0.5]],
+                                 [[1, 0, 0]],
+                                 [[0, 0.5, 0.5]],
+                                 [[0, 0.5, 0.5]],
+                                 [[0, 0.5, 0.5]],
+                                 [[1, 0, 0]]])
+
+        mock_guesser = Mock()
+        mock_guesser.config = pwd_guess.ModelDefaults(
+            min_len=3, max_len=3, char_bag='ab\n',
+            relevel_not_matching_passwords=False)
+        mock_guesser.should_make_guesses_rare_char_optimizer = False
+        mock_guesser.batch_prob = _mock_batch_prob
+        p = pwd_guess.ProbabilityCalculator(mock_guesser, cache_size=100)
+        self.assertEqual(set(p.calc_probabilities([('aaa', 1), ('abb', 1)])),
+                         set([('aaa', 0.125), ('abb', 0.125)]))
+        self.assertEqual(set(p.calc_probabilities([('aaa', 1), ('abb', 1)])),
+                         set([('aaa', 0.125), ('abb', 0.125)]))
+
+    def test_calc_ManyToMany(self):
+        mock_guesser = Mock()
+        mock_guesser.config = pwd_guess.ModelDefaults(
+            sequence_model=pwd_guess.Sequence.MANY_TO_MANY,
+            min_len=4, max_len=4, char_bag='ab\n\t', context_length=4,
+            relevel_not_matching_passwords=False)
+        mock_guesser.batch_prob = MagicMock(
+            return_value=np.array([[[0, 0, 0.5, 0.5],
+                                   [0, 0, 0.5, 0.5],
+                                   [0, 0, 0.5, 0.5],
+                                   [0, 1, 0, 0]]]))
+        mock_guesser.should_make_guesses_rare_char_optimizer = False
+        p = pwd_guess.ManyToManyProbabilityCalculator(mock_guesser)
+        self.assertEqual(list(p.calc_probabilities([('aaa', 1)])),
+                         [('\taaa', 0.125)])
 
     def test_calc_prefix(self):
         mock_guesser = Mock()
         mock_guesser.config = pwd_guess.ModelDefaults(
             min_len = 3, max_len = 3, char_bag = 'ab\n',
             relevel_not_matching_passwords = False)
-        mock_guesser._should_make_guesses_rare_char_optimizer = MagicMock(
-            return_value = False)
+        mock_guesser.should_make_guesses_rare_char_optimizer = False
         mock_guesser.batch_prob = MagicMock(
-            return_value=[[[0, 0.5, 0.5]],
+            return_value=np.array([[[0, 0.5, 0.5]],
                           [[0, 0.4, 0.6]],
                           [[0, 0.5, 0.5]],
                           [[.5, .25, .25]],
                           [[0, 0.5, 0.5]],
                           [[0, 0.4, 0.6]],
                           [[0, 0.5, 0.5]],
-                          [[.5, .25, .25]]])
+                          [[.5, .25, .25]]]))
         p = pwd_guess.ProbabilityCalculator(mock_guesser, prefixes = True)
         self.assertEqual(set(p.calc_probabilities([('aaa', 1), ('abb', 1)])),
                          set([('aaa', 0.1), ('abb', 0.15)]))
 
     def test_calc_optimizing(self):
-        with tempfile.NamedTemporaryFile() as tf:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as tf:
             config = pwd_guess.ModelDefaults(
                 min_len = 2, max_len = 2, char_bag = 'abAB\n',
                 uppercase_character_optimization = True,
@@ -1943,15 +1335,14 @@ class ProbabilityCalculatorTest(unittest.TestCase):
                 'end_character_frequencies', freqs)
             mock_guesser = Mock()
             mock_guesser.config = config
-            mock_guesser._should_make_guesses_rare_char_optimizer = MagicMock(
-                return_value = True)
+            mock_guesser.should_make_guesses_rare_char_optimizer = True
             mock_guesser.batch_prob = MagicMock(
-                return_value=[[[0, 0.5, 0.5]],
+                return_value=np.array([[[0, 0.5, 0.5]],
                               [[0, 0.5, 0.5]],
                               [[1, 0, 0]],
                               [[0, 0.5, 0.5]],
                               [[0, 0.5, 0.5]],
-                              [[1, 0, 0]]])
+                              [[1, 0, 0]]]))
             p = pwd_guess.ProbabilityCalculator(mock_guesser)
             self.assertEqual(set(p.calc_probabilities(
                 [('aa', 1), ('bB', 1)])),
@@ -1959,7 +1350,8 @@ class ProbabilityCalculatorTest(unittest.TestCase):
 
 class GuessNumberGeneratorTest(unittest.TestCase):
     def setUp(self):
-        self.ostream = tempfile.NamedTemporaryFile(mode = 'w', delete = False)
+        self.ostream = tempfile.NamedTemporaryFile(
+            mode = 'w', delete = False, dir=TMPDIR)
 
     def tearDown(self):
         os.remove(self.ostream.name)
@@ -2009,7 +1401,7 @@ class PasswordTemplateSerializerTest(unittest.TestCase):
         mock_serializer = Mock()
         mock_serializer.serialize = mock_serialize
         mock_serializer.finish = mock_finish
-        with tempfile.NamedTemporaryFile() as tf:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as tf:
             config = pwd_guess.ModelDefaults(
                 min_len = 2, max_len = 5, char_bag = 'abABc:!@\n',
                 uppercase_character_optimization = True,
@@ -2064,7 +1456,7 @@ class PasswordTemplateSerializerTest(unittest.TestCase):
             ('cc@c:', .4 * (.02 / .4) * (.3 / .4))]))
 
     def test_expand(self):
-        with tempfile.NamedTemporaryFile() as tf:
+        with tempfile.NamedTemporaryFile(dir=TMPDIR) as tf:
             config = pwd_guess.ModelDefaults(
                 min_len = 3, max_len = 3, char_bag = 'abAB:^\n',
                 relevel_not_matching_passwords = False,
@@ -2143,7 +1535,7 @@ class RandomWalkGuesserTest(unittest.TestCase):
             ('aa\n', .25, .5), ('aaa', .125, .25), ('aab', .125, .25)])
 
     def test_guess(self):
-        with tempfile.NamedTemporaryFile(mode = 'w') as gf:
+        with tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR) as gf:
             gf.write('aaa\nbbb\n')
             gf.flush()
             pw = pwd_guess.PwdList(gf.name)
@@ -2167,51 +1559,18 @@ class RandomWalkGuesserTest(unittest.TestCase):
                 self.assertEqual(len(reader), 2)
                 for row in reader:
                     pwd, prob, gn, *_ = row
+                    prob = float(prob)
                     self.assertTrue(pwd == 'aaa' or pwd == 'bbb')
-                    self.assertAlmostEqual(float(prob), 0.008 if pwd == 'aaa' else 0.512)
+                    self.assertAlmostEqual(
+                        prob, 0.008 if pwd == 'aaa' else 0.512)
                     self.assertAlmostEqual(
                         float(gn), 8 if pwd == 'aaa' else 1, delta = 2)
 
-    TEST_GUESS_WIDE_EXPECTED_AAAA = 50
-    TEST_GUESS_WIDE_EXPECTED_BBBBA = 15
 
-    @unittest.skip('Not supported anymore')
-    def test_guess_wide(self):
-        with tempfile.NamedTemporaryFile(mode = 'w') as gf:
-            gf.write('aaaa\nbbbba\n')
-            gf.flush()
-            pw = pwd_guess.PwdList(gf.name)
-            self.assertEqual(list(pw.as_list()), [('aaaa', 1), ('bbbba', 1)])
-            config = pwd_guess.ModelDefaults(
-                parallel_guessing = False, char_bag = 'ab\n', min_len = 3,
-                max_len = 5, password_test_fname = gf.name,
-                random_walk_seed_num = 10000,
-                relevel_not_matching_passwords = True,
-                guess_serialization_method = 'random_walk')
-            self.assertTrue(pwd_guess.Filterer(config).pwd_is_valid('aaa'))
-            builder = self.make_builder(config)
-            mock_model = Mock()
-            mock_model.predict = mock_predict_smart_parallel_skewed
-            builder.add_model(mock_model).add_file(self.tempf.name)
-            guesser = builder.build()
-            guesser.complete_guessing()
-            with open(self.tempf.name, 'r') as output:
-                reader = list(csv.reader(
-                    output, delimiter = '\t', quotechar = None))
-                self.assertEqual(len(reader), 2)
-                for row in reader:
-                    pwd, prob, gn, *_ = row
-                    self.assertTrue(pwd == 'aaaa' or pwd == 'bbbba')
-                    self.assertEqual(
-                        prob, '0.0004' if pwd == 'aaaa' else '0.02048')
-                    self.assertAlmostEqual(
-                        float(gn),
-                        (self.TEST_GUESS_WIDE_EXPECTED_AAAA if pwd == 'aaaa'
-                         else self.TEST_GUESS_WIDE_EXPECTED_BBBBA), delta = 2)
-
+    @unittest.skipIf(not RUN_SLOW_TESTS, "skipping slow tests")
     def test_guess_simulated(self):
-        with tempfile.NamedTemporaryFile(mode = 'w') as gf, \
-             tempfile.NamedTemporaryFile() as intermediatef:
+        with tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR) as gf, \
+             tempfile.NamedTemporaryFile(dir=TMPDIR) as intermediatef:
             gf.write('aaaa\nbbbBa\n')
             gf.flush()
             pw = pwd_guess.PwdList(gf.name)
@@ -2249,11 +1608,12 @@ class RandomWalkGuesserTest(unittest.TestCase):
                 self.assertEqual(len(reader), 2)
                 for row in reader:
                     pwd, prob, gn, *_ = row
+                    prob = float(prob)
                     self.assertTrue(pwd == 'aaaa' or pwd == 'bbbBa')
                     self.assertAlmostEqual(
-                        float(prob), 0.00016384 if pwd == 'aaaa' else 0.0016777216)
+                        prob, 0.00016384 if pwd == 'aaaa' else 0.0016777216)
                     self.assertAlmostEqual(
-                        float(gn), 397 if pwd == 'aaaa' else 137, delta = 20)
+                        float(gn), 397 if pwd == 'aaaa' else 137, delta = 30)
 
 class RandomGeneratorTest(unittest.TestCase):
     def test_generate(self):
@@ -2290,7 +1650,7 @@ class RandomGeneratorTest(unittest.TestCase):
 
     def test_rare(self):
         num_passwords = 100
-        with tempfile.NamedTemporaryFile(mode = 'w') as gf:
+        with tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR) as gf:
             config = pwd_guess.ModelDefaults(
                 char_bag = 'abAB\n', min_len = 3, max_len = 5,
                 random_walk_seed_num = num_passwords,
@@ -2342,7 +1702,7 @@ class DelAmicoRandomWalkTest(RandomWalkGuesserTest):
         return pwd_guess.GuesserBuilder(config)
 
     def test_create(self):
-        with tempfile.NamedTemporaryFile(mode = 'w') as pwdfile:
+        with tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR) as pwdfile:
             pwdfile.write('aaaaa\nbbbbb\n')
             pwdfile.flush()
             builder = self.make_builder(pwd_guess.ModelDefaults(
@@ -2356,7 +1716,7 @@ class DelAmicoRandomWalkTest(RandomWalkGuesserTest):
             self.assertEqual(self.expected_class, type(guesser))
 
     def test_seed_data(self):
-        with tempfile.NamedTemporaryFile(mode = 'w') as pwdfile:
+        with tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR) as pwdfile:
             pwdfile.write('aaaaa\nbbbbb\n')
             pwdfile.flush()
             config = pwd_guess.ModelDefaults(
@@ -2373,7 +1733,7 @@ class DelAmicoRandomWalkTest(RandomWalkGuesserTest):
             self.assertEqual(g, [('', 1, 1, 0), ('', 1, 1, 0)])
 
     def test_next_nodes(self):
-        with tempfile.NamedTemporaryFile(mode = 'w') as pwdfile:
+        with tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR) as pwdfile:
             pwdfile.write('aaaaa\nbbbbb\n')
             pwdfile.flush()
             config = pwd_guess.ModelDefaults(
@@ -2391,9 +1751,10 @@ class DelAmicoRandomWalkTest(RandomWalkGuesserTest):
             self.assertEqual(list(next), [
                 ('aa\n', .25, .5), ('aaa', .125, .25), ('aab', .125, .25)])
 
+    @unittest.skipIf(not RUN_SLOW_TESTS, "skipping slow tests")
     def test_guess_simulated_policy(self):
-        with tempfile.NamedTemporaryFile(mode = 'w') as gf, \
-             tempfile.NamedTemporaryFile() as intermediatef:
+        with tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR) as gf, \
+             tempfile.NamedTemporaryFile(dir=TMPDIR) as intermediatef:
             gf.write('aAaa\nbbbBa\n')
             gf.flush()
             pw = pwd_guess.PwdList(gf.name)
@@ -2434,177 +1795,10 @@ class DelAmicoRandomWalkTest(RandomWalkGuesserTest):
                     pwd, prob, gn, *_ = row
                     self.assertTrue(pwd == 'aAaa' or pwd == 'bbbBa')
                     self.assertAlmostEqual(
-                        float(prob), float('4.096e-05') if pwd == 'aAaa' else 0.0016777216)
+                        float(prob),
+                        4.096e-05 if pwd == 'aAaa' else 0.0016777216)
                     self.assertAlmostEqual(
-                        float(gn), 613 if pwd == 'aAaa' else 100, delta = 20)
-
-    @unittest.skip('Not supported anymore')
-    def test_guess_simulated_policy_tokens(self):
-        def mock_predict_smart_parallel_skewed_token(input_vec, **kwargs):
-            answer = []
-            for i in range(len(input_vec)):
-                answer.append([[0.25, 0.10, 0.05, 0.3, 0.1, 0.2].copy()])
-            return answer
-        with tempfile.NamedTemporaryFile(mode = 'w') as gf, \
-             tempfile.NamedTemporaryFile() as intermediatef:
-            gf.write('aAaa\nbbbBa\nabBBa\n')
-            gf.flush()
-            pw = pwd_guess.PwdList(gf.name)
-            self.assertEqual(list(pw.as_list()), [
-                ('aAaa', 1), ('bbbBa', 1), ('abBBa', 1)])
-            config = pwd_guess.ModelDefaults(
-                parallel_guessing = False, char_bag = 'abAB\n', min_len = 3,
-                max_len = 5, password_test_fname = gf.name,
-                uppercase_character_optimization = True,
-                random_walk_seed_num = 10000,
-                random_walk_upper_bound = 1,
-                rare_character_optimization_guessing = True,
-                intermediate_fname = intermediatef.name,
-                relevel_not_matching_passwords = True,
-                enforced_policy = 'one_uppercase',
-                tokenize_words = True,
-                most_common_token_count = 3,
-                guess_serialization_method = 'delamico_random_walk')
-            config.set_intermediate_info(
-                'rare_character_bag', [])
-            config.set_intermediate_info(
-                'most_common_tokens', ['ab', 'BBB', 'abb'])
-            freqs = {
-                'a' : .4, 'b' : .4, 'A' : .1, 'B' : .1,
-            }
-            config.set_intermediate_info('character_frequencies', freqs)
-            config.set_intermediate_info(
-                'beginning_character_frequencies', freqs)
-            config.set_intermediate_info(
-                'end_character_frequencies', freqs)
-            self.assertTrue(pwd_guess.Filterer(config).pwd_is_valid('aaa'))
-            builder = self.make_builder(config)
-            mock_model = Mock()
-            mock_model.predict = mock_predict_smart_parallel_skewed_token
-            builder.add_model(mock_model).add_file(self.tempf.name)
-            guesser = builder.build()
-            guesser.complete_guessing()
-            with open(self.tempf.name, 'r') as output:
-                reader = list(csv.reader(
-                    output, delimiter = '\t', quotechar = None))
-                self.assertEqual(len(reader), 3)
-                expected = {
-                    'aAaa' : ['6.75164835165e-05', '721'],
-                    'bbbBa' : ['0.00125387755102', '121'],
-                    'abBBa' : ['0.000219428571429', '431']
-                }
-                for row in reader:
-                    pwd, prob, gn, *_ = row
-                    self.assertTrue(pwd in expected)
-                    self.assertAlmostEqual(float(prob), float(expected[pwd][0]))
-                    self.assertAlmostEqual(
-                        float(gn), float(expected[pwd][1]), delta = 20)
-
-class ParallelRandomWalkGuesserTest(unittest.TestCase):
-    def setUp(self):
-        self.tempf = tempfile.NamedTemporaryFile(delete = False)
-        self.intermediate_dir = tempfile.mkdtemp()
-        self.archfile = tempfile.NamedTemporaryFile(mode = 'w', delete = False)
-        self.weightfile = tempfile.NamedTemporaryFile(
-            mode = 'w', delete = False)
-        self.serializer = Mock()
-        self.serializer.archfile = self.archfile.name
-        self.serializer.weightfile = self.weightfile.name
-        mock_model = Mock()
-        mock_model.predict = mock_predict_smart_parallel_skewed
-        self.serializer.load_model = MagicMock(return_value = mock_model)
-
-    def tearDown(self):
-        self.tempf.close()
-        if os.path.exists(self.tempf.name):
-            os.remove(self.tempf.name)
-        shutil.rmtree(self.intermediate_dir)
-        os.remove(self.archfile.name)
-        os.remove(self.weightfile.name)
-
-    def test_arglist(self):
-        with tempfile.NamedTemporaryFile(mode = 'w') as gf, \
-             tempfile.NamedTemporaryFile() as intermediatef:
-            gf.write('aaaa\nbbbBa\n')
-            gf.flush()
-            config = pwd_guess.ModelDefaults(
-                char_bag = 'abAB\n', min_len = 3, max_len = 5,
-                uppercase_character_optimization = True,
-                rare_character_optimization_guessing = True,
-                rare_character_optimization = True,
-                intermediate_fname = intermediatef.name,
-                parallel_guessing = True, password_test_fname = gf.name,
-                guess_serialization_method = 'random_walk', cpu_limit = 2)
-            builder = pwd_guess.GuesserBuilder(config)
-            json.dump({
-                'mock_model' : [0.5, 0.1, 0.4]
-            }, self.archfile)
-            self.archfile.flush()
-            config.set_intermediate_info(
-                'rare_character_bag', [])
-            freqs = {
-                'a' : .4, 'b' : .4, 'A' : .1, 'B' : .1,
-            }
-            config.set_intermediate_info('character_frequencies', freqs)
-            config.set_intermediate_info(
-                'beginning_character_frequencies', freqs)
-            config.set_intermediate_info(
-                'end_character_frequencies', freqs)
-            builder.add_serializer(self.serializer).add_file(self.tempf.name)
-            guesser = builder.build()
-            self.assertEqual(type(guesser), pwd_guess.ParallelRandomWalker)
-            arg_list = list(guesser.arg_list())
-            self.assertEqual(len(arg_list), 2)
-            self.assertEqual(set(itertools.chain.from_iterable(arg_list)),
-                             set([('bbbBa', 0.0016777216000000014),
-                                  ('aaaa', 0.00016384000000000011)]))
-
-    def test_guess_simulated(self):
-        with tempfile.NamedTemporaryFile(mode = 'w') as gf, \
-             tempfile.NamedTemporaryFile() as intermediatef:
-            gf.write('aaaa\nbbbBa\n')
-            gf.flush()
-            pw = pwd_guess.PwdList(gf.name)
-            self.assertEqual(list(pw.as_list()), [('aaaa', 1), ('bbbBa', 1)])
-            config = pwd_guess.ModelDefaults(
-                parallel_guessing = True, char_bag = 'abAB\n', min_len = 3,
-                max_len = 5, password_test_fname = gf.name,
-                uppercase_character_optimization = True,
-                random_walk_seed_num = 10000,
-                rare_character_optimization_guessing = True,
-                intermediate_fname = intermediatef.name,
-                guesser_intermediate_directory = self.intermediate_dir,
-                relevel_not_matching_passwords = True,
-                cpu_limit = 2,
-                guess_serialization_method = 'random_walk')
-            config.set_intermediate_info(
-                'rare_character_bag', [])
-            freqs = {
-                'a' : .4, 'b' : .4, 'A' : .1, 'B' : .1,
-            }
-            config.set_intermediate_info('character_frequencies', freqs)
-            config.set_intermediate_info(
-                'beginning_character_frequencies', freqs)
-            config.set_intermediate_info(
-                'end_character_frequencies', freqs)
-            json.dump({
-                'mock_model' : [0.5, 0.1, 0.4]
-            }, self.archfile)
-            self.archfile.flush()
-            builder = pwd_guess.GuesserBuilder(config)
-            builder.add_serializer(self.serializer).add_file(self.tempf.name)
-            guesser = builder.build()
-            self.assertTrue(guesser.model is not None)
-            guesser.complete_guessing()
-            with open(self.tempf.name, 'r') as output:
-                reader = list(csv.reader(
-                    output, delimiter = '\t', quotechar = None))
-                self.assertEqual(len(reader), 2)
-                for row in reader:
-                    pwd, prob, gn, *_ = row
-                    self.assertTrue(pwd == 'aaaa' or pwd == 'bbbBa')
-                    self.assertEqual(prob, '0.0001638400000000001' if pwd == 'aaaa' else '0.0016777216000000014')
-                    self.assertAlmostEqual(float(gn), 397 if pwd == 'aaaa' else 137, delta = 20)
+                        float(gn), 613 if pwd == 'aAaa' else 100, delta = 30)
 
 class PolicyTests(unittest.TestCase):
     def test_basic(self):
@@ -2668,7 +1862,7 @@ class PolicyTests(unittest.TestCase):
         self.assertTrue(policy.pwd_complies('999Apple*'))
         self.assertTrue(policy.pwd_complies('111*Asdf'))
         self.assertTrue(policy.pwd_complies('111*jjjJ'))
-        with tempfile.NamedTemporaryFile(mode = 'w') as temp_bl:
+        with tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR) as temp_bl:
             temp_bl.write('asdf\n')
             temp_bl.write('apple\n')
             temp_bl.flush()
@@ -2707,7 +1901,7 @@ class PolicyTests(unittest.TestCase):
         self.assertTrue(policy.pwd_complies('999Apple*'))
         self.assertTrue(policy.pwd_complies('111*Asdf'))
         self.assertTrue(policy.pwd_complies('111*jjjJ'))
-        with tempfile.NamedTemporaryFile(mode = 'w') as temp_bl:
+        with tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR) as temp_bl:
             temp_bl.write('asdf\n')
             temp_bl.write('apple\n')
             temp_bl.flush()
@@ -2715,6 +1909,48 @@ class PolicyTests(unittest.TestCase):
         self.assertFalse(policy.pwd_complies('111*Asdf'))
         self.assertFalse(policy.pwd_complies('999Apple*'))
         self.assertTrue(policy.pwd_complies('111*jjjJ'))
+
+    def test_3class12(self):
+        config = Mock()
+        config.enforced_policy = '3class12'
+        policy = pwd_guess.BasePasswordPolicy.fromConfig(config)
+        self.assertTrue(type(policy), pwd_guess.SemiComplexPolicy)
+
+        self.assertTrue(policy.has_group('asdf', policy.lowercase))
+        self.assertFalse(policy.has_group('1', policy.lowercase))
+        self.assertTrue(policy.has_group('10', policy.digits))
+        self.assertFalse(policy.has_group('a', policy.digits))
+        self.assertTrue(policy.has_group('A', policy.uppercase))
+        self.assertFalse(policy.has_group('a', policy.uppercase))
+        self.assertTrue(policy.all_from_group('asdf0A', policy.non_symbols))
+        self.assertFalse(policy.all_from_group('asdf*', policy.non_symbols))
+        self.assertTrue(policy.passes_blacklist('asdf*'))
+        self.assertFalse(policy.pwd_complies('asdf'))
+        self.assertFalse(policy.pwd_complies('asdfasd'))
+        self.assertFalse(policy.pwd_complies(''))
+        self.assertFalse(policy.pwd_complies('asdf' * 30))
+        self.assertFalse(policy.pwd_complies('asdfasdf'))
+        self.assertFalse(policy.pwd_complies('asdfasdfasdfasdf'))
+        self.assertFalse(policy.pwd_complies('1Aa*asdf'))
+        self.assertFalse(policy.pwd_complies('1Aa*'))
+        self.assertFalse(policy.pwd_complies('1A*'))
+        self.assertTrue(policy.pwd_complies('111*asdf12345'))
+        self.assertTrue(policy.pwd_complies('1Aasdfasdfasdfasdf'))
+        self.assertTrue(policy.pwd_complies('1Aasdfasdfasdfasdf*'))
+
+        self.assertTrue(policy.pwd_complies('999Apple*!@#'))
+        self.assertTrue(policy.pwd_complies('111*Asdfasdfg'))
+        self.assertTrue(policy.pwd_complies('111*jjjJ12345'))
+        self.assertTrue(policy.pwd_complies('abcdefgh1234Z'))
+        with tempfile.NamedTemporaryFile(mode = 'w', dir=TMPDIR) as temp_bl:
+            temp_bl.write('asdf\n')
+            temp_bl.write('apple\n')
+            temp_bl.flush()
+            policy.load_blacklist(temp_bl.name)
+        self.assertFalse(policy.pwd_complies('11199999*Asdf'))
+        self.assertFalse(policy.pwd_complies('00011999Apple*'))
+        self.assertTrue(policy.pwd_complies('111*jjjJ12345'))
+
 
 class PasswordPolicyEnforcingSerializerTest(unittest.TestCase):
     def test_serializer(self):
@@ -2731,101 +1967,310 @@ class PasswordPolicyEnforcingSerializerTest(unittest.TestCase):
         serializer.serialize('A111*aajf', .1)
         mock_serializer.serialize.assert_called_once_with('A111*aajf', .1)
 
-class ScheduledSamplingTest(unittest.TestCase):
-    @unittest.skip('Not supported anymore')
-    def test_set_sigma(self):
-        mock_model = Mock()
-        mock_model.predict = mock_predict_smart_parallel_skewed
-        config = pwd_guess.ModelDefaults(
-            max_len = 3, generations = 20, char_bag = 'ab\n',
-            scheduled_sampling = True)
-        testable = pwd_guess.ScheduledSamplingCharacterTable(config)
-        testable.init_model(mock_model)
-        np.testing.assert_array_equal(testable.encode_many(['bb', 'ab']),
-                                      np.array([[[0, 0, 1],
-                                                 [0, 0, 1],
-                                                 [1, 0, 0]],
-                                                [[0, 1, 0],
-                                                 [0, 0, 1],
-                                                 [1, 0, 0]]]))
-        testable.end_generation()
+def get_available_gpus():
+    local_device_protos = device_lib.list_local_devices()
+    return [x.name for x in local_device_protos if x.device_type == 'GPU']
 
-        self.assertEqual(testable.generation_size, 2)
-        self.assertEqual(testable.generations, 20)
-        self.assertEqual(testable.generation_counter, 0)
-        self.assertEqual(testable.generation, 1)
-        self.assertEqual(testable.total_size, 40)
-        self.assertAlmostEqual(testable.steepness_value, -0.147221948959)
-        self.assertAlmostEqual(testable.sigma, 0.0659893126558)
-        for _ in range(9):
-            testable.end_generation()
-        self.assertEqual(0, testable.generation_counter)
-        self.assertEqual(10, testable.generation)
-        self.assertAlmostEqual(testable.sigma, 0.5)
-        for _ in range(10):
-            testable.end_generation()
-        self.assertEqual(0, testable.generation_counter)
-        self.assertEqual(20, testable.generation)
-        self.assertTrue(testable.sigma > 0.9)
-        testable.encode_many(['ba', 'ab'])
+class TestMainConfigurations(unittest.TestCase):
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp(dir=TMPDIR)
 
-class TokenizerTest(unittest.TestCase):
-    def test_tokenize(self):
-        t = pwd_guess.Tokenizer((string.ascii_lowercase + string.ascii_uppercase
-                                 + string.digits + ':!~'), False)
-        self.assertEqual(t.tokenize('password'), ['password'])
-        self.assertEqual(t.tokenize('password123'), ['password', '123'])
-        self.assertEqual(t.tokenize('password123!'), ['password', '123', '!'])
-        self.assertEqual(t.tokenize('Password123!'), [
-            'P', 'assword', '123', '!'])
-        self.assertEqual(t.tokenize('~iec84nl91:!'), [
-            '~', 'iec', '84', 'nl', '91', ':!'])
+    def tearDown(self):
+        shutil.rmtree(self.test_dir)
 
-    def test_tokenize_ignore_upper(self):
-        t = pwd_guess.Tokenizer((string.ascii_lowercase + string.ascii_uppercase
-                                 + string.digits + ':!~'), True)
-        self.assertEqual(t.tokenize('password'), ['password'])
-        self.assertEqual(t.tokenize('password123'), ['password', '123'])
-        self.assertEqual(t.tokenize('password123!'), ['password', '123', '!'])
-        self.assertEqual(t.tokenize('Password123!'), [
-            'password', '123', '!'])
-        self.assertEqual(t.tokenize('~iEc84nl91:!'), [
-            '~', 'iec', '84', 'nl', '91', ':!'])
+    def _temp_path(self, name):
+        return os.path.join(self.test_dir, name)
 
-class TokenCompleterTest(unittest.TestCase):
-    def test_completion(self):
-        t = pwd_guess.TokenCompleter(['123', 'boy', 'boa',
-                                      '12', 'qwerty', 'rta', 'none'])
-        self.assertEqual(set(t.completions('12')), set(['3']))
-        self.assertEqual(set(t.completions('bo')), set(['a', 'y']))
-        self.assertEqual(set(t.completions('boy')), set([]))
-        self.assertEqual(set(t.completions('cpiqwert')), set(['y', 'a']))
-        self.assertEqual(set(t.completions('99non')), set(['e']))
-        self.assertEqual(set(t.completions('asdfasdf')), set([]))
-        self.assertEqual(set(t.longer_than(3)),
-                         set(['123', 'boy', 'boa', 'rta', 'qwerty', 'none']))
+    def _run_with_config(self, config_items):
+        random_password_chars = (
+            string.ascii_uppercase + string.ascii_lowercase + string.digits)
+        test_data_file = self._temp_path('test_data.txt')
+        config_items['args']['arch_file'] = self._temp_path("arch.json")
+        config_items['args']['weight_file'] = self._temp_path("weight.h5")
+        config_items['args']['log_file'] = self._temp_path("train_log.txt")
+        config_items['args']['pwd_file'] = [ test_data_file ]
+        config_items['args']['pwd_format'] = [ 'list' ]
+        config_items['config']["intermediate_fname"] = self._temp_path(
+            "intermediate_data.sqlite")
 
-    def test_completion_tuple(self):
-        t = pwd_guess.TokenCompleter(['123', 'boy', 'boa',
-                                      '12', 'qwerty', 'rta', 'none'])
-        self.assertEqual(set(t.completions(('12', ))), set(['3']))
+        with open(test_data_file, 'w') as test_data:
+            for i in range(40):
+                random_password = ''.join([
+                    random.choice(random_password_chars)
+                    for j in range(random.randrange(2, 18))])
+                test_data.write('%s\n' % random_password)
 
-    def test_create_many(self):
-        rand_strings = ['asdfasdfasdf' for n in range(2000)]
-        t = pwd_guess.TokenCompleter(rand_strings)
+        config_file = self._temp_path('config.json')
+        with open(config_file, 'w') as config_stream:
+            json.dump(config_items, config_stream)
 
-class TokenizingSerializer(unittest.TestCase):
-    def test_serialize(self):
-        mock_tokenizer = Mock()
-        mock_serializer = Mock()
-        mock_serializer.serialize = MagicMock()
-        t = pwd_guess.TokenizingSerializer(mock_tokenizer, mock_serializer)
-        mock_tokenizer.tokenize = MagicMock(return_value=['pass', '123'])
-        t.serialize(('pass', '123'), .1)
-        mock_serializer.serialize.assert_called_with('pass123', .1)
-        mock_tokenizer.tokenize = MagicMock(return_value=['pass', '123'])
-        t.serialize(('pass', '1', '23'), .1)
-        mock_serializer.serialize.assert_called_with('pass123', 0)
+        parser = pwd_guess.make_parser()
+        args = vars(parser.parse_args(['--config-args', config_file]))
+        pwd_guess.main(args)
+
+    @unittest.skipIf((len(get_available_gpus()) < 2) or (not RUN_SLOW_TESTS),
+                     "Atleast 2 GPUs not available for testing multi-gpu functionality")
+    def test_main_multigpu(self):
+        self._run_with_config({
+            "args" : {
+                "multi_gpu" :2
+            },
+            "config" : {
+                "training_chunk" : 10,
+                "training_main_memory_chunk": 10000000,
+                "min_len" : 1,
+                "fork_length" : 0,
+                "max_len" : 30,
+                "context_length" : 10,
+                "chunk_print_interval" : 100,
+                "layers" : 2,
+                "hidden_size" : 1000,
+                "generations" : 3,
+                "training_accuracy_threshold" : -1,
+                "train_test_ratio" : 20,
+                "model_type" : "LSTM",
+                "tokenize_words" : False,
+                "most_common_token_count" : 2000,
+                "bidirectional_rnn" : False,
+                "train_backwards" : True,
+                "dense_layers" : 1,
+                "dense_hidden_size" : 512,
+                "secondary_training" : False,
+                "simulated_frequency_optimization" : False,
+                "randomize_training_order" : True,
+                "uppercase_character_optimization" : True,
+                "rare_character_optimization" : True,
+                "rare_character_optimization_guessing" : True,
+                "parallel_guessing" : False,
+                "lower_probability_threshold" : 1e-7,
+                "chunk_size_guesser" : 40000,
+                "random_walk_seed_num" : 100000,
+                "max_gpu_prediction_size" : 10000,
+                "random_walk_seed_iterations" : 1,
+                "no_end_word_cache" : True,
+                "save_model_versioned" : True
+            }
+        })
+
+    @unittest.skipIf(not RUN_SLOW_TESTS, "skipping slow tests")
+    def test_main(self):
+        self._run_with_config({
+            "args" : {},
+            "config" : {
+                "training_chunk" : 10,
+                "training_main_memory_chunk": 10000000,
+                "min_len" : 1,
+                "fork_length" : 0,
+                "max_len" : 30,
+                "context_length" : 10,
+                "chunk_print_interval" : 100,
+                "layers" : 2,
+                "hidden_size" : 1000,
+                "generations" : 3,
+                "training_accuracy_threshold" : -1,
+                "train_test_ratio" : 20,
+                "model_type" : "LSTM",
+                "tokenize_words" : False,
+                "most_common_token_count" : 2000,
+                "train_backwards" : True,
+                "dense_layers" : 1,
+                "dense_hidden_size" : 512,
+                "secondary_training" : False,
+                "simulated_frequency_optimization" : False,
+                "randomize_training_order" : True,
+                "uppercase_character_optimization" : True,
+                "rare_character_optimization" : True,
+                "rare_character_optimization_guessing" : True,
+                "parallel_guessing" : False,
+                "lower_probability_threshold" : 1e-7,
+                "chunk_size_guesser" : 40000,
+                "random_walk_seed_num" : 100000,
+                "max_gpu_prediction_size" : 10000,
+                "random_walk_seed_iterations" : 1,
+                "no_end_word_cache" : True,
+                "save_model_versioned" : True,
+                "tensorboard" : True,
+                "tensorboard_dir" : self.test_dir
+            }
+        })
+
+    @unittest.skipIf(not RUN_SLOW_TESTS, "skipping slow tests")
+    def test_main_no_tensorboard(self):
+        self._run_with_config({
+            "args" : {},
+            "config" : {
+                "training_chunk" : 10,
+                "training_main_memory_chunk": 10000000,
+                "min_len" : 1,
+                "fork_length" : 0,
+                "max_len" : 30,
+                "context_length" : 10,
+                "chunk_print_interval" : 100,
+                "layers" : 2,
+                "hidden_size" : 1000,
+                "generations" : 3,
+                "training_accuracy_threshold" : -1,
+                "train_test_ratio" : 20,
+                "model_type" : "LSTM",
+                "tokenize_words" : False,
+                "most_common_token_count" : 2000,
+                "train_backwards" : True,
+                "dense_layers" : 1,
+                "dense_hidden_size" : 512,
+                "secondary_training" : False,
+                "simulated_frequency_optimization" : False,
+                "randomize_training_order" : True,
+                "uppercase_character_optimization" : True,
+                "rare_character_optimization" : True,
+                "rare_character_optimization_guessing" : True,
+                "parallel_guessing" : False,
+                "lower_probability_threshold" : 1e-7,
+                "chunk_size_guesser" : 40000,
+                "random_walk_seed_num" : 100000,
+                "max_gpu_prediction_size" : 10000,
+                "random_walk_seed_iterations" : 1,
+                "no_end_word_cache" : True,
+                "save_model_versioned" : True,
+                "tensorboard" : False,
+                "tensorboard_dir" : self.test_dir
+            }
+        })
+
+    @unittest.skipIf(not RUN_SLOW_TESTS, "skipping slow tests")
+    def test_main_probability_steps(self):
+        self._run_with_config({
+            "args" : {},
+            "config" : {
+                "training_chunk" : 10,
+                "training_main_memory_chunk": 10000000,
+                "min_len" : 1,
+                "fork_length" : 0,
+                "max_len" : 30,
+                "context_length" : 10,
+                "chunk_print_interval" : 100,
+                "layers" : 2,
+                "hidden_size" : 1000,
+                "generations" : 3,
+                "training_accuracy_threshold" : -1,
+                "train_test_ratio" : 20,
+                "model_type" : "LSTM",
+                "tokenize_words" : False,
+                "most_common_token_count" : 2000,
+                "train_backwards" : True,
+                "dense_layers" : 1,
+                "dense_hidden_size" : 512,
+                "secondary_training" : False,
+                "simulated_frequency_optimization" : False,
+                "randomize_training_order" : True,
+                "uppercase_character_optimization" : True,
+                "rare_character_optimization" : True,
+                "rare_character_optimization_guessing" : True,
+                "parallel_guessing" : False,
+                "lower_probability_threshold" : 1e-7,
+                "chunk_size_guesser" : 40000,
+                "random_walk_seed_num" : 100000,
+                "max_gpu_prediction_size" : 10000,
+                "random_walk_seed_iterations" : 1,
+                "no_end_word_cache" : True,
+                "save_model_versioned" : True,
+                "tensorboard" : False,
+                "tensorboard_dir" : self.test_dir,
+                "probability_steps" : [
+                    1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6 ]
+            }
+        })
+
+    @unittest.skipIf(not RUN_SLOW_TESTS, "skipping slow tests")
+    def test_main_convolutional(self):
+        self._run_with_config({
+            "args" : {},
+            "config" : {
+                "training_chunk" : 10,
+                "training_main_memory_chunk": 10000000,
+                "min_len" : 1,
+                "fork_length" : 0,
+                "max_len" : 30,
+                "context_length" : 10,
+                "chunk_print_interval" : 100,
+                "layers" : 2,
+                "hidden_size" : 1000,
+                "generations" : 3,
+                "training_accuracy_threshold" : -1,
+                "train_test_ratio" : 20,
+                "model_type" : "Conv1D",
+                "tokenize_words" : False,
+                "most_common_token_count" : 2000,
+                "train_backwards" : True,
+                "dense_layers" : 1,
+                "dense_hidden_size" : 512,
+                "secondary_training" : False,
+                "simulated_frequency_optimization" : False,
+                "randomize_training_order" : True,
+                "uppercase_character_optimization" : True,
+                "rare_character_optimization" : True,
+                "rare_character_optimization_guessing" : True,
+                "parallel_guessing" : False,
+                "lower_probability_threshold" : 1e-7,
+                "chunk_size_guesser" : 40000,
+                "random_walk_seed_num" : 100000,
+                "max_gpu_prediction_size" : 10000,
+                "random_walk_seed_iterations" : 1,
+                "no_end_word_cache" : True,
+                "save_model_versioned" : True,
+                "tensorboard" : False,
+                "tensorboard_dir" : self.test_dir
+            }
+        })
+
+    @unittest.skipIf(not RUN_SLOW_TESTS, "skipping slow tests")
+    def test_many_to_many(self):
+        self._run_with_config({
+            "args": {},
+            "config": {
+                "training_chunk": 10,
+                "training_main_memory_chunk": 10000000,
+                "min_len": 1,
+                "fork_length": 0,
+                "max_len": 30,
+                "context_length": 20,
+                "chunk_print_interval": 100,
+                "layers": 2,
+                "hidden_size": 32,
+                "generations": 5,
+                "training_accuracy_threshold": -1,
+                "train_test_ratio": 10,
+                "model_type": "LSTM",
+                "tokenize_words": False,
+                "most_common_token_count": 2000,
+                "sequence_model" : "many_to_many",
+                "bidirectional_rnn": False,
+                "train_backwards": True,
+
+                "dense_layers": 1,
+                "dense_hidden_size": 512,
+                "secondary_training": False,
+                "simulated_frequency_optimization": False,
+
+                "randomize_training_order": False,
+                "uppercase_character_optimization": False,
+                "rare_character_optimization": False,
+
+                "rare_character_optimization_guessing": False,
+                "parallel_guessing": False,
+                "lower_probability_threshold": 1e-7,
+                "chunk_size_guesser": 40000,
+                "random_walk_seed_num": 100000,
+                "max_gpu_prediction_size": 10000,
+                "random_walk_seed_iterations": 1,
+                "no_end_word_cache": True,
+                "save_model_versioned": False,
+                "early_stopping": False,
+                "embedding_layer": True,
+                "embedding_size": 8,
+                "tensorboard": False
+            }
+        })
+
 
 if __name__ == '__main__':
     unittest.main()

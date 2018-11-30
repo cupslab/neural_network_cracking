@@ -6,32 +6,6 @@ W. Melicher, Blase Ur, Sean M. Segreti, Saranga Komanduri, Lujo Bauer, Nicolas C
 https://www.usenix.org/conference/usenixsecurity16/technical-sessions/presentation/melicher
 
 
-TODO
-----
-
-- Update code to newer versions of keras and Theano.
-
-- Refactor code to split into separate files.
-
-- Change to YAML for configuration files to support comments and reduce the
-  number of configuration writing errors.
-
-- Remove support for things that are no longer used or keras no longer
-  supports (e.g., bidirectional models, JSZ1).
-
-- Make live demo of JavaScript guesser.
-
-- Improve testing on the JavaScript guesser.
-
-- Improve documentation about versions and check compatibility with previous
-  versions of keras and Theano.
-
-- Improve state of saving data in the intermediate_sqlite file. Its easy to end
-  up with data in the intermediate files that doesn't match the training data
-  and leads to obscure and sometimes silent errors.
-
-- Improve performance for enumerating guesses.
-
 
 Bugs
 ----
@@ -63,59 +37,14 @@ Setup (Manual)
 
   Requirements:
 
-  + python - Version 3.4.2 was used during development. Should work with any
-    version of python3
+  + python3
 
-  + python packages:
+  + python packages: listed in requirements.txt
+    Install with python3 -m pip install -r requirements.txt
 
-    - theano - Theano requires the version from github instead of the version on
-      pip.
-      https://github.com/Theano/Theano. To setup the GPU, make sure that you
-      read the documentation. Make the .theanorc file in your home directory
-      with this:
-
-        [cuda]
-        root = /usr/local/cuda
-
-        [global]
-        device = gpu                  # change this to be gpu# if necessary
-        floatX = float32
-        warn_float64 = ignore
-
-      Using the GPU will require that you have nvidia drivers installed and
-      CUDA.
-
-      Make sure that gcc is compatible with nvcc. At the time of writing, gcc
-      version 4.9 is required. You can check this by executing:
-
-      `which gcc` --version
-
-      Theano 0.7.0-0.8.2 was used during development.
-
-      If using 0.8.2, you may need to add the following lines to you .theanorc
-      due to https://github.com/Theano/Theano/pull/4369. If you don't you might
-      get errors like "WARNING (theano.sandbox.cuda): CUDA is installed, but
-      device gpu is not available (error: cuda unavailable)":
-
-        [nvcc]
-        flags = -D_FORCE_INLINES
-
-    - keras - at time of writing, the version on pip is not current and will
-      cause model saving to fail. Use the version from github instead
-      (https://github.com/fchollet/keras). Version 0.2.0 was the main keras
-      version during development. However, during development, keras changed to
-      version 0.3.1. Some commits support on version or the other. It is
-      currently a todo item to improve the state of keras support. On my
-      machine the current commit's tests pass with Keras commit
-      1e58b895236f6a80f5e07de74af25f16d9cc4625.
-
-    - scikit-learn - pip install scikit-learn
-
-    - sqlitedict - pip install sqlitedict
-
-    - numpy
-
-    - cython
+    - requirements-tensorflow-1.4.txt - dependencies for working with tensorflow v1.4
+    - requirements-tensorflow-cpu-1.4.txt - dependencies for working with
+      tensorflow v1.4 and using CPU only (no GPU).
 
   Compiling:
 
@@ -123,11 +52,8 @@ Setup (Manual)
 
   Set up:
 
-    - Cuda must be in path and library path. Add these two lines to your .bashrc
-      file:
-
-      export PATH="$PATH":/usr/local/cuda-7.5/bin
-      export LD_LIBRARY_PATH="$LD_LIBRARY_PATH":/usr/local/cuda-7.5/lib64
+    - Cuda must be in path and library path. Look at the tensorflow
+      documentation for how to set it up.
 
 Tests
 -----
@@ -303,6 +229,11 @@ dense_hidden_size - Size of dense layer.
 
 layers - Number of hidden layers.
 
+embedding_layer - Whether to use a character embedding layer as the first layer
+
+embedding_size - The size of the character embedding layer. embedding_layer has
+    to be set true along with this option
+
 max_len - Maximum length of any password in training data. This can be
   larger than all passwords in the data and the network may output guesses
   that are this many characters long.
@@ -373,7 +304,9 @@ training_chunk - Smaller training chunk means less memory consumed on
   GPU. Potentially, there is a possibility that large values also have lower
   quality training but I have not observed this to happen in practice.
 
-chunk_print_interval - Interval over which to print info to the log.
+chunk_print_interval - Interval over which to print info to the log. This
+  value is also used to calculate the number of previous batches to
+  calculate the moving average loss for making early stopping decisions
 
 train_test_ratio - Ratio of training data to holdout testing data. A value of
   20 means using one out of every 20 passwords for holdout testing. These
@@ -430,6 +363,18 @@ tokenize_words - If true, create a tokenized model.
 most_common_token_count - If tokenize_words is true, then this is the number of
   tokens to simulate. E.g., 2000 will simulate the most common 2000 tokens in
   the training set.
+
+tensorboard - Boolean. If true, will create training visualizations with training statistics
+
+tensorboard_dir - The directory where the tensorboard data should be saved. Defaults
+  to current working directory.
+
+early_stopping - Boolean. If true, will enable early stopping logic to save weights and
+  stop training when the accuracy fails to improve. The training will wait till
+  early_stopping_patience batches for the loss to decrease before it stops the training
+
+early_stopping_patience - Integer. The early stopping algorithm will wait till
+  the number of batches specified by this parameter before stopping the training
 
 
 

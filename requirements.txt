@@ -1,7 +1,8 @@
-Cython==0.28.2
-h5py==2.6.0
-numpy==1.14.1
-PyYAML==3.12
-scikit-learn==0.19.1
-sqlitedict==1.5.0
-setuptools==39.0.1
+numpy
+h5py
+Cython
+Keras
+scikit-learn
+tensorflow-gpu
+pyyaml
+pylru

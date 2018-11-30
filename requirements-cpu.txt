@@ -1,0 +1,8 @@
+numpy
+h5py
+Cython
+Keras
+scikit-learn
+tensorflow
+pyyaml
+pylru
