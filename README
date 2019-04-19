@@ -17,7 +17,11 @@ likely will have many bugs and issues.
 Setup using Docker
 ------------------
 
-Make sure you have installed the NVIDIA driver (https://github.com/NVIDIA/nvidia-docker/wiki/Frequently-Asked-Questions#how-do-i-install-the-nvidia-driver) and Docker (https://docs.docker.com/install). For GPU support, additionally install nvidia-docker (https://github.com/NVIDIA/nvidia-docker).
+Make sure you have installed the NVIDIA driver
+(https://github.com/NVIDIA/nvidia-docker/wiki/Frequently-Asked-Questions#how-do-i-install-the-nvidia-driver)
+and Docker (https://docs.docker.com/install). For GPU support,
+additionally install nvidia-docker
+(https://github.com/NVIDIA/nvidia-docker).
 
 Build a CPU-only container and start an interactive bash session within it:
 
@@ -29,7 +33,19 @@ Build a GPU-supported container and start an interactive bash session within it:
     ./deploy.py build-gpu
     ./deploy.py run-gpu
 
-Note: You may need to specify python3 when executing python scripts within the Docker container, e.g. `python3 pwd_guess_unit.py`.
+Build a GPU-supported container, volume map `./nn_input` and `./nn_output` in the host
+to `/nn/input` and `/nn/output` inside the container, and generate guess numbers
+according to `guessing_config.json` using the pre-trained 1class8 neural network and
+(only) GPU #1:
+
+    ./deploy.py build-gpu
+    ./deploy.py run-gpu --input_dir nn_input/ --output_dir nn_output
+    
+    // now in bash session within container..
+    cd pre_built_networks/1class8
+    export CUDA_VISIBLE_DEVICES=1
+    python ../../pwd_guess.py --config-args=guessing_config.json
+    // NN output files will be available in the host inside nn_output/
 
 
 Setup (Manual)
