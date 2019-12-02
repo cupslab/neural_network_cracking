@@ -6,3 +6,4 @@ scikit-learn
 tensorflow
 pyyaml
 pylru
+test-generator
